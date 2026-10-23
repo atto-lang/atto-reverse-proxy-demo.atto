@@ -2,9 +2,18 @@
 // This pure proof helper handles one canonical lookup for tests only; a live
 // HTTP adapter must provide complete per-request header lookup and enforcement.
 import module proxy_yaml from "./proxy_yaml";
+import module header_policy from "./header_policy";
 define module middleware_policy as
   pub fnc evaluate(borrow proxy_yaml.Config snapshot, String chain,
                    String supplied_header, String supplied_value): Result<bool, String> {
+    // Pure proof API: never accidentally consider a malformed supplied header
+    // as satisfying a required-header policy. The transport remains responsible
+    // for validating the entire HTTP message and header multiplicity.
+    if !header_policy.value_safe(supplied_value) ||
+      (supplied_header != "" &&
+       !header_policy.canonical_name(supplied_header)); then
+      return Err("invalid canonical middleware header input");
+    fi
     if chain == ""; then return Ok(true); fi
     for (const id of chain.split_literal(",")) {
       let bool found = false;
