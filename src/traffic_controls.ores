@@ -46,12 +46,21 @@ define module traffic_controls as
   pub fnc permits(borrow Breaker state, int epoch, int now_ms): bool {
     return epoch > 0 && state.epoch == epoch &&
       state.failures >= 0 && state.open_until_ms >= 0 &&
-      now_ms >= 0 && now_ms >= state.open_until_ms;
+      now_ms >= 0 && state.open_until_ms == 0;
   }
 
-  // Failing closed in half-open: the model requires supervisor-issued single
-  // probe credit; permissive permits() alone must never authorize mass probes.
-  // A real breaker must include an actor-owned half-open lease.
+  // This only reports an expired cooldown: it NEVER grants a request credit.
+  // A trusted supervisor must mint a single-winner half-open probe lease.
+  pub fnc probe_due(borrow Breaker state, int epoch, int now_ms): bool {
+    return epoch > 0 && state.epoch == epoch &&
+      state.open_until_ms > 0 && now_ms >= state.open_until_ms;
+  
+  }
+
+  // Fail closed in half-open: after cooldown expiry no request or success
+  // receipt can reopen a breaker until the supervisor adds a single-winner
+  // half-open probe lease and verified outcome transition. This conservative
+  // v1 oracle models open-state fencing, NOT automatic recovery.
   pub fnc record(borrow Breaker previous, int epoch, int now_ms,
                  bool success, int threshold, int cooldown_ms):
       Result<Breaker, String> {
@@ -67,8 +76,8 @@ define module traffic_controls as
       return Ok(new Breaker(epoch, success ? 0 : 1,
         (!success && threshold == 1) ? now_ms + cooldown_ms : 0));
     fi
-    if !success && previous.open_until_ms > now_ms; then
-      return Err("failure arrived while breaker is open");
+    if previous.open_until_ms != 0; then
+      return Err("breaker open: supervisor half-open probe lease required");
     fi
     if success; then return Ok(new Breaker(epoch, 0, 0)); fi
     let int count = previous.failures + 1;
