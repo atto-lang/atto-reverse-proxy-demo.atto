@@ -1,0 +1,341 @@
+// Strict, bounded-by-call-site YAML subset for proxy control-plane documents.
+// No YAML tags, anchors, aliases, implicit coercion, flows, block scalars,
+// includes or inline comments. This is not a general-purpose YAML 1.2 parser.
+// Configuration is NEVER a raw network authority: adapters enforce separate
+// canonicalization, DNS/IP admission, framing and TLS/CONNECT policies.
+define module proxy_yaml as
+  pub define class Middleware as
+    pub val String name;
+    pub val String kind;
+    pub val String header;
+  end
+
+  pub define class Route as
+    pub val String name;
+    pub val String host;
+    pub val String path_prefix;
+    pub val String upstream;
+    pub val String middleware;
+  end
+
+  pub define class Config as
+    pub val String mode;
+    pub val String listen_host;
+    pub val String listen_port;
+    pub val String carrier_budget;
+    pub val String actor_pool;
+    pub val String max_inflight;
+    pub val String deny_private;
+    pub val String allow_domains;
+    pub val String connect_ports;
+    pub val Array<Middleware> middleware;
+    pub val Array<Route> routes;
+  end
+
+  fnc decimal(String candidate): bool {
+    if candidate == "" || candidate.starts_with("0"); then
+      return candidate == "0";
+    fi
+    val String other = candidate.replace_literal("0", "")
+      .replace_literal("1", "").replace_literal("2", "")
+      .replace_literal("3", "").replace_literal("4", "")
+      .replace_literal("5", "").replace_literal("6", "")
+      .replace_literal("7", "").replace_literal("8", "")
+      .replace_literal("9", "");
+    return other == "";
+  }
+
+  fnc safe_scalar(String value): bool {
+    if value == ""; then return false; fi
+    if value.contains_literal("#") || value.contains_literal("&") ||
+      value.contains_literal("*") || value.contains_literal("!") ||
+      value.contains_literal("{") || value.contains_literal("}") ||
+      value.contains_literal("[") || value.contains_literal("]") ||
+      value.contains_literal("|") || value.contains_literal(">") ||
+      value.contains_literal("\\") || value.contains_literal("\"") ||
+      value.contains_literal("'") || value.contains_literal("\t") ||
+      value.contains_literal("\r"); then
+      return false;
+    fi
+    if value.starts_with(" ") || value.ends_with(" "); then return false; fi
+    return true;
+  }
+
+  fnc validate_route(String name, String host, String prefix, String upstream,
+                     String chain): Result<Route, String> {
+    if !safe_scalar(name) || !safe_scalar(host) || !safe_scalar(prefix) ||
+      !safe_scalar(upstream); then
+      return Err("route requires safe name, host, path_prefix, upstream");
+    fi
+    if !prefix.starts_with("/") || prefix.starts_with("//") ||
+      prefix.contains_literal("?") || prefix.contains_literal("//"); then
+      return Err("route path_prefix must be a canonical absolute path");
+    fi
+    if !(upstream.starts_with("http://") || upstream.starts_with("https://")) ||
+      upstream.contains_literal("@") || upstream.contains_literal("?"); then
+      return Err("upstream must be an explicit HTTP(S) origin without credentials/query");
+    fi
+    if chain != "" && !safe_scalar(chain); then
+      return Err("invalid middleware reference");
+    fi
+    return Ok(new Route(name, host, prefix, upstream, chain));
+  }
+
+  fnc validate_middleware(String name, String kind, String header):
+      Result<Middleware, String> {
+    if !safe_scalar(name); then return Err("middleware needs a safe name"); fi
+    if !(kind == "trace" || kind == "deny" || kind == "require_header"); then
+      return Err("unsupported middleware kind");
+    fi
+    if kind == "require_header"; then
+      if !safe_scalar(header) || header.contains_literal(":") ||
+        header.contains_literal(" "); then
+        return Err("require_header needs a canonical header name");
+      fi
+    else
+      if header != ""; then return Err("header only applies to require_header"); fi
+    fi
+    return Ok(new Middleware(name, kind, header));
+  }
+
+  // Exact duplicates are fatal, including repeated sections and list properties.
+  // The YAML list spelling is exactly two-space '  - name: ...' followed by
+  // four-space fields; maps have exactly two-space fields.
+  pub fnc parse(String yaml, String expected_mode): Result<Config, String> {
+    let String version = "";
+    let String mode = "";
+    let String host = "";
+    let String port = "";
+    let String carriers = "";
+    let String actors = "";
+    let String inflight = "";
+    let String deny_private = "";
+    let String allowed = "";
+    let String connect = "";
+    let String section = "";
+    let bool seen_listen = false;
+    let bool seen_runtime = false;
+    let bool seen_policy = false;
+    let bool seen_routes = false;
+    let bool seen_middleware = false;
+    let mut Array<Route> routes = new Array<Route>();
+    let mut Array<Middleware> middlewares = new Array<Middleware>();
+    let String rn = "";
+    let String rh = "";
+    let String rp = "";
+    let String ru = "";
+    let String rc = "";
+    let String mn = "";
+    let String mk = "";
+    let String mh = "";
+
+    for (const original of yaml.split_literal("\n")) {
+      val String line = original.trim();
+      if line == "" || line.starts_with("#"); then continue; fi
+      if original.contains_literal("\r") || original.contains_literal("\t"); then
+        return Err("CR and tabs are forbidden; use LF and spaces");
+      fi
+      if original.starts_with("  - "); then
+        if section == "routes"; then
+          if rn != ""; then
+            val previous = validate_route(rn, rh, rp, ru, rc);
+            if previous.is_err(); then return Err("invalid previous route"); fi
+            for (const existing of routes) {
+              if existing.name == rn || (existing.host == rh &&
+                existing.path_prefix == rp); then
+                return Err("duplicate or shadowing route");
+              fi
+            }
+            routes.add(previous.unwrap());
+          fi
+          rn = ""; rh = ""; rp = ""; ru = ""; rc = "";
+        elif section == "middleware"; then
+          if mn != ""; then
+            val previous = validate_middleware(mn, mk, mh);
+            if previous.is_err(); then return Err("invalid previous middleware"); fi
+            for (const existing of middlewares) {
+              if existing.name == mn; then return Err("duplicate middleware"); fi
+            }
+            middlewares.add(previous.unwrap());
+          fi
+          mn = ""; mk = ""; mh = "";
+        else
+          return Err("list item outside routes/middleware");
+        fi
+        val pair = line.replace_literal("- ", "").split_literal(": ");
+        if pair.size != 2 || pair.get(0) != "name" ||
+          !safe_scalar(pair.get(1)); then
+          return Err("list items must begin with '- name: VALUE'");
+        fi
+        if section == "routes"; then rn = pair.get(1); else mn = pair.get(1); fi
+        continue;
+      fi
+
+      if original.starts_with("    "); then
+        if !original.starts_with("    ") || original.starts_with("     "); then
+          return Err("invalid four-space list indentation");
+        fi
+        val pair = line.split_literal(": ");
+        if pair.size != 2 || !safe_scalar(pair.get(1)); then
+          return Err("invalid list field");
+        fi
+        val String key = pair.get(0);
+        val String value = pair.get(1);
+        if section == "routes" && rn != ""; then
+          if key == "host" && rh == ""; then rh = value;
+          elif key == "path_prefix" && rp == ""; then rp = value;
+          elif key == "upstream" && ru == ""; then ru = value;
+          elif key == "middleware" && rc == ""; then rc = value;
+          else return Err("unknown or duplicate route field"); fi
+        elif section == "middleware" && mn != ""; then
+          if key == "kind" && mk == ""; then mk = value;
+          elif key == "header" && mh == ""; then mh = value;
+          else return Err("unknown or duplicate middleware field"); fi
+        else
+          return Err("list field without list item");
+        fi
+        continue;
+      fi
+
+      if original.starts_with("  "); then
+        if original.starts_with("   "); then return Err("invalid indentation"); fi
+        val pair = line.split_literal(": ");
+        if pair.size != 2 || !safe_scalar(pair.get(1)); then
+          return Err("invalid map field");
+        fi
+        val String key = pair.get(0);
+        val String value = pair.get(1);
+        if section == "listen"; then
+          if key == "host" && host == ""; then host = value;
+          elif key == "port" && port == ""; then port = value;
+          else return Err("unknown/duplicate listen key"); fi
+        elif section == "runtime"; then
+          if key == "carriers" && carriers == ""; then carriers = value;
+          elif key == "actors" && actors == ""; then actors = value;
+          elif key == "max_inflight" && inflight == ""; then inflight = value;
+          else return Err("unknown/duplicate runtime key"); fi
+        elif section == "policy"; then
+          if key == "deny_private" && deny_private == ""; then deny_private = value;
+          elif key == "allow_domains" && allowed == ""; then allowed = value;
+          elif key == "connect_ports" && connect == ""; then connect = value;
+          else return Err("unknown/duplicate policy key"); fi
+        else
+          return Err("mapping outside listen/runtime/policy");
+        fi
+        continue;
+      fi
+
+      if original != line; then return Err("unexpected indentation"); fi
+      // A section change seals the previous list item.
+      if rn != ""; then
+        val previous = validate_route(rn, rh, rp, ru, rc);
+        if previous.is_err(); then return Err("invalid route"); fi
+        for (const existing of routes) {
+          if existing.name == rn || (existing.host == rh &&
+            existing.path_prefix == rp); then
+            return Err("duplicate or shadowing route");
+          fi
+        }
+        routes.add(previous.unwrap());
+        rn = ""; rh = ""; rp = ""; ru = ""; rc = "";
+      fi
+      if mn != ""; then
+        val previous = validate_middleware(mn, mk, mh);
+        if previous.is_err(); then return Err("invalid middleware"); fi
+        for (const existing of middlewares) {
+          if existing.name == mn; then return Err("duplicate middleware"); fi
+        }
+        middlewares.add(previous.unwrap());
+        mn = ""; mk = ""; mh = "";
+      fi
+      if line == "listen:"; then
+        if seen_listen; then return Err("duplicate listen section"); fi
+        seen_listen = true; section = "listen";
+      elif line == "runtime:"; then
+        if seen_runtime; then return Err("duplicate runtime section"); fi
+        seen_runtime = true; section = "runtime";
+      elif line == "policy:"; then
+        if seen_policy; then return Err("duplicate policy section"); fi
+        seen_policy = true; section = "policy";
+      elif line == "routes:"; then
+        if seen_routes; then return Err("duplicate routes section"); fi
+        seen_routes = true; section = "routes";
+      elif line == "middleware:"; then
+        if seen_middleware; then return Err("duplicate middleware section"); fi
+        seen_middleware = true; section = "middleware";
+      else
+        val pair = line.split_literal(": ");
+        if pair.size != 2 || !safe_scalar(pair.get(1)); then
+          return Err("unknown root YAML key");
+        fi
+        if pair.get(0) == "version" && version == ""; then
+          version = pair.get(1);
+        elif pair.get(0) == "mode" && mode == ""; then
+          mode = pair.get(1);
+        else
+          return Err("unknown or duplicate root key");
+        fi
+        section = "";
+      fi
+    }
+
+    if rn != ""; then
+      val last = validate_route(rn, rh, rp, ru, rc);
+      if last.is_err(); then return Err("invalid final route"); fi
+      for (const existing of routes) {
+        if existing.name == rn || (existing.host == rh &&
+          existing.path_prefix == rp); then return Err("duplicate final route"); fi
+      }
+      routes.add(last.unwrap());
+    fi
+    if mn != ""; then
+      val last = validate_middleware(mn, mk, mh);
+      if last.is_err(); then return Err("invalid final middleware"); fi
+      for (const existing of middlewares) {
+        if existing.name == mn; then return Err("duplicate final middleware"); fi
+      }
+      middlewares.add(last.unwrap());
+    fi
+    if version != "ores.proxy/v1" || mode != expected_mode; then
+      return Err("invalid schema version or proxy mode");
+    fi
+    if !seen_listen || !seen_runtime || !safe_scalar(host) || !decimal(port) ||
+      !decimal(carriers) || !decimal(actors) || !decimal(inflight); then
+      return Err("missing or invalid listener/runtime configuration");
+    fi
+    // Tuned baseline, not hard limits on carrier count or hardware sizing.
+    // Unsupported numeric values deliberately do not become live listeners.
+    if carriers != "20" || actors != "100" || inflight != "1024"; then
+      return Err("v1 profile requires carriers=20 actors=100 max_inflight=1024");
+    fi
+    if mode == "reverse"; then
+      if !seen_routes || routes.size == 0 || routes.size > 128; then
+        return Err("reverse mode needs 1..128 routes");
+      fi
+      if seen_policy; then return Err("reverse policy section is not supported in v1"); fi
+    else
+      if seen_routes || !seen_policy || deny_private != "true" ||
+        !safe_scalar(allowed) || connect != "443"; then
+        return Err("forward mode requires deny_private=true, allow_domains and connect_ports=443");
+      fi
+      if allowed.contains_literal("://") || allowed.contains_literal("@") ||
+        allowed.contains_literal("/") || allowed.contains_literal("*"); then
+        return Err("forward allow_domains must contain DNS names only");
+      fi
+    fi
+
+    for (const route of routes) {
+      if route.middleware != ""; then
+        for (const id of route.middleware.split_literal(",")) {
+          let bool present = false;
+          for (const definition of middlewares) {
+            if definition.name == id; then present = true; fi
+          }
+          if !present; then return Err("route references missing middleware"); fi
+        }
+      fi
+    }
+    return Ok(new Config(mode, host, port, carriers, actors, inflight,
+      deny_private, allowed, connect, middlewares, routes));
+  }
+end

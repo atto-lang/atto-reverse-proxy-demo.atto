@@ -1,0 +1,41 @@
+// Pure routing decisions over a validated immutable configuration snapshot.
+// URI normalization and Host admission MUST be completed by the transport.
+import module proxy_yaml from "./proxy_yaml";
+define module route_policy as
+  pub fnc prefix_match(String configured, String path): bool {
+    if !path.starts_with("/") || path.starts_with("//"); then return false; fi
+    if configured == "/"; then return true; fi
+    if path == configured; then return true; fi
+    if configured.ends_with("/"); then return path.starts_with(configured); fi
+    return path.starts_with(configured + "/");
+  }
+
+  // First matching route is chosen; this makes YAML ordering explicit.
+  // Header/proxy protocol authority must be canonicalized before passing host.
+  pub fnc select(borrow proxy_yaml.Config snapshot, String host, String path):
+      Result<proxy_yaml.Route, String> {
+    for (const route of snapshot.routes) {
+      if route.host == host && prefix_match(route.path_prefix, path); then
+        return Ok(route);
+      fi
+    }
+    return Err("no configured reverse route");
+  }
+
+  // This is a domain-name filter, NOT an SSRF security boundary.
+  // A transport must resolve and pin ALL destination addresses before connect.
+  // Deny IP literals, IPv6 bracket forms, userinfo, encoded separators and
+  // CNAME/DNS rebinding bypasses at the network capability boundary.
+  pub fnc configured_domain(borrow proxy_yaml.Config snapshot, String candidate): bool {
+    if snapshot.mode != "forward" || candidate == "" ||
+      candidate.contains_literal(":") || candidate.contains_literal("/") ||
+      candidate.contains_literal("@") || candidate.contains_literal("%") ||
+      candidate.contains_literal("\\"); then return false; fi
+    for (const item of snapshot.allow_domains.split_literal(",")) {
+      val String domain = item.trim();
+      if domain != "" && (candidate == domain ||
+        candidate.ends_with("." + domain)); then return true; fi
+    }
+    return false;
+  }
+end

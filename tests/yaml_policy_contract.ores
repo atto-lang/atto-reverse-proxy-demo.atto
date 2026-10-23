@@ -1,0 +1,23 @@
+import module proxy_yaml from "../src/proxy_yaml";
+import module route_policy from "../src/route_policy";
+import module middleware_policy from "../src/middleware_policy";
+
+pub routine main(): int {
+  val String document = "version: ores.proxy/v1\nmode: reverse\nlisten:\n  host: 127.0.0.1\n  port: 8080\nruntime:\n  carriers: 20\n  actors: 100\n  max_inflight: 1024\n" +
+    "middleware:\n  - name: guard\n    kind: require_header\n    header: x-token\nroutes:\n  - name: app\n    host: app.example.test\n    path_prefix: /api\n    upstream: http://127.0.0.1:9000\n    middleware: guard\n";
+  val parsed = proxy_yaml.parse(document, "reverse");
+  if parsed.is_err(); then stdio.println("FAIL valid fixture"); return 1; fi
+  val snapshot = parsed.unwrap();
+  if proxy_yaml.parse(document + "mode: reverse\n", "reverse").is_ok(); then
+    stdio.println("FAIL duplicate root"); return 1;
+  fi
+  if proxy_yaml.parse(document.replace_literal("  actors: 100", "  actors: 0"), "reverse").is_ok(); then
+    stdio.println("FAIL actor admission"); return 1;
+  fi
+  if !route_policy.prefix_match("/api", "/api/x") || route_policy.prefix_match("/api", "/api2"); then
+    stdio.println("FAIL route/domain boundary"); return 1;
+  fi
+  val result = route_policy.select(rt borrow snapshot, "app.example.test", "/api/hello");\n  if result.is_err(); then stdio.println("FAIL route match"); return 1; fi\n  if middleware_policy.evaluate(rt borrow snapshot, result.unwrap().middleware, "x-token", "").unwrap(); then\n    stdio.println("FAIL middleware denial"); return 1; fi
+  stdio.println("PASS native reverse YAML/policy contract");
+  return 0;
+}
