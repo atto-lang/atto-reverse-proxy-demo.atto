@@ -1,0 +1,77 @@
+// Single-writer generation coordinator for parsed YAML snapshots.
+// No active network routing pointer or actor publication yet. The parent
+// supervisor must own this class exclusively; never share the mutable
+// coordinator between unrelated actors or native threads.
+import module proxy_yaml from "./proxy_yaml";
+
+define module generation as
+  pub define class Snapshot as
+    pub val int epoch;
+    pub val proxy_yaml.Config configuration;
+  end
+
+  pub define class Coordinator as
+    val String mode;
+    let String current_yaml;
+    let String prepared_yaml = "";
+    let bool pending = false;
+    let int epoch_value = 1;
+
+    pub constructor(String mode, String initial_yaml) {
+      self.mode = mode;
+      self.current_yaml = initial_yaml;
+    }
+
+    pub epoch() -> int { return self.epoch_value; }
+    pub is_prepared() -> bool { return self.pending; }
+
+    pub snapshot() -> Result<Snapshot, String> {
+      val parsed = proxy_yaml.parse(self.current_yaml, self.mode);
+      if parsed.is_err(); then return Err("current config no longer validates"); fi
+      return Ok(new Snapshot(self.epoch_value, parsed.unwrap()));
+    }
+
+    pub prepare(String candidate): Result<bool, String> {
+      if self.pending; then return Err("generation already prepared"); fi
+      val parsed = proxy_yaml.parse(candidate, self.mode);
+      if parsed.is_err(); then return Err("invalid candidate config"); fi
+      self.prepared_yaml = candidate;
+      self.pending = true;
+      return Ok(true);
+    }
+
+    // Real proxy publication requires readiness, HTTP admission pointer swap,
+    // request generation pinning and bounded actor drain OUTSIDE this class.
+    // Callers must not treat publication of these pure values as a live reload.
+    pub publish(int expected_epoch): Result<Snapshot, String> {
+      if !self.pending; then return Err("no prepared generation"); fi
+      if expected_epoch != self.epoch_value; then
+        return Err("stale generation compare-and-swap token");
+      fi
+      if self.epoch_value >= 2147483647; then
+        return Err("generation counter exhausted");
+      fi
+      val parsed = proxy_yaml.parse(self.prepared_yaml, self.mode);
+      if parsed.is_err(); then return Err("staged config invalidated"); fi
+      self.current_yaml = self.prepared_yaml;
+      self.prepared_yaml = "";
+      self.pending = false;
+      self.epoch_value = self.epoch_value + 1;
+      return Ok(new Snapshot(self.epoch_value, parsed.unwrap()));
+    }
+
+    pub abort(): Result<bool, String> {
+      if !self.pending; then return Err("no staged config"); fi
+      self.prepared_yaml = "";
+      self.pending = false;
+      return Ok(true);
+    }
+  end
+
+  pub fnc open(String initial_yaml, String mode): Result<Coordinator, String> {
+    if proxy_yaml.parse(initial_yaml, mode).is_err(); then
+      return Err("invalid initial configuration");
+    fi
+    return Ok(new Coordinator(mode, initial_yaml));
+  }
+end
