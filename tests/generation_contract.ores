@@ -1,13 +1,15 @@
 import module generation from "../src/generation";
 pub routine main(): int {
   val String source = "version: ores.proxy/v1\nmode: reverse\nlisten:\n  host: 127.0.0.1\n  port: 8080\nruntime:\n  carriers: 20\n  actors: 100\n  max_inflight: 1024\n" +
-    "routes:\n  - name: a\n    host: api.example.test\n    path_prefix: /\n    upstream: http://127.0.0.1:9000\n";
+    "middleware:\n  - name: gate\n    kind: trace\nroutes:\n  - name: site\n    host: site.example.test\n    path_prefix: /\n    upstream: http://127.0.0.1:9000\n    middleware: gate\n";
   val admission = generation.open(source, "reverse");
   if admission.is_err(); then stdio.println("FAIL open"); return 1; fi
-  val control = admission.unwrap();
+  let control = admission.unwrap();
   val first = control.snapshot().unwrap();
   if control.publish(1).is_ok(); then stdio.println("FAIL publish without prepare"); return 1; fi
-  if control.prepare(source).is_err(); then stdio.println("FAIL prepare"); return 1; fi
+  if control.prepare(source.replace_literal("kind: trace", "kind: deny")).is_err(); then
+    stdio.println("FAIL prepare"); return 1;
+  fi
   if control.prepare(source).is_ok(); then stdio.println("FAIL double prepare"); return 1; fi
   if control.publish(0).is_ok(); then stdio.println("FAIL stale epoch"); return 1; fi
   val next = control.publish(1);
@@ -15,12 +17,15 @@ pub routine main(): int {
   if first.epoch != 1 || next.unwrap().epoch != 2; then
     stdio.println("FAIL generation pin"); return 1;
   fi
-  if control.prepare("mode: forward\n").is_ok(); then
+  if first.configuration.middleware.get(0).kind != "trace"; then
+    stdio.println("FAIL old config mutated"); return 1;
+  fi
+  if control.prepare("mode: reverse\n").is_ok(); then
     stdio.println("FAIL malformed reload"); return 1;
   fi
   if control.prepare(source).is_err() || control.abort().is_err(); then
     stdio.println("FAIL abort"); return 1;
   fi
-  stdio.println("PASS pure generation prepare/publish/abort");
+  stdio.println("PASS reverse pure generation prepare/publish/abort");
   return 0;
 }
