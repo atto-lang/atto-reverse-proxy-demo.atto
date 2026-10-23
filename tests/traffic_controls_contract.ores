@@ -34,18 +34,27 @@ pub routine main(): int {
   val fail2 = traffic_controls.record(rt borrow fail1.unwrap(), 1, 1001,
     false, 2, 100);
   if fail2.is_err() || traffic_controls.permits(rt borrow fail2.unwrap(),
-    1, 1002) || !traffic_controls.permits(rt borrow fail2.unwrap(), 1, 1101); then
-    stdio.println("FAIL circuit-open fencing"); return 1;
+    1, 1002) || traffic_controls.permits(rt borrow fail2.unwrap(), 1, 1101) ||
+    traffic_controls.probe_due(rt borrow fail2.unwrap(), 1, 1002) ||
+    !traffic_controls.probe_due(rt borrow fail2.unwrap(), 1, 1101); then
+    stdio.println("FAIL circuit-open fencing or unsafe half-open bypass"); return 1;
   fi
   if traffic_controls.record(rt borrow fail2.unwrap(), 1, 1002,
-    false, 2, 100).is_ok(); then
-    stdio.println("FAIL closed circuit unexpectedly admitted update"); return 1;
+    false, 2, 100).is_ok() ||
+    traffic_controls.record(rt borrow fail2.unwrap(), 1, 1003,
+    true, 2, 100).is_ok() ||
+    traffic_controls.record(rt borrow fail2.unwrap(), 1, 1101,
+    true, 2, 100).is_ok(); then
+    stdio.println("FAIL unauthorized half-open transition"); return 1;
   fi
-  val recovered = traffic_controls.record(rt borrow fail2.unwrap(), 1, 1101,
-    true, 2, 100);
-  if recovered.is_err() || recovered.unwrap().failures != 0 ||
-    !traffic_controls.permits(rt borrow recovered.unwrap(), 1, 1102); then
-    stdio.println("FAIL recovery event"); return 1;
+  // New configuration epoch may reset policy state under trusted supervisor
+  // authority; same-epoch cooldown expiry must NEVER grant mass probes.
+  val changed_epoch = traffic_controls.record(rt borrow fail2.unwrap(),
+    2, 1102, true, 2, 100);
+  if changed_epoch.is_err() || changed_epoch.unwrap().epoch != 2 ||
+    changed_epoch.unwrap().failures != 0 ||
+    !traffic_controls.permits(rt borrow changed_epoch.unwrap(), 2, 1102); then
+    stdio.println("FAIL supervisor policy-epoch fence"); return 1;
   fi
   stdio.println("PASS native traffic control reference contract");
   return 0;
