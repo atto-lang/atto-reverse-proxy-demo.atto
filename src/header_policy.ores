@@ -59,6 +59,12 @@ define module header_policy as
     fi
     let bool nominated = false;
     for (const original of connection_tokens.split_literal(",")) {
+      // Prove the untrimmed token consists only of ASCII lowercase tchar
+      // plus ASCII SP. Otherwise trim() could erase Unicode whitespace or
+      // another invalid control byte before lexical validation.
+      if !token(original.replace_literal(" ", "")); then
+        return Err("invalid raw Connection token");
+      fi
       val String candidate = original.trim();
       if !token(candidate); then return Err("invalid Connection token"); fi
       if key == candidate; then nominated = true; fi
