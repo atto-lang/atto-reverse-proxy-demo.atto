@@ -9,7 +9,12 @@ pub routine main(): int {
   if proxy_yaml.parse(doc, "reverse").is_err(); then
     stdio.println("FAIL weighted pool YAML"); return 1;
   fi
-  val snapshot = generation.open(doc, "reverse").unwrap().snapshot().unwrap();
+  val opened = generation.open(doc, "reverse");
+  if opened.is_err(); then stdio.println("FAIL config generation"); return 1; fi
+  val control = opened.unwrap();
+  val initial = control.snapshot();
+  if initial.is_err(); then stdio.println("FAIL snapshot"); return 1; fi
+  val snapshot = initial.unwrap();
   for (let cursor = 0; cursor < 4; cursor++) {
     val selected = backend_pools.choose(rt borrow snapshot,
       "core", "weighted-round-robin", cursor);
