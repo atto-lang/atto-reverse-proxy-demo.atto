@@ -49,6 +49,8 @@ jobs:
         run: oreslang --check tests/generation_contract.ores
       - name: Compiler-check native middleware contract
         run: oreslang --check tests/middleware_generation_contract.ores
+      - name: Compiler-check middleware manifest contract
+        run: oreslang --check tests/middleware_manifest_contract.ores
       - name: Compiler-check canonical path contract
         run: oreslang --check tests/path_admission_contract.ores
       - name: Execute canonical configuration path contract
@@ -57,6 +59,8 @@ jobs:
         run: oreslang tests/yaml_policy_contract.ores
       - name: Execute generation epoch / rollback contract
         run: oreslang tests/generation_contract.ores
+      - name: Execute generation-pinned middleware manifest contract
+        run: oreslang tests/middleware_manifest_contract.ores
       - name: Execute independent middleware snapshot contract
         run: oreslang tests/middleware_generation_contract.ores
       - name: Execute legacy HTTP header policy contract
