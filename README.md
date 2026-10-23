@@ -12,3 +12,5 @@ Config environment variable: **`ores_proxy_conf_yaml`** (lowercase exactly). CLI
 Further native-Oreslang regression coverage: `tests/middleware_generation_contract.ores` compares independent old/new immutable policy snapshots. See `docs/RELOAD_AND_MIDDLEWARE.md` for proposed actor staging, middleware placement, generation pinning, and drain semantics. **This is a pure test contract, not an implemented hot-reloader.**
 
 Exact-head compiler/contract execution is not yet available; no passing PR CI checks have been observed. Keep the pull request draft and do not advertise active HTTP forwarding.
+
+A native, **pure control-plane** coordinator in `src/generation.ores` exercises prepare/publish/abort fencing and snapshot epochs (see `tests/generation_contract.ores`). This does not publish a listener/actor generation or serve requests.
