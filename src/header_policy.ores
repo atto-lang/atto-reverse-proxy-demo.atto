@@ -40,6 +40,8 @@ define module header_policy as
   pub fnc connection_safe(String key, String connection_tokens): bool {
     if !token(key); then return false; fi
     if connection_tokens == ""; then return true; fi
+    if connection_tokens.starts_with(",") || connection_tokens.ends_with(",") ||
+      connection_tokens.contains_literal(",,"); then return false; fi
     for (const original of connection_tokens.split_literal(",")) {
       val String nominated = original.trim();
       if !token(nominated); then return false; fi

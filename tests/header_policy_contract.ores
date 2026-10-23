@@ -14,6 +14,8 @@ pub routine main(): int {
     header_policy.request_copy("x-forwarded-for", "127.0.0.1", "") ||
     header_policy.request_copy("x-custom", "fine", "x-custom, keep-alive") ||
     header_policy.request_copy("x-custom", "fine", "x-custom,") ||
+    header_policy.request_copy("x-custom", "fine", "keep-alive,") ||
+    header_policy.request_copy("x-custom", "fine", ",keep-alive") ||
     header_policy.request_copy("X-CUSTOM", "fine", "") ||
     header_policy.request_copy("x-custom", "ok\r\nInjected: yes", "") ||
     header_policy.request_copy("x:evil", "fine", "") ||

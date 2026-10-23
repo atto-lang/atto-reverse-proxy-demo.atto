@@ -9,6 +9,7 @@ pub routine main(): int {
     proxy_wire.reverse("GET //evil.test/x HTTP/1.1", "app.example.test").is_ok() ||
     proxy_wire.reverse("GET /api%2fadmin HTTP/1.1", "app.example.test").is_ok() ||
     proxy_wire.reverse("GET /api/../admin HTTP/1.1", "app.example.test").is_ok() ||
+    proxy_wire.reverse("GET /api/./admin HTTP/1.1", "app.example.test").is_ok() ||
     proxy_wire.reverse("GET /api?token=x HTTP/1.1", "app.example.test").is_ok() ||
     proxy_wire.reverse("GET /api HTTP/1.1\r\n", "app.example.test").is_ok() ||
     proxy_wire.reverse("GET /api HTTP/1.0", "app.example.test").is_ok() ||

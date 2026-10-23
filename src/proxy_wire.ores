@@ -24,6 +24,9 @@ define module proxy_wire as
       path.contains_literal("\u0000"); then
       return false;
     fi
+    for (const segment of path.split_literal("/")) {
+      if segment == "." || segment == ".."; then return false; fi
+    }
     return true;
   }
 
