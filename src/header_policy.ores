@@ -34,20 +34,38 @@ define module header_policy as
       !value.contains_literal("\t");
   }
 
-  // Dynamic Connection hop-by-hop nominations must be normalized and removed
-  // on both request and response. This function additionally rejects malformed
-  // tokens in the nomination list; caller must reject malformed whole message.
-  pub fnc connection_safe(String key, String connection_tokens): bool {
-    if !token(key); then return false; fi
-    if connection_tokens == ""; then return true; fi
-    if connection_tokens.starts_with(",") || connection_tokens.ends_with(",") ||
-      connection_tokens.contains_literal(",,"); then return false; fi
+  // Return the complete, validated dynamic nomination decision.
+  // Reject raw control bytes BEFORE trim(): trim can otherwise disguise
+  // malformed CRLF/HTAB/NUL and make injected nominations look legitimate.
+  // Scan the entire list even after a match, so a later malformed token
+  // cannot be hidden by an earlier valid nomination.
+  fnc connection_nomination(String key, String connection_tokens):
+      Result<bool, String> {
+    if !token(key); then return Err("invalid header name"); fi
+    if connection_tokens == ""; then return Ok(false); fi
+    if connection_tokens.contains_literal("\r") ||
+      connection_tokens.contains_literal("\n") ||
+      connection_tokens.contains_literal("\t") ||
+      connection_tokens.contains_literal("\u0000") ||
+      connection_tokens.starts_with(",") || connection_tokens.ends_with(",") ||
+      connection_tokens.contains_literal(",,"); then
+      return Err("invalid Connection token list");
+    fi
+    let bool nominated = false;
     for (const original of connection_tokens.split_literal(",")) {
-      val String nominated = original.trim();
-      if !token(nominated); then return false; fi
-      if key == nominated; then return false; fi
+      val String candidate = original.trim();
+      if !token(candidate); then return Err("invalid Connection token"); fi
+      if key == candidate; then nominated = true; fi
     }
-    return true;
+    return Ok(nominated);
+  }
+
+  // False for invalid field names, malformed lists or nominated fields.
+  // A caller must also reject an invalid list at the message level.
+  pub fnc connection_safe(String key, String connection_tokens): bool {
+    val decision = connection_nomination(key, connection_tokens);
+    if decision.is_err(); then return false; fi
+    return !decision.unwrap();
   }
 
   // Staged nominal enum; compiler execution support remains gated.
@@ -177,14 +195,18 @@ define module header_policy as
     if !token(key) || !value_safe(value); then
       return Err("invalid response header syntax");
     fi
+    val nomination = connection_nomination(key, connection_tokens);
+    if nomination.is_err(); then
+      return Err("invalid Connection token list");
+    fi
     val HeaderName header = known_header(key);
     if response_unsupported(header); then
       return Err("response body transformation is unsupported");
     fi
-    if !connection_safe(key, connection_tokens); then
-      return Err("connection-nominated or invalid response header");
-    fi
-    if hop_by_hop(header) || proxy_auth(header) ||
+    // RFC hop-by-hop removal is a drop, not a syntax error. Keep unsupported
+    // body metadata fail-closed even if Connection nominates it.
+    if nomination.unwrap() ||
+      hop_by_hop(header) || proxy_auth(header) ||
       response_derived(header); then
       return Ok("drop");
     fi
