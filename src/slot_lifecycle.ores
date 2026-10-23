@@ -48,7 +48,7 @@ define module slot_lifecycle as
       return new Ticket(self.incarnation, self.epoch);
     }
 
-    pub owns(Ticket ticket): bool {
+    pub owns(borrow Ticket ticket): bool {
       return ticket.incarnation > 0 &&
         ticket.incarnation == self.incarnation && ticket.epoch == self.epoch;
     }
@@ -66,8 +66,8 @@ define module slot_lifecycle as
 
     // A separate claim for each in-flight async operation prevents late
     // or duplicate producer completion from reclaiming somebody else's pin.
-    pub fnc pin(Ticket ticket): Result<Pinned, String> {
-      if !self.owns(ticket) || self.phase != 1; then
+    pub fnc pin(borrow Ticket ticket): Result<Pinned, String> {
+      if !self.owns(rt borrow ticket) || self.phase != 1; then
         return Err("pin requires active matching slot");
       fi
       if self.claims.size >= 64 || self.next_serial >= 2147483646; then
@@ -84,12 +84,12 @@ define module slot_lifecycle as
 
     // Close/cancel is idempotent for one ticket; get_done() can resolve
     // only once all claims are acknowledged or explicitly reclaimed.
-    pub fnc close(Ticket ticket): Result<Slot, String> {
-      if !self.owns(ticket); then return Err("stale close ticket"); fi
+    pub fnc close(borrow Ticket ticket): Result<Slot, String> {
+      if !self.owns(rt borrow ticket); then return Err("stale close ticket"); fi
       if self.phase == 0 || self.phase == 2; then
         return Ok(self.clone_state());
       fi
-      val int next_phase = 2;
+      let int next_phase = 2;
       if self.claims.size == 0; then next_phase = 0; fi
       return Ok(new Slot(self.incarnation, self.epoch, next_phase,
         self.next_serial, self.copy_claims()));
@@ -97,7 +97,7 @@ define module slot_lifecycle as
 
     // An acknowledgement consumes its precise serial exactly once.
     // Late, repeated, forged or prior-incarnation claims fail closed.
-    pub fnc settle(Claim claim): Result<Slot, String> {
+    pub fnc settle(borrow Claim claim): Result<Slot, String> {
       if claim.incarnation != self.incarnation || claim.epoch != self.epoch ||
         claim.serial <= 0; then
         return Err("stale claim receipt");
