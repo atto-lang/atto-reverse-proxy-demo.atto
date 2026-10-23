@@ -63,6 +63,11 @@ pub routine main(): int {
     !header_policy.response_action("x-extension-7", "ok", "x-extension-7, evil\r\nInjected").is_err() ||
     !header_policy.response_action("x-extension-7", "ok", "x-extension-7, evil\tInjected").is_err() ||
     !header_policy.response_action("x-extension-7", "ok", "x-extension-7, evil\u0000Injected").is_err() ||
+    !header_policy.response_action("x-extension-7", "ok", "x-extension-7, evil\u000bInjected").is_err() ||
+    !header_policy.response_action("x-extension-7", "ok", "x-extension-7, evil\u000cInjected").is_err() ||
+    !header_policy.response_action("x-extension-7", "ok", "x-extension-7, evil\u007fInjected").is_err() ||
+    !header_policy.response_action("x-extension-7", "ok", "x-extension-7, evil\u00a0Injected").is_err() ||
+    !header_policy.response_action("x-extension-7", "ok", "x-extension-7, evil\u2003Injected").is_err() ||
     !header_policy.response_action("x-extension-7", "ok", "x-extension-7,").is_err() ||
     header_policy.request_copy("x-extension-7", "ok", "x-extension-7, evil\r\nInjected") ||
     header_policy.response_copy("x-extension-7", "ok", "x-extension-7, evil\r\nInjected") ||
