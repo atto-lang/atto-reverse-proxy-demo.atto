@@ -84,7 +84,7 @@ define module header_policy as
   end
 
   // Canonical lowercase names only; validate the raw header name first.
-  pub fnc known_header(String key): HeaderName {
+  fnc known_header(String key): HeaderName {
     if key == "connection"; then return HeaderName.Connection; fi
     if key == "keep-alive"; then return HeaderName.KeepAlive; fi
     if key == "proxy-connection"; then return HeaderName.ProxyConnection; fi
