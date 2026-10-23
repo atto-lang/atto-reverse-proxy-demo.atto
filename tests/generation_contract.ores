@@ -4,7 +4,7 @@ pub routine main(): int {
     "middleware:\n  - name: gate\n    kind: trace\nroutes:\n  - name: site\n    host: site.example.test\n    path_prefix: /\n    upstream: http://127.0.0.1:9000\n    middleware: gate\n";
   val admission = generation.open(source, "reverse");
   if admission.is_err(); then stdio.println("FAIL open"); return 1; fi
-  val control = admission.unwrap();
+  let control = admission.unwrap();
   val first = control.snapshot().unwrap();
   if control.publish(1).is_ok(); then stdio.println("FAIL publish without prepare"); return 1; fi
   if control.prepare(source.replace_literal("kind: trace", "kind: deny")).is_err(); then
