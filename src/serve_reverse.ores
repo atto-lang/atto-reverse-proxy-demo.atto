@@ -38,8 +38,8 @@ define isoactor StreamV1 as
   receive(ActorMail<String> mail): void {
     val exchange = http.claim(mail.value);
     await exchange.start(200, "text/plain; charset=utf-8");
-    await exchange.write("stage-one\\n");
-    await exchange.write("stage-two\\n");
+    await exchange.write("stage-one\n");
+    await exchange.write("stage-two\n");
     await exchange.finish();
     return;
   }
