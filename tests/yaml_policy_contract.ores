@@ -18,7 +18,9 @@ pub routine main(): int {
     stdio.println("FAIL route/domain boundary"); return 1;
   fi
   val result = route_policy.select(rt borrow snapshot, "app.example.test", "/api/hello");
-  if result.is_err(); then stdio.println("FAIL route match"); return 1; fi\n  if middleware_policy.evaluate(rt borrow snapshot, result.unwrap().middleware, "x-token", "").unwrap(); then\n    stdio.println("FAIL middleware denial"); return 1; fi
+  if result.is_err(); then stdio.println("FAIL route match"); return 1; fi
+  if middleware_policy.evaluate(rt borrow snapshot, result.unwrap().middleware, "x-token", "").unwrap(); then
+    stdio.println("FAIL middleware denial"); return 1; fi
   if proxy_yaml.parse(document.replace_literal("app.example.test", "app..example.test"), "reverse").is_ok(); then
     stdio.println("FAIL invalid reverse route host"); return 1;
   fi
