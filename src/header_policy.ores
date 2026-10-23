@@ -72,6 +72,28 @@ define module header_policy as
     return true;
   }
 
+  // A boolean copy predicate MUST NOT be treated as a sufficient HTTP
+  // transformation plan. Dropping content-encoding without decoding its bytes
+  // would corrupt the response, and suppressing a Content-Range could violate
+  // partial-response semantics. Return explicit reject/drop/keep decisions.
+  pub fnc response_action(String key, String value,
+                          String connection_tokens): Result<String, String> {
+    if !token(key) || !value_safe(value); then
+      return Err("invalid response header syntax");
+    fi
+    if key == "content-encoding" || key == "content-range"; then
+      return Err("response body transformation is unsupported");
+    fi
+    if !connection_safe(key, connection_tokens); then
+      return Err("connection-nominated or invalid response header");
+    fi
+    if hop_by_hop(key) || key == "content-length" ||
+      key == "server" || key == "date"; then
+      return Ok("drop");
+    fi
+    return Ok("keep");
+  }
+
   // Multiple Set-Cookie lines must remain independent; callers cannot use
   // this scalar helper to coalesce them or make framing decisions.
   pub fnc response_copy(String key, String value,

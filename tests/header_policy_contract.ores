@@ -25,6 +25,13 @@ pub routine main(): int {
     header_policy.response_copy("bad name", "x", ""); then
     stdio.println("FAIL forbidden header"); return 1;
   fi
+  if !header_policy.response_action("content-encoding", "gzip", "").is_err() ||
+    !header_policy.response_action("content-range", "bytes 0-9/20", "").is_err() ||
+    header_policy.response_action("content-length", "2", "").unwrap() != "drop" ||
+    header_policy.response_action("set-cookie", "a=b", "").unwrap() != "keep" ||
+    !header_policy.response_action("x-extra", "ok", "x-extra").is_err(); then
+    stdio.println("FAIL explicit response action"); return 1;
+  fi
   stdio.println("PASS canonical header policy (raw wire parser still required)");
   return 0;
 }
