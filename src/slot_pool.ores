@@ -81,8 +81,9 @@ define module slot_pool as
           fi
           val next = changed.unwrap();
           val int unique = self.next_nonce;
+          val ticket = next.ticket();
           return Ok(new Admitted(self.replaced(i, next, unique, unique + 1),
-            new Handle(i, unique, next.ticket())));
+            new Handle(i, unique, ticket)));
         fi
       }
       return Err("bounded pool exhausted");
