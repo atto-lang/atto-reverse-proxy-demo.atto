@@ -1,0 +1,41 @@
+// Native Oreslang policy admission contract; no socket or authentication.
+// Both proxy modes must reject presence-only rules targeting hop-by-hop,
+// framing, credentials, forwarded identities, or body metadata.
+import module proxy_yaml from "../src/proxy_yaml";
+import module header_policy from "../src/header_policy";
+
+pub routine main(): int {
+  val String forward = "version: ores.proxy/v1\nmode: forward\nlisten:\n  host: 127.0.0.1\n  port: 8080\nruntime:\n  carriers: 20\n  actors: 100\n  max_inflight: 1024\n" +
+    "policy:\n  deny_private: true\n  allow_domains: example.test\n  connect_ports: 443\n" +
+    "middleware:\n  - name: gate\n    kind: require_header\n    header: x-auth\n";
+  val String reverse = "version: ores.proxy/v1\nmode: reverse\nlisten:\n  host: 127.0.0.1\n  port: 8080\nruntime:\n  carriers: 20\n  actors: 100\n  max_inflight: 1024\n" +
+    "middleware:\n  - name: gate\n    kind: require_header\n    header: x-auth\n" +
+    "routes:\n  - name: api\n    host: api.example.test\n    path_prefix: /api\n    upstream: http://127.0.0.1:9000\n    middleware: gate\n";
+  if proxy_yaml.parse(forward, "forward").is_err() ||
+    proxy_yaml.parse(reverse, "reverse").is_err() ||
+    !header_policy.middleware_header_allowed("x-auth") ||
+    !header_policy.middleware_header_allowed("accept") ||
+    !header_policy.middleware_header_allowed("content-type"); then
+    stdio.println("FAIL safe middleware control fixture"); return 1;
+  fi
+
+  val String blocked = "connection,keep-alive,proxy-connection,te,trailer,transfer-encoding,upgrade,http2-settings,proxy-authenticate,proxy-authorization,host,content-length,authorization,cookie,forwarded,x-forwarded-for,x-forwarded-host,x-forwarded-proto,via,content-encoding,content-range,server,date,set-cookie";
+  for (const name of blocked.split_literal(",")) {
+    if header_policy.middleware_header_allowed(name) ||
+      proxy_yaml.parse(forward.replace_literal("header: x-auth", "header: " + name), "forward").is_ok() ||
+      proxy_yaml.parse(reverse.replace_literal("header: x-auth", "header: " + name), "reverse").is_ok(); then
+      stdio.println("FAIL unsafe require_header accepted"); return 1;
+    fi
+  }
+
+  // Presence of x-auth cannot prove authorization. This test only checks
+  // strict configuration admission, not trust in the header's contents.
+  if header_policy.middleware_header_allowed("X-Auth") ||
+    header_policy.middleware_header_allowed("x:auth") ||
+    header_policy.middleware_header_allowed("bad name") ||
+    header_policy.middleware_header_allowed(""); then
+    stdio.println("FAIL noncanonical middleware header name"); return 1;
+  fi
+  stdio.println("PASS middleware header configuration boundary");
+  return 0;
+}
