@@ -32,6 +32,29 @@ pub async routine main(): int {
     stdio.println("FAIL missing declarative header should be refused");
     return 1;
   fi
-  stdio.println("PASS native Oreslang actor-service TCP smoke");
+  // Prove actual HTTP/1.1 chunked body bytes from the guest StreamV1 actor,
+  // not just status-line dispatch. Connection: close gives bounded EOF.
+  val streaming = await network.connect_async("127.0.0.1", 8080);
+  await streaming.write_text_async(
+    "GET /stream HTTP/1.1\\r\\nHost: worker.example.test\\r\\nConnection: close\\r\\n\\r\\n");
+  val streamed_status = await streaming.read_line_async();
+  if streamed_status.is_none() ||
+    !streamed_status.unwrap().starts_with("HTTP/1.1 200"); then
+    await streaming.close_async();
+    stdio.println("FAIL native streaming actor status"); return 1;
+  fi
+  let String streamed_lines = "";
+  for (let i = 0; i < 48; i++) {
+    val line = await streaming.read_line_async();
+    if line.is_none(); then break; fi
+    streamed_lines = streamed_lines + line.unwrap() + "\\n";
+  }
+  await streaming.close_async();
+  if !streamed_lines.contains_literal("stage-one") ||
+    !streamed_lines.contains_literal("stage-two"); then
+    stdio.println("FAIL streaming actor body chunks not visible on wire");
+    return 1;
+  fi
+  stdio.println("PASS native Oreslang actor-service and streaming TCP smoke");
   return 0;
 }

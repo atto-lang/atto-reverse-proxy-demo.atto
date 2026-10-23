@@ -11,6 +11,9 @@ services:
   - name: greeting
     kind: actor
     target: hello-v1
+  - name: streaming
+    kind: actor
+    target: stream-v1
 middleware:
   - name: trace
     kind: trace
@@ -22,6 +25,11 @@ routes:
     host: worker.example.test
     path_prefix: /actor
     upstream: service://greeting
+    middleware: trace
+  - name: streaming-route
+    host: worker.example.test
+    path_prefix: /stream
+    upstream: service://streaming
     middleware: trace
   - name: origin
     host: worker.example.test

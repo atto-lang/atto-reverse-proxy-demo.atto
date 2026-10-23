@@ -32,6 +32,19 @@ define isoactor HelloV1 as
   }
 end
 
+// Native Oreslang streaming actor path. Transport-owned byte credits and
+// response commit are managed by HttpExchange; each write is awaited.
+define isoactor StreamV1 as
+  receive(ActorMail<String> mail): void {
+    val exchange = http.claim(mail.value);
+    await exchange.start(200, "text/plain; charset=utf-8");
+    await exchange.write("stage-one\\n");
+    await exchange.write("stage-two\\n");
+    await exchange.finish();
+    return;
+  }
+end
+
 pub async routine main(): int {
   val selected = env.get("ores_proxy_conf_yaml");
   if selected.is_none(); then
@@ -63,11 +76,11 @@ pub async routine main(): int {
     return 78;
   fi
 
-  // Keep the total reusable HTTP actor allocation within the YAML actors=100
-  // budget: 50 actor-service handlers + 50 unavailable-upstream handlers.
-  // Pooled actor count is NOT HTTP admission or the carrier thread count.
-  val unavailable = http.handler("UpstreamUnavailable").pooled(50);
+  // Exactly 100 maximum lazily created reusable actors across three pools.
+  // This is separate from transport admission and the carrier-thread budget.
+  val unavailable = http.handler("UpstreamUnavailable").pooled(25);
   val hello = http.handler("HelloV1").pooled(50);
+  val stream = http.handler("StreamV1").pooled(25);
   val server = http.listen("127.0.0.1", 8080, 1024, 65536, 30000);
   stdio.println("EXPERIMENTAL loopback actor ingress; HTTP upstream forwarding returns 501");
   loop {
@@ -127,6 +140,8 @@ pub async routine main(): int {
       fi
       if bound.unwrap().target == "hello-v1"; then
         hello.dispatch(rt borrow mut exchange);
+      elif bound.unwrap().target == "stream-v1"; then
+        stream.dispatch(rt borrow mut exchange);
       else
         await exchange.respond(501, "text/plain; charset=utf-8",
           "Actor image not registered in this demonstration");
