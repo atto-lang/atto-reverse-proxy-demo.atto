@@ -45,6 +45,13 @@ pub routine main(): int {
   if middleware_manifest.bind(rt borrow now, "actor", "gate,gate").is_ok(); then
     stdio.println("FAIL repeated middleware in chain"); return 1;
   fi
+  // Invalid headers must never satisfy a pinned middleware manifest.
+  if old_plan.permitted("x-auth", "present\\r\\nInjected: 1") ||
+    old_plan.permitted("X-AUTH", "present") ||
+    old_plan.permitted("x-auth", "present\\tunsafe") ||
+    old_plan.permitted("x:auth", "present"); then
+    stdio.println("FAIL invalid middleware header admitted"); return 1;
+  fi
   stdio.println("PASS reverse generation-pinned route/actor middleware manifests");
   return 0;
 }
