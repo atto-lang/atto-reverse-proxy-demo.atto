@@ -50,12 +50,108 @@ define module header_policy as
     return true;
   }
 
-  fnc hop_by_hop(String key): bool {
-    return key == "connection" || key == "keep-alive" ||
-      key == "proxy-connection" || key == "te" ||
-      key == "trailer" || key == "transfer-encoding" ||
-      key == "upgrade" || key == "http2-settings" ||
-      key == "proxy-authenticate" || key == "proxy-authorization";
+  // Staged nominal enum; compiler execution support remains gated.
+  // Other does not discard the original extension name: the caller keeps
+  // key for exact Connection-token removal and HTTP serialization.
+  define enum HeaderName as
+    Connection
+    KeepAlive
+    ProxyConnection
+    TE
+    Trailer
+    TransferEncoding
+    Upgrade
+    Http2Settings
+    ProxyAuthenticate
+    ProxyAuthorization
+    Host
+    ContentLength
+    Authorization
+    Cookie
+    Forwarded
+    XForwardedFor
+    XForwardedHost
+    XForwardedProto
+    Via
+    ContentEncoding
+    ContentRange
+    Server
+    Date
+    Accept
+    ContentType
+    SetCookie
+    Other
+  end
+
+  // Canonical lowercase names only; validate the raw header name first.
+  pub fnc known_header(String key): HeaderName {
+    if key == "connection"; then return HeaderName.Connection; fi
+    if key == "keep-alive"; then return HeaderName.KeepAlive; fi
+    if key == "proxy-connection"; then return HeaderName.ProxyConnection; fi
+    if key == "te"; then return HeaderName.TE; fi
+    if key == "trailer"; then return HeaderName.Trailer; fi
+    if key == "transfer-encoding"; then return HeaderName.TransferEncoding; fi
+    if key == "upgrade"; then return HeaderName.Upgrade; fi
+    if key == "http2-settings"; then return HeaderName.Http2Settings; fi
+    if key == "proxy-authenticate"; then return HeaderName.ProxyAuthenticate; fi
+    if key == "proxy-authorization"; then return HeaderName.ProxyAuthorization; fi
+    if key == "host"; then return HeaderName.Host; fi
+    if key == "content-length"; then return HeaderName.ContentLength; fi
+    if key == "authorization"; then return HeaderName.Authorization; fi
+    if key == "cookie"; then return HeaderName.Cookie; fi
+    if key == "forwarded"; then return HeaderName.Forwarded; fi
+    if key == "x-forwarded-for"; then return HeaderName.XForwardedFor; fi
+    if key == "x-forwarded-host"; then return HeaderName.XForwardedHost; fi
+    if key == "x-forwarded-proto"; then return HeaderName.XForwardedProto; fi
+    if key == "via"; then return HeaderName.Via; fi
+    if key == "content-encoding"; then return HeaderName.ContentEncoding; fi
+    if key == "content-range"; then return HeaderName.ContentRange; fi
+    if key == "server"; then return HeaderName.Server; fi
+    if key == "date"; then return HeaderName.Date; fi
+    if key == "accept"; then return HeaderName.Accept; fi
+    if key == "content-type"; then return HeaderName.ContentType; fi
+    if key == "set-cookie"; then return HeaderName.SetCookie; fi
+    return HeaderName.Other;
+  }
+
+  fnc hop_by_hop(HeaderName header): bool {
+    return header == HeaderName.Connection ||
+      header == HeaderName.KeepAlive ||
+      header == HeaderName.ProxyConnection ||
+      header == HeaderName.TE ||
+      header == HeaderName.Trailer ||
+      header == HeaderName.TransferEncoding ||
+      header == HeaderName.Upgrade ||
+      header == HeaderName.Http2Settings;
+  }
+
+  // Proxy-auth headers require a separate trust/direction policy.
+  fnc proxy_auth(HeaderName header): bool {
+    return header == HeaderName.ProxyAuthenticate ||
+      header == HeaderName.ProxyAuthorization;
+  }
+
+  fnc request_sensitive(HeaderName header): bool {
+    return header == HeaderName.Host ||
+      header == HeaderName.ContentLength ||
+      header == HeaderName.Authorization ||
+      header == HeaderName.Cookie ||
+      header == HeaderName.Forwarded ||
+      header == HeaderName.XForwardedFor ||
+      header == HeaderName.XForwardedHost ||
+      header == HeaderName.XForwardedProto ||
+      header == HeaderName.Via;
+  }
+
+  fnc response_unsupported(HeaderName header): bool {
+    return header == HeaderName.ContentEncoding ||
+      header == HeaderName.ContentRange;
+  }
+
+  fnc response_derived(HeaderName header): bool {
+    return header == HeaderName.ContentLength ||
+      header == HeaderName.Server ||
+      header == HeaderName.Date;
   }
 
   // Do not copy Host or framing from inbound traffic. The future source-level
@@ -63,12 +159,10 @@ define module header_policy as
   // upstream, and owns exact response/body/trailer consistency.
   pub fnc request_copy(String key, String value,
                        String connection_tokens): bool {
+    val HeaderName header = known_header(key);
     if !connection_safe(key, connection_tokens) || !value_safe(value) ||
-      hop_by_hop(key) || key == "host" ||
-      key == "content-length" || key == "authorization" ||
-      key == "cookie" || key == "forwarded" ||
-      key == "x-forwarded-for" || key == "x-forwarded-host" ||
-      key == "x-forwarded-proto" || key == "via"; then
+      hop_by_hop(header) || proxy_auth(header) ||
+      request_sensitive(header); then
       return false;
     fi
     return true;
@@ -83,14 +177,15 @@ define module header_policy as
     if !token(key) || !value_safe(value); then
       return Err("invalid response header syntax");
     fi
-    if key == "content-encoding" || key == "content-range"; then
+    val HeaderName header = known_header(key);
+    if response_unsupported(header); then
       return Err("response body transformation is unsupported");
     fi
     if !connection_safe(key, connection_tokens); then
       return Err("connection-nominated or invalid response header");
     fi
-    if hop_by_hop(key) || key == "content-length" ||
-      key == "server" || key == "date"; then
+    if hop_by_hop(header) || proxy_auth(header) ||
+      response_derived(header); then
       return Ok("drop");
     fi
     return Ok("keep");
@@ -100,10 +195,10 @@ define module header_policy as
   // this scalar helper to coalesce them or make framing decisions.
   pub fnc response_copy(String key, String value,
                         String connection_tokens): bool {
+    val HeaderName header = known_header(key);
     if !connection_safe(key, connection_tokens) || !value_safe(value) ||
-      hop_by_hop(key) || key == "content-length" || key == "server" ||
-      key == "date" || key == "content-encoding" ||
-      key == "content-range"; then
+      hop_by_hop(header) || proxy_auth(header) ||
+      response_derived(header) || response_unsupported(header); then
       return false;
     fi
     return true;
