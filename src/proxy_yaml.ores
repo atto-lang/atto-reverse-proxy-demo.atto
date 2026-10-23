@@ -156,8 +156,8 @@ define module proxy_yaml as
     let bool seen_policy = false;
     let bool seen_routes = false;
     let bool seen_middleware = false;
-    let mut Array<Route> routes = new Array<Route>();
-    let mut Array<Middleware> middlewares = new Array<Middleware>();
+    let Array<Route> routes = new Array<Route>();
+    let Array<Middleware> middlewares = new Array<Middleware>();
     let String rn = "";
     let String rh = "";
     let String rp = "";
