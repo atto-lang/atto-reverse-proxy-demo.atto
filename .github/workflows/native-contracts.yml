@@ -27,6 +27,8 @@ jobs:
         run: command -v oreslang
       - name: Compiler-check entrypoint
         run: oreslang --check src/main.ores
+      - name: Compiler-check configuration path admission
+        run: oreslang --check src/config_path.ores
       - name: Compiler-check YAML parser
         run: oreslang --check src/proxy_yaml.ores
       - name: Compiler-check routing policy
@@ -41,6 +43,10 @@ jobs:
         run: oreslang --check tests/generation_contract.ores
       - name: Compiler-check native middleware contract
         run: oreslang --check tests/middleware_generation_contract.ores
+      - name: Compiler-check canonical path contract
+        run: oreslang --check tests/path_admission_contract.ores
+      - name: Execute canonical configuration path contract
+        run: oreslang tests/path_admission_contract.ores
       - name: Execute YAML / routing / policy contract
         run: oreslang tests/yaml_policy_contract.ores
       - name: Execute generation epoch / rollback contract
