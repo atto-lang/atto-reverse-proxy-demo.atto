@@ -83,6 +83,7 @@ pub async routine main(): int {
     fi
     val target = matched.unwrap();
     if !proxy_yaml.valid_service_ref(target.upstream) &&
+      !proxy_yaml.valid_pool_ref(target.upstream) &&
       proxy_wire.upstream_origin(target.upstream).is_err(); then
       await exchange.respond(502, "text/plain; charset=utf-8", "Invalid upstream origin");
       continue;
