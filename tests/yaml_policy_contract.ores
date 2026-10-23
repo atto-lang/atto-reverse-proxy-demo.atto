@@ -66,6 +66,8 @@ pub routine main(): int {
       "path_prefix: /api/../admin"), "reverse").is_ok() ||
     proxy_yaml.parse(document.replace_literal("path_prefix: /api",
       "path_prefix: /api%2Fadmin"), "reverse").is_ok() ||
+    proxy_yaml.parse(document.replace_literal("path_prefix: /api",
+      "path_prefix: /api/"), "reverse").is_ok() ||
     proxy_yaml.parse(document.replace_literal("upstream: http://127.0.0.1:9000",
       "upstream: http://127.0.0.1:9000/steal"), "reverse").is_ok() ||
     proxy_yaml.parse(document.replace_literal("header: x-token",
