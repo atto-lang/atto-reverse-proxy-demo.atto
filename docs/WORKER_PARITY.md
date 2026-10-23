@@ -95,3 +95,30 @@ Sources: https://github.com/cloudflare/workerd ,
 https://github.com/cloudflare/workerd/blob/main/src/workerd/server/workerd.capnp ,
 https://nginx.org/en/docs/http/load_balancing.html ,
 https://www.haproxy.com/documentation/
+
+## Declarative weighted upstream pools (second vertical slice)
+
+`config/backend-example.yaml` demonstrates end-user YAML `backends:` with
+`name`, `pool`, `origin` and `weight`. For the provisional v1 format,
+weights are restricted to **1, 2, 3, 4, 5, or 10**; max 128 backends.
+Duplicate names or duplicate origin within a pool fail admission. An Oreslang
+reverse route can reference `pool://api`; dangling pools are rejected.
+
+`src/backend_pools.ores` compiles that YAML to the existing
+`load_balancer.choose` policy. Supported planned choices are
+`weighted-round-robin` (deterministic block-weighted rotation) and
+`least-active` (which defaults to choosing the first configured node in
+this **static** plan, because no live in-flight counters exist yet).
+This returns an untrusted **decision descriptor**, not an authenticated
+network connection. The current experimental reverse HTTP ingress returns
+501 for these pool routes, not a counterfeit upstream response. The forward
+proxy accepts backend declarations but does not route CONNECT through them.
+
+A production implementation must additionally implement all of:
+(1) resolved-address and certificate identity pinning; (2) egress-scoped
+capability minting by the trusted supervisor; (3) actor-owned atomic backend
+credit/reservation and exact-once release; (4) bounded connection pools and
+HTTP/1.1+2 framing; (5) health/probe and failover policy; (6) retries only
+for idempotent requests before headers commit; (7) streamed bodies with
+backpressure and request-generation pins. No such capability is inferred
+from a syntactically valid YAML origin.
