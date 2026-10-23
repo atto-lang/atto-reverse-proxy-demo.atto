@@ -32,10 +32,11 @@ pub routine main(): int {
   if canceled.settle(rt borrow forged).is_ok(); then
     stdio.println("FAIL cross-slot completion"); return 1;
   fi
-  if canceled.settle(rt borrow one.receipt).is_err(); then
+  val settled_one = canceled.settle(rt borrow one.receipt);
+  if settled_one.is_err(); then
     stdio.println("FAIL original receipt"); return 1;
   fi
-  val drained = canceled.settle(rt borrow one.receipt).unwrap();
+  val drained = settled_one.unwrap();
   if drained.retiring_slots() != 0 || drained.live_slots() != 1; then
     stdio.println("FAIL one slot reclaimed"); return 1;
   fi
