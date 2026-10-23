@@ -17,7 +17,18 @@ pub routine main(): int {
   if !route_policy.prefix_match("/api", "/api/x") || route_policy.prefix_match("/api", "/api2"); then
     stdio.println("FAIL route/domain boundary"); return 1;
   fi
-  val result = route_policy.select(rt borrow snapshot, "app.example.test", "/api/hello");\n  if result.is_err(); then stdio.println("FAIL route match"); return 1; fi\n  if middleware_policy.evaluate(rt borrow snapshot, result.unwrap().middleware, "x-token", "").unwrap(); then\n    stdio.println("FAIL middleware denial"); return 1; fi
+  val result = route_policy.select(rt borrow snapshot, "app.example.test", "/api/hello");
+  if result.is_err(); then stdio.println("FAIL route match"); return 1; fi\n  if middleware_policy.evaluate(rt borrow snapshot, result.unwrap().middleware, "x-token", "").unwrap(); then\n    stdio.println("FAIL middleware denial"); return 1; fi
+  if proxy_yaml.parse(document.replace_literal("app.example.test", "app..example.test"), "reverse").is_ok(); then
+    stdio.println("FAIL invalid reverse route host"); return 1;
+  fi
+  if proxy_yaml.parse(document.replace_literal("- name: guard", "- name: x- guard")
+      .replace_literal("middleware: guard", "middleware: x- guard"), "reverse").is_err(); then
+    stdio.println("FAIL list name with literal dash-space"); return 1;
+  fi
+  if proxy_yaml.parse(document + "  # trailing comment\\r\\n", "reverse").is_ok(); then
+    stdio.println("FAIL CR on comment"); return 1;
+  fi
   stdio.println("PASS native reverse YAML/policy contract");
   return 0;
 }
