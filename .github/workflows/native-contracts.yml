@@ -53,3 +53,36 @@ jobs:
         run: oreslang tests/generation_contract.ores
       - name: Execute independent middleware snapshot contract
         run: oreslang tests/middleware_generation_contract.ores
+
+      - name: Compiler-check HTTP metadata admission and header filtering
+        run: |
+          oreslang --check src/proxy_wire.ores
+          oreslang --check src/header_policy.ores
+      - name: Compiler-check native slot lifecycle, middleware manifest and data layouts
+        run: |
+          oreslang --check src/slot_lifecycle.ores
+          oreslang --check src/slot_pool.ores
+          oreslang --check src/middleware_manifest.ores
+          oreslang --check src/data_layout.ores
+      - name: Compiler-check all security and slot regression vectors
+        run: |
+          oreslang --check tests/security_admission_contract.ores
+          oreslang --check tests/wire_contract.ores
+          oreslang --check tests/header_policy_contract.ores
+          oreslang --check tests/middleware_manifest_contract.ores
+          oreslang --check tests/data_layout_contract.ores
+          oreslang --check tests/slot_lifecycle_contract.ores
+          oreslang --check tests/slot_pool_contract.ores
+      - name: Compiler-check opt-in reverse ingress and TCP smoke
+        run: |
+          oreslang --check src/serve_reverse.ores
+          oreslang --check tests/ingress_tcp_smoke.ores
+      - name: Execute complete Oreslang safety contracts
+        run: |
+          oreslang tests/security_admission_contract.ores
+          oreslang tests/wire_contract.ores
+          oreslang tests/header_policy_contract.ores
+          oreslang tests/middleware_manifest_contract.ores
+          oreslang tests/data_layout_contract.ores
+          oreslang tests/slot_lifecycle_contract.ores
+          oreslang tests/slot_pool_contract.ores

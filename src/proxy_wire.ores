@@ -21,7 +21,8 @@ define module proxy_wire as
       path.contains_literal("?") || path.contains_literal("#") ||
       path.contains_literal(" ") || path.contains_literal("\r") ||
       path.contains_literal("\n") || path.contains_literal("\t") ||
-      path.contains_literal("\u0000"); then
+      path.contains_literal("\u0000") || path.contains_literal(";") ||
+      path.contains_literal("\u007f"); then
       return false;
     fi
     for (const segment of path.split_literal("/")) {
@@ -60,7 +61,8 @@ define module proxy_wire as
       target.contains_literal("/") || target.contains_literal("\\") ||
       target.contains_literal("[") || target.contains_literal("]") ||
       target.contains_literal("\r") || target.contains_literal("\n") ||
-      target.contains_literal("\t"); then
+      target.contains_literal("\t") || target.contains_literal("\u0000") ||
+      target.contains_literal("#") || target.contains_literal("?"); then
       return Err("CONNECT requires canonical DNS-host:443 and identical Host");
     fi
     return Ok(new Target("CONNECT", authority.get(0), "", true));

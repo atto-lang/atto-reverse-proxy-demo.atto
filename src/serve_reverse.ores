@@ -5,6 +5,7 @@
 import module proxy_yaml from "./proxy_yaml";
 import module proxy_wire from "./proxy_wire";
 import module route_policy from "./route_policy";
+import module config_path from "./config_path";
 
 // Reusable actor lifecycle: pooled handlers return after each request and do
 // not self.end(). HTTP transport owns the FD and single-use claim generation.
@@ -24,7 +25,10 @@ pub async routine main(): int {
     return 64;
   fi
   val String path = selected.unwrap();
-  if path == ""; then return 64; fi
+  if !config_path.valid(path); then
+    stdio.println("ERROR: config path must be canonical and absolute");
+    return 65;
+  fi
   if fs.is_symlink(path) || !fs.exists(path) || fs.is_dir(path); then
     stdio.println("ERROR: nonregular configuration");
     return 65;
@@ -53,17 +57,17 @@ pub async routine main(): int {
     val String request_line = exchange.method + " " + exchange.target + " HTTP/1.1";
     val admitted = proxy_wire.reverse(request_line, host);
     if admitted.is_err(); then
-      exchange.respond(400, "text/plain; charset=utf-8", "Noncanonical request");
+      await exchange.respond(400, "text/plain; charset=utf-8", "Noncanonical request");
       continue;
     fi
     val matched = route_policy.select(rt borrow config, host, exchange.target);
     if matched.is_err(); then
-      exchange.respond(404, "text/plain; charset=utf-8", "No route");
+      await exchange.respond(404, "text/plain; charset=utf-8", "No route");
       continue;
     fi
     val target = matched.unwrap();
     if proxy_wire.upstream_origin(target.upstream).is_err(); then
-      exchange.respond(502, "text/plain; charset=utf-8", "Invalid upstream origin");
+      await exchange.respond(502, "text/plain; charset=utf-8", "Invalid upstream origin");
       continue;
     fi
 
@@ -89,7 +93,7 @@ pub async routine main(): int {
       }
     fi
     if !permit; then
-      exchange.respond(403, "text/plain; charset=utf-8", "Request denied");
+      await exchange.respond(403, "text/plain; charset=utf-8", "Request denied");
       continue;
     fi
     unavailable.dispatch(exchange);

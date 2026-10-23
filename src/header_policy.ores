@@ -68,7 +68,10 @@ define module header_policy as
       key == "content-length" || key == "authorization" ||
       key == "cookie" || key == "forwarded" ||
       key == "x-forwarded-for" || key == "x-forwarded-host" ||
-      key == "x-forwarded-proto" || key == "via"; then
+      key == "x-forwarded-proto" || key == "via" ||
+      key == "expect" || key == "range" || key == "if-range" ||
+      key == "content-range" || key == "content-encoding" ||
+      key == "content-md5" || key == "digest"; then
       return false;
     fi
     return true;

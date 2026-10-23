@@ -54,7 +54,8 @@ define module proxy_yaml as
       value.contains_literal("|") || value.contains_literal(">") ||
       value.contains_literal("\\") || value.contains_literal("\"") ||
       value.contains_literal("'") || value.contains_literal("\t") ||
-      value.contains_literal("\r"); then
+      value.contains_literal("\r") || value.contains_literal("\u0000") ||
+      value.contains_literal("\u001b") || value.contains_literal("\u007f"); then
       return false;
     fi
     if value.starts_with(" ") || value.ends_with(" "); then return false; fi
@@ -121,16 +122,6 @@ define module proxy_yaml as
     return other == "";
   }
 
-  // Syntax only. Do not use as an outbound network capability check.
-  fnc valid_ipv4_spelling(String candidate): bool {
-    val parts = candidate.split_literal(".");
-    if parts.size != 4; then return false; fi
-    for (const part of parts) {
-      if !decimal(part) || part == ""; then return false; fi
-    }
-    return true;
-  }
-
   // Accept only HTTP(S) scheme + an unambiguous host and optional decimal
   // port. The v1 schema deliberately excludes IPv6 and path-bearing origins.
   // Resolved address, port range and TLS hostname checks belong to transport.
@@ -150,8 +141,8 @@ define module proxy_yaml as
     val parts = authority.split_literal(":");
     if parts.size == 0 || parts.size > 2; then return false; fi
     val String hostname = parts.get(0);
-    if hostname != "localhost" && !valid_domain(hostname) &&
-      !valid_ipv4_spelling(hostname); then return false; fi
+    if hostname != "localhost" && hostname != "127.0.0.1" &&
+      !valid_domain(hostname); then return false; fi
     if parts.size == 2; then
       val String port = parts.get(1);
       if !decimal(port) || port == "0"; then return false; fi
@@ -159,9 +150,16 @@ define module proxy_yaml as
     return true;
   }
 
+  // Route names and middleware identifiers must remain unambiguous when
+  // compiled into comma-delimited pipeline references and log/trace keys.
+  pub fnc valid_identifier(String candidate): bool {
+    return valid_header_name(candidate) &&
+      candidate != "connection" && candidate != "proxy-authorization";
+  }
+
   fnc validate_route(String name, String host, String prefix, String upstream,
                      String chain): Result<Route, String> {
-    if !safe_scalar(name) || !valid_domain(host) || !safe_scalar(prefix) ||
+    if !valid_identifier(name) || !valid_domain(host) || !safe_scalar(prefix) ||
       !safe_scalar(upstream); then
       return Err("route requires safe name, host, path_prefix, upstream");
     fi
@@ -184,12 +182,18 @@ define module proxy_yaml as
 
   fnc validate_middleware(String name, String kind, String header):
       Result<Middleware, String> {
-    if !safe_scalar(name); then return Err("middleware needs a safe name"); fi
+    if !valid_identifier(name); then return Err("middleware needs a canonical identifier"); fi
     if !(kind == "trace" || kind == "deny" || kind == "require_header"); then
       return Err("unsupported middleware kind");
     fi
     if kind == "require_header"; then
-      if !valid_header_name(header); then
+      if !valid_header_name(header) ||
+        header == "host" || header == "connection" ||
+        header == "content-length" || header == "transfer-encoding" ||
+        header == "authorization" || header == "proxy-authorization" ||
+        header == "cookie" || header == "proxy-connection" ||
+        header == "forwarded" || header == "x-forwarded-for" ||
+        header == "x-forwarded-host" || header == "x-forwarded-proto"; then
         return Err("require_header needs a canonical header name");
       fi
     else
@@ -270,7 +274,7 @@ define module proxy_yaml as
         fi
         val pair = line.split_literal(": ");
         if pair.size != 2 || pair.get(0) != "- name" ||
-          !safe_scalar(pair.get(1)); then
+          !valid_identifier(pair.get(1)); then
           return Err("list items must begin with '- name: VALUE'");
         fi
         if section == "routes"; then rn = pair.get(1); else mn = pair.get(1); fi

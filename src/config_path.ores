@@ -8,7 +8,8 @@ define module config_path as
       path.contains_literal("/../") || path.ends_with("/..") ||
       path.contains_literal("\\") || path.contains_literal("\n") ||
       path.contains_literal("\r") || path.contains_literal("\t") ||
-      path.contains_literal("\u0000"); then return false; fi
+      path.contains_literal("\u0000") || path.contains_literal("\u001b") ||
+      path.contains_literal("\u007f"); then return false; fi
     return true;
   }
 end

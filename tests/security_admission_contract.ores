@@ -1,0 +1,52 @@
+import module proxy_yaml from "../src/proxy_yaml";
+import module header_policy from "../src/header_policy";
+import module proxy_wire from "../src/proxy_wire";
+import module config_path from "../src/config_path";
+
+pub routine main(): int {
+  if proxy_yaml.valid_identifier("header,spoof") ||
+    proxy_yaml.valid_identifier("mixed Case") ||
+    proxy_yaml.valid_identifier("auth:deny") ||
+    !proxy_yaml.valid_identifier("route-v1"); then
+    stdio.println("FAIL canonical middleware and route identifiers"); return 1;
+  fi
+  if !proxy_yaml.valid_upstream_origin("http://127.0.0.1:9000") ||
+    proxy_yaml.valid_upstream_origin("http://999.999.999.999:9000") ||
+    proxy_yaml.valid_upstream_origin("http://127.0.0.01:9000") ||
+    proxy_yaml.valid_upstream_origin("http://192.168.1.1:8080") ||
+    proxy_yaml.valid_upstream_origin("http://127.1:9000"); then
+    stdio.println("FAIL ambiguous IPv4 authority"); return 1;
+  fi
+  if header_policy.request_copy("expect", "100-continue", "") ||
+    header_policy.request_copy("range", "bytes=0-9", "") ||
+    header_policy.request_copy("content-encoding", "gzip", "") ||
+    header_policy.request_copy("digest", "sha-256=bogus", ""); then
+    stdio.println("FAIL unsound body/framing metadata forwarding"); return 1;
+  fi
+  if proxy_wire.reverse("GET /api;admin HTTP/1.1", "api.example.test").is_ok() ||
+    proxy_wire.connect("CONNECT api.example.test:443 HTTP/1.1",
+      "api.example.test:443\u0000ignored").is_ok() ||
+    config_path.valid("/etc/proxy\u001b[31m.yaml"); then
+    stdio.println("FAIL control or separator admission"); return 1;
+  fi
+
+  val String yaml = "version: ores.proxy/v1\nmode: reverse\nlisten:\n  host: 127.0.0.1\n  port: 8080\nruntime:\n  carriers: 20\n  actors: 100\n  max_inflight: 1024\n" +
+    "middleware:\n  - name: guard\n    kind: require_header\n    header: x-token\nroutes:\n  - name: api\n    host: api.example.test\n    path_prefix: /api\n    upstream: http://127.0.0.1:9000\n    middleware: guard\n";
+  if proxy_yaml.parse(yaml, "reverse").is_err(); then
+    stdio.println("FAIL safe baseline"); return 1;
+  fi
+  if proxy_yaml.parse(yaml.replace_literal("header: x-token",
+      "header: authorization"), "reverse").is_ok() ||
+    proxy_yaml.parse(yaml.replace_literal("header: x-token",
+      "header: content-length"), "reverse").is_ok() ||
+    proxy_yaml.parse(yaml.replace_literal("- name: guard",
+      "- name: guard,other"), "reverse").is_ok() ||
+    proxy_yaml.parse(yaml.replace_literal("- name: api",
+      "- name: route admin"), "reverse").is_ok() ||
+    proxy_yaml.parse(yaml.replace_literal("upstream: http://127.0.0.1:9000",
+      "upstream: http://999.999.999.999:9000"), "reverse").is_ok(); then
+    stdio.println("FAIL forbidden YAML authority/policy identifiers"); return 1;
+  fi
+  stdio.println("PASS native reverse security admission contract");
+  return 0;
+}
