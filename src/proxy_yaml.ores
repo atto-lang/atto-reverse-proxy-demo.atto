@@ -61,9 +61,39 @@ define module proxy_yaml as
     return true;
   }
 
+
+  // Syntax validation only: transport must still pin resolved IPs.
+  pub fnc valid_domain(String domain): bool {
+    if domain == "" || domain.starts_with(".") || domain.ends_with(".") ||
+      domain.contains_literal(".."); then return false; fi
+    let int labels = 0;
+    for (const label of domain.split_literal(".")) {
+      if label == "" || label.starts_with("-") || label.ends_with("-"); then
+        return false;
+      fi
+      val String residue = label
+        .replace_literal("a", "").replace_literal("b", "").replace_literal("c", "")
+        .replace_literal("d", "").replace_literal("e", "").replace_literal("f", "")
+        .replace_literal("g", "").replace_literal("h", "").replace_literal("i", "")
+        .replace_literal("j", "").replace_literal("k", "").replace_literal("l", "")
+        .replace_literal("m", "").replace_literal("n", "").replace_literal("o", "")
+        .replace_literal("p", "").replace_literal("q", "").replace_literal("r", "")
+        .replace_literal("s", "").replace_literal("t", "").replace_literal("u", "")
+        .replace_literal("v", "").replace_literal("w", "").replace_literal("x", "")
+        .replace_literal("y", "").replace_literal("z", "").replace_literal("-", "")
+        .replace_literal("0", "").replace_literal("1", "").replace_literal("2", "")
+        .replace_literal("3", "").replace_literal("4", "").replace_literal("5", "")
+        .replace_literal("6", "").replace_literal("7", "").replace_literal("8", "")
+        .replace_literal("9", "");
+      if residue != ""; then return false; fi
+      labels = labels + 1;
+    }
+    return labels >= 2;
+  }
+
   fnc validate_route(String name, String host, String prefix, String upstream,
                      String chain): Result<Route, String> {
-    if !safe_scalar(name) || !safe_scalar(host) || !safe_scalar(prefix) ||
+    if !safe_scalar(name) || !valid_domain(host) || !safe_scalar(prefix) ||
       !safe_scalar(upstream); then
       return Err("route requires safe name, host, path_prefix, upstream");
     fi
@@ -131,10 +161,10 @@ define module proxy_yaml as
 
     for (const original of yaml.split_literal("\n")) {
       val String line = original.trim();
-      if line == "" || line.starts_with("#"); then continue; fi
       if original.contains_literal("\r") || original.contains_literal("\t"); then
         return Err("CR and tabs are forbidden; use LF and spaces");
       fi
+      if line == "" || line.starts_with("#"); then continue; fi
       if original.starts_with("  - "); then
         if section == "routes"; then
           if rn != ""; then
@@ -318,10 +348,12 @@ define module proxy_yaml as
         !safe_scalar(allowed) || connect != "443"; then
         return Err("forward mode requires deny_private=true, allow_domains and connect_ports=443");
       fi
-      if allowed.contains_literal("://") || allowed.contains_literal("@") ||
-        allowed.contains_literal("/") || allowed.contains_literal("*"); then
-        return Err("forward allow_domains must contain DNS names only");
-      fi
+      // Every token must be syntactically admissible; empty entries fail.
+      for (const item of allowed.split_literal(",")) {
+        if !valid_domain(item); then
+          return Err("allow_domains requires canonical ASCII DNS names");
+        fi
+      }
     fi
 
     for (const route of routes) {
