@@ -93,3 +93,19 @@ jobs:
           oreslang tests/data_layout_contract.ores
           oreslang tests/slot_lifecycle_contract.ores
           oreslang tests/slot_pool_contract.ores
+
+      - name: Compiler-check actor service, LB, rate and circuit modules
+        run: |
+          oreslang --check src/service_bindings.ores
+          oreslang --check src/load_balancer.ores
+          oreslang --check src/traffic_controls.ores
+          oreslang --check tests/service_bindings_contract.ores
+          oreslang --check tests/load_balancer_contract.ores
+          oreslang --check tests/traffic_controls_contract.ores
+      - name: Execute actor service, LB, rate and circuit contracts
+        run: |
+          oreslang tests/service_bindings_contract.ores
+          oreslang tests/load_balancer_contract.ores
+          oreslang tests/traffic_controls_contract.ores
+      - name: Compiler-check opt-in local actor-service real TCP client
+        run: oreslang --check tests/actor_ingress_tcp_smoke.ores
