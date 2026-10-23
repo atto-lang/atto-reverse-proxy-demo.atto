@@ -169,7 +169,8 @@ define module proxy_yaml as
       prefix.contains_literal("?") || prefix.contains_literal("//") ||
       prefix.contains_literal("%") || prefix.contains_literal(";") ||
       prefix.contains_literal("/./") || prefix.contains_literal("/../") ||
-      prefix.ends_with("/.") || prefix.ends_with("/.."); then
+      prefix.ends_with("/.") || prefix.ends_with("/..") ||
+      (prefix != "/" && prefix.ends_with("/")); then
       return Err("route path_prefix must be a canonical absolute path");
     fi
     if !valid_upstream_origin(upstream); then
