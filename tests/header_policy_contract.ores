@@ -35,7 +35,11 @@ pub routine main(): int {
     header_policy.response_action("x-extra", "ok", "x-extra").unwrap() != "drop" ||
     !header_policy.response_action("x-extra", "ok", "x-extra, bad\r\nInjected").is_err() ||
     !header_policy.response_action("x-extra", "ok", "x-extra, bad\tvalue").is_err() ||
-    !header_policy.response_action("x-extra", "ok", "x-extra, bad\u0000value").is_err(); then
+    !header_policy.response_action("x-extra", "ok", "x-extra, bad\u0000value").is_err() ||
+    !header_policy.response_action("x-extra", "ok", "x-extra, bad\u2003value").is_err() ||
+    header_policy.value_safe("safe\u000bunsafe") ||
+    header_policy.value_safe("safe\u000cunsafe") ||
+    header_policy.value_safe("safe\u007funsafe"); then
     stdio.println("FAIL explicit response action"); return 1;
   fi
   stdio.println("PASS canonical header policy (raw wire parser still required)");
