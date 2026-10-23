@@ -126,14 +126,14 @@ pub async routine main(): int {
         continue;
       fi
       if bound.unwrap().target == "hello-v1"; then
-        hello.dispatch(exchange);
+        hello.dispatch(rt borrow mut exchange);
       else
         await exchange.respond(501, "text/plain; charset=utf-8",
           "Actor image not registered in this demonstration");
       fi
       continue;
     fi
-    unavailable.dispatch(exchange);
+    unavailable.dispatch(rt borrow mut exchange);
   }
   return 0;
 }
