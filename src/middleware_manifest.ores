@@ -82,12 +82,10 @@ define module middleware_manifest as
     if snapshot.configuration.mode != "reverse"; then
       return Err("route binding requires reverse mode");
     fi
-    for (const route of snapshot.configuration.routes) {
-      if route.host == host &&
-        route_policy.prefix_match(route.path_prefix, path); then
-        return bind(snapshot, route.name, route.middleware);
-      fi
-    }
-    return Err("no reverse route for middleware binding");
+    // Use the most-specific configured route, not YAML declaration order.
+    val selected = route_policy.select(rt borrow snapshot.configuration, host, path);
+    if selected.is_err(); then return Err("no reverse route for middleware binding"); fi
+    val route = selected.unwrap();
+    return bind(snapshot, route.name, route.middleware);
   }
 end

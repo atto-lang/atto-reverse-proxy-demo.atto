@@ -2,6 +2,7 @@
 // It validates YAML but DOES NOT start a proxy listener or claim forwarding.
 // flags-2-env is invoked by the external CLI caller; this file uses the env ABI.
 import module proxy_yaml from "./proxy_yaml";
+import module config_path from "./config_path";
 
 pub routine main(): int {
   val selected = env.get("ores_proxy_conf_yaml");
@@ -13,6 +14,10 @@ pub routine main(): int {
   if path == ""; then
     stdio.println("ERROR: empty ores_proxy_conf_yaml");
     return 64;
+  fi
+  if !config_path.valid(path); then
+    stdio.println("ERROR: ores_proxy_conf_yaml must name a canonical absolute POSIX path");
+    return 65;
   fi
   try {
     if fs.is_symlink(path); then

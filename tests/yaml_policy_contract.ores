@@ -31,6 +31,78 @@ pub routine main(): int {
   if proxy_yaml.parse(document + "  # trailing comment\r\n", "reverse").is_ok(); then
     stdio.println("FAIL CR on comment"); return 1;
   fi
+  // A bounded native parser must not walk arbitrarily many comment lines.
+  let String padding = "# bounded comment\n";
+  for (let i = 0; i < 12; i++) {
+    padding = padding + padding;
+  }
+  if proxy_yaml.parse(document + padding, "reverse").is_ok(); then
+    stdio.println("FAIL YAML line budget"); return 1;
+  fi
+  // Syntax checks are configuration admission only: transport must still
+  // enforce HTTP framing, pinned resolution, port bounds and TLS validation.
+  if !proxy_yaml.valid_upstream_origin("https://api.example.test:443") ||
+    !proxy_yaml.valid_upstream_origin("http://127.0.0.1:9000") ||
+    !proxy_yaml.valid_upstream_origin("http://localhost:8080"); then
+    stdio.println("FAIL canonical upstream origin"); return 1;
+  fi
+  if proxy_yaml.valid_upstream_origin("http://") ||
+    proxy_yaml.valid_upstream_origin("http:///admin") ||
+    proxy_yaml.valid_upstream_origin("http://api.example.test/admin") ||
+    proxy_yaml.valid_upstream_origin("http://user@api.example.test") ||
+    proxy_yaml.valid_upstream_origin("http://api.example.test%2Fadmin") ||
+    proxy_yaml.valid_upstream_origin("http://api.example.test:0") ||
+    proxy_yaml.valid_upstream_origin("ftp://api.example.test"); then
+    stdio.println("FAIL ambiguous upstream authority"); return 1;
+  fi
+  if !proxy_yaml.valid_header_name("x-trace-id") ||
+    proxy_yaml.valid_header_name("X-Trace-ID") ||
+    proxy_yaml.valid_header_name("x_trace") ||
+    proxy_yaml.valid_header_name("x-header:forged") ||
+    proxy_yaml.valid_header_name("-bad"); then
+    stdio.println("FAIL canonical policy header"); return 1;
+  fi
+  if proxy_yaml.parse(document.replace_literal("path_prefix: /api",
+      "path_prefix: /api/../admin"), "reverse").is_ok() ||
+    proxy_yaml.parse(document.replace_literal("path_prefix: /api",
+      "path_prefix: /api%2Fadmin"), "reverse").is_ok() ||
+    proxy_yaml.parse(document.replace_literal("path_prefix: /api",
+      "path_prefix: /api/"), "reverse").is_ok() ||
+    proxy_yaml.parse(document.replace_literal("upstream: http://127.0.0.1:9000",
+      "upstream: http://127.0.0.1:9000/steal"), "reverse").is_ok() ||
+    proxy_yaml.parse(document.replace_literal("header: x-token",
+      "header: X-Token"), "reverse").is_ok(); then
+    stdio.println("FAIL reverse proxy origin/path/header admission"); return 1;
+  fi
+  // Most-specific prefix must win even when the broad route appears first.
+  val String admin = "  - name: admin\n    host: app.example.test\n    path_prefix: /api/admin\n    upstream: http://127.0.0.1:9001\n    middleware: guard\n";
+  val first_broad = proxy_yaml.parse(document + admin, "reverse");
+  if first_broad.is_err(); then
+    stdio.println("FAIL nested route admission"); return 1;
+  fi
+  val broad_snapshot = first_broad.unwrap();
+  val chosen = route_policy.select(rt borrow broad_snapshot,
+      "app.example.test", "/api/admin/users");
+  if chosen.is_err() || chosen.unwrap().name != "admin"; then
+    stdio.println("FAIL most-specific route selection"); return 1;
+  fi
+  val unprivileged = route_policy.select(rt borrow broad_snapshot,
+      "app.example.test", "/api/users");
+  if unprivileged.is_err() || unprivileged.unwrap().name != "app"; then
+    stdio.println("FAIL broad route selection"); return 1;
+  fi
+  val String original_item = "  - name: app\n";
+  val first_specific = proxy_yaml.parse(document.replace_literal(original_item,
+      admin + original_item), "reverse");
+  if first_specific.is_err(); then
+    stdio.println("FAIL reversed route order"); return 1;
+  fi
+  val specific_snapshot = first_specific.unwrap();
+  val reversed = route_policy.select(rt borrow specific_snapshot,
+      "app.example.test", "/api/admin/users");
+  if reversed.is_err() || reversed.unwrap().name != "admin"; then
+    stdio.println("FAIL order-independent longest prefix"); return 1;
+  fi
   stdio.println("PASS native reverse YAML/policy contract");
   return 0;
 }

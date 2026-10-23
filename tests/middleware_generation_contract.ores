@@ -1,0 +1,31 @@
+// Pure snapshot test only. NO listener, running actor, atomic swap or live hot reload.
+import module proxy_yaml from "../src/proxy_yaml";
+import module middleware_policy from "../src/middleware_policy";
+
+pub routine main(): int {
+  val String config = "version: ores.proxy/v1\nmode: reverse\nlisten:\n  host: 127.0.0.1\n  port: 8080\nruntime:\n  carriers: 20\n  actors: 100\n  max_inflight: 1024\n" +
+    "middleware:\n  - name: gate\n    kind: trace\nroutes:\n  - name: service\n    host: service.example.test\n    path_prefix: /\n    upstream: http://127.0.0.1:9000\n    middleware: gate\n";
+
+  val old_result = proxy_yaml.parse(config, "reverse");
+  val next_result = proxy_yaml.parse(config.replace_literal("kind: trace", "kind: deny"), "reverse");
+  if old_result.is_err() || next_result.is_err(); then
+    stdio.println("FAIL snapshot admission"); return 1;
+  fi
+  val before = old_result.unwrap();
+  val after = next_result.unwrap();
+  if !middleware_policy.evaluate(rt borrow before, "gate", "", "").unwrap(); then
+    stdio.println("FAIL old policy initially allowed"); return 1;
+  fi
+  if middleware_policy.evaluate(rt borrow after, "gate", "", "").unwrap(); then
+    stdio.println("FAIL candidate deny policy"); return 1;
+  fi
+  // Parsing another generation may not mutate the already-admitted snapshot.
+  if !middleware_policy.evaluate(rt borrow before, "gate", "", "").unwrap(); then
+    stdio.println("FAIL old snapshot changed when candidate parsed"); return 1;
+  fi
+  if proxy_yaml.parse(config.replace_literal("kind: trace", "kind: unsupported"), "reverse").is_ok(); then
+    stdio.println("FAIL unsupported middleware candidate admitted"); return 1;
+  fi
+  stdio.println("PASS reverse independent middleware generations (pure policy)");
+  return 0;
+}

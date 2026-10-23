@@ -31,7 +31,7 @@ define module generation as
       return Ok(new Snapshot(self.epoch_value, parsed.unwrap()));
     }
 
-    pub fnc prepare(mut self)(String candidate): Result<bool, String> {
+    pub prepare(String candidate): Result<bool, String> {
       if self.pending; then return Err("generation already prepared"); fi
       val parsed = proxy_yaml.parse(candidate, self.mode);
       if parsed.is_err(); then return Err("invalid candidate config"); fi
@@ -43,7 +43,7 @@ define module generation as
     // Real proxy publication requires readiness, HTTP admission pointer swap,
     // request generation pinning and bounded actor drain OUTSIDE this class.
     // Callers must not treat publication of these pure values as a live reload.
-    pub fnc publish(mut self)(int expected_epoch): Result<Snapshot, String> {
+    pub publish(int expected_epoch): Result<Snapshot, String> {
       if !self.pending; then return Err("no prepared generation"); fi
       if expected_epoch != self.epoch_value; then
         return Err("stale generation compare-and-swap token");
@@ -60,7 +60,7 @@ define module generation as
       return Ok(new Snapshot(self.epoch_value, parsed.unwrap()));
     }
 
-    pub fnc abort(mut self)(): Result<bool, String> {
+    pub abort(): Result<bool, String> {
       if !self.pending; then return Err("no staged config"); fi
       self.prepared_yaml = "";
       self.pending = false;
