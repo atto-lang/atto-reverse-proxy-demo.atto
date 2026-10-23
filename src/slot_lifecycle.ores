@@ -1,0 +1,146 @@
+// Pure single-slot lifecycle model used to specify actor-owned SoA/AoSoA
+// retirement. No native arena, socket, thread or mutable cross-actor state.
+// Transitions allocate immutable reference snapshots; NOT a transport hot path.
+// Actual slab implementation must preserve these semantics in packed columns.
+define module slot_lifecycle as
+  // 0 = FREE, 1 = OPEN, 2 = RETIRING. Never recycle while claims remain.
+  pub define class Ticket as
+    pub val int incarnation;
+    pub val int epoch;
+    pub constructor(int incarnation, int epoch) {
+      self.incarnation = incarnation;
+      self.epoch = epoch;
+    }
+  end
+
+  pub define class Claim as
+    pub val int incarnation;
+    pub val int epoch;
+    pub val int serial;
+    pub constructor(int incarnation, int epoch, int serial) {
+      self.incarnation = incarnation;
+      self.epoch = epoch;
+      self.serial = serial;
+    }
+  end
+
+  pub define class Slot as
+    pub val int incarnation;
+    pub val int epoch;
+    pub val int phase;
+    pub val int next_serial;
+    val Array<int> claims;
+
+    pub constructor(int incarnation, int epoch, int phase, int next_serial,
+                    Array<int> claims) {
+      self.incarnation = incarnation;
+      self.epoch = epoch;
+      self.phase = phase;
+      self.next_serial = next_serial;
+      self.claims = claims;
+    }
+
+    pub outstanding(): int { return self.claims.size; }
+    pub reusable(): bool { return self.phase == 0 && self.claims.size == 0; }
+    pub quiescent(): bool { return self.reusable(); }
+
+    pub ticket(): Ticket {
+      return new Ticket(self.incarnation, self.epoch);
+    }
+
+    pub owns(Ticket ticket): bool {
+      return ticket.incarnation > 0 &&
+        ticket.incarnation == self.incarnation && ticket.epoch == self.epoch;
+    }
+
+    // New incarnation on every slot reuse; never reset to 1 or wrap.
+    pub fnc reserve(int next_epoch): Result<Slot, String> {
+      if !self.reusable(); then return Err("slot still in use"); fi
+      if next_epoch <= 0; then return Err("invalid config epoch"); fi
+      if self.incarnation >= 2147483646; then
+        return Err("slot incarnation exhausted");
+      fi
+      return Ok(new Slot(self.incarnation + 1, next_epoch, 1, 1,
+        new Array<int>()));
+    }
+
+    // A separate claim for each in-flight async operation prevents late
+    // or duplicate producer completion from reclaiming somebody else's pin.
+    pub fnc pin(Ticket ticket): Result<Pinned, String> {
+      if !self.owns(ticket) || self.phase != 1; then
+        return Err("pin requires active matching slot");
+      fi
+      if self.claims.size >= 64 || self.next_serial >= 2147483646; then
+        return Err("pin capacity or serial exhausted");
+      fi
+      let mut Array<int> next_claims = new Array<int>();
+      for (const value of self.claims) { next_claims.add(value); }
+      val int serial = self.next_serial;
+      next_claims.add(serial);
+      return Ok(new Pinned(
+        new Slot(self.incarnation, self.epoch, 1, serial + 1, next_claims),
+        new Claim(self.incarnation, self.epoch, serial)));
+    }
+
+    // Close/cancel is idempotent for one ticket; get_done() can resolve
+    // only once all claims are acknowledged or explicitly reclaimed.
+    pub fnc close(Ticket ticket): Result<Slot, String> {
+      if !self.owns(ticket); then return Err("stale close ticket"); fi
+      if self.phase == 0 || self.phase == 2; then
+        return Ok(self.clone_state());
+      fi
+      val int next_phase = 2;
+      if self.claims.size == 0; then next_phase = 0; fi
+      return Ok(new Slot(self.incarnation, self.epoch, next_phase,
+        self.next_serial, self.copy_claims()));
+    }
+
+    // An acknowledgement consumes its precise serial exactly once.
+    // Late, repeated, forged or prior-incarnation claims fail closed.
+    pub fnc settle(Claim claim): Result<Slot, String> {
+      if claim.incarnation != self.incarnation || claim.epoch != self.epoch ||
+        claim.serial <= 0; then
+        return Err("stale claim receipt");
+      fi
+      let mut Array<int> remainder = new Array<int>();
+      let bool found = false;
+      for (const value of self.claims) {
+        if value == claim.serial; then
+          found = true;
+        else
+          remainder.add(value);
+        fi
+      }
+      if !found; then return Err("duplicate or unknown claim completion"); fi
+      val int pending = remainder.size;
+      let int next_phase = self.phase;
+      if next_phase == 2 && pending == 0; then next_phase = 0; fi
+      return Ok(new Slot(self.incarnation, self.epoch, next_phase,
+        self.next_serial, remainder));
+    }
+
+    fnc copy_claims(): Array<int> {
+      let mut Array<int> copied = new Array<int>();
+      for (const value of self.claims) { copied.add(value); }
+      return copied;
+    }
+
+    fnc clone_state(): Slot {
+      return new Slot(self.incarnation, self.epoch, self.phase,
+        self.next_serial, self.copy_claims());
+    }
+  end
+
+  pub define class Pinned as
+    pub val Slot state;
+    pub val Claim claim;
+    pub constructor(Slot state, Claim claim) {
+      self.state = state;
+      self.claim = claim;
+    }
+  end
+
+  pub fnc empty(): Slot {
+    return new Slot(0, 0, 0, 1, new Array<int>());
+  }
+end
