@@ -67,6 +67,7 @@ define module proxy_yaml as
     if domain == "" || domain.starts_with(".") || domain.ends_with(".") ||
       domain.contains_literal(".."); then return false; fi
     let int labels = 0;
+    let bool has_letter = false;
     for (const label of domain.split_literal(".")) {
       if label == "" || label.starts_with("-") || label.ends_with("-"); then
         return false;
@@ -86,9 +87,16 @@ define module proxy_yaml as
         .replace_literal("6", "").replace_literal("7", "").replace_literal("8", "")
         .replace_literal("9", "");
       if residue != ""; then return false; fi
+      val String letters = label
+        .replace_literal("-", "")
+        .replace_literal("0", "").replace_literal("1", "").replace_literal("2", "")
+        .replace_literal("3", "").replace_literal("4", "").replace_literal("5", "")
+        .replace_literal("6", "").replace_literal("7", "").replace_literal("8", "")
+        .replace_literal("9", "");
+      if letters != ""; then has_letter = true; fi
       labels = labels + 1;
     }
-    return labels >= 2;
+    return labels >= 2 && has_letter;
   }
 
   fnc validate_route(String name, String host, String prefix, String upstream,
