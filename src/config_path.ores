@@ -1,0 +1,14 @@
+// Lexical POSIX configuration-path admission. NOT race-free filesystem access.
+// Production hostile-path protection requires a scoped openat-style descriptor.
+define module config_path as
+  pub fnc valid(String path): bool {
+    if path == "" || !path.starts_with("/") ||
+      path.ends_with("/") || path.contains_literal("//") ||
+      path.contains_literal("/./") || path.ends_with("/.") ||
+      path.contains_literal("/../") || path.ends_with("/..") ||
+      path.contains_literal("\\") || path.contains_literal("\n") ||
+      path.contains_literal("\r") || path.contains_literal("\t") ||
+      path.contains_literal("\u0000"); then return false; fi
+    return true;
+  }
+end
