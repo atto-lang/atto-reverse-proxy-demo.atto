@@ -162,8 +162,8 @@ define module proxy_yaml as
         else
           return Err("list item outside routes/middleware");
         fi
-        val pair = line.replace_literal("- ", "").split_literal(": ");
-        if pair.size != 2 || pair.get(0) != "name" ||
+        val pair = line.split_literal(": ");
+        if pair.size != 2 || pair.get(0) != "- name" ||
           !safe_scalar(pair.get(1)); then
           return Err("list items must begin with '- name: VALUE'");
         fi

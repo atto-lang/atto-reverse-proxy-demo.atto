@@ -16,7 +16,7 @@ define module route_policy as
       Result<proxy_yaml.Route, String> {
     for (const route of snapshot.routes) {
       if route.host == host && prefix_match(route.path_prefix, path); then
-        return Ok(route);
+        return Ok(new proxy_yaml.Route(route.name, route.host,\n          route.path_prefix, route.upstream, route.middleware));
       fi
     }
     return Err("no configured reverse route");
