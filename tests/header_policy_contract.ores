@@ -1,0 +1,30 @@
+import module header_policy from "../src/header_policy";
+pub routine main(): int {
+  if !header_policy.request_copy("accept", "text/plain", "") ||
+    !header_policy.request_copy("x-request-id", "123", "") ||
+    !header_policy.response_copy("set-cookie", "session=a; Secure", "") ||
+    !header_policy.response_copy("content-type", "text/plain", ""); then
+    stdio.println("FAIL safe header retention"); return 1;
+  fi
+  if header_policy.request_copy("connection", "keep-alive", "") ||
+    header_policy.request_copy("host", "evil.test", "") ||
+    header_policy.request_copy("content-length", "10", "") ||
+    header_policy.request_copy("proxy-authorization", "Basic sensitive", "") ||
+    header_policy.request_copy("authorization", "Bearer secret", "") ||
+    header_policy.request_copy("x-forwarded-for", "127.0.0.1", "") ||
+    header_policy.request_copy("x-custom", "fine", "x-custom, keep-alive") ||
+    header_policy.request_copy("x-custom", "fine", "x-custom,") ||
+    header_policy.request_copy("X-CUSTOM", "fine", "") ||
+    header_policy.request_copy("x-custom", "ok\r\nInjected: yes", "") ||
+    header_policy.request_copy("x:evil", "fine", "") ||
+    header_policy.response_copy("transfer-encoding", "chunked", "") ||
+    header_policy.response_copy("content-length", "200", "") ||
+    header_policy.response_copy("x-custom", "value", "x-custom") ||
+    header_policy.response_copy("x-custom", "value", "x-custom,") ||
+    header_policy.response_copy("content-encoding", "gzip", "") ||
+    header_policy.response_copy("bad name", "x", ""); then
+    stdio.println("FAIL forbidden header"); return 1;
+  fi
+  stdio.println("PASS canonical header policy (raw wire parser still required)");
+  return 0;
+}

@@ -1,0 +1,86 @@
+// Native Oreslang HTTP proxy header admission predicates.
+// Caller MUST perform raw byte parser/framing, duplicate header handling,
+// comma-token parsing and canonical lowercase conversion before invoking this.
+// These helpers NEVER write bytes, authenticate clients or grant network access.
+define module header_policy as
+  fnc token(String key): bool {
+    if key == "" || key.starts_with("-") || key.ends_with("-") ||
+      key.contains_literal(":") || key.contains_literal(" ") ||
+      key.contains_literal("\r") || key.contains_literal("\n") ||
+      key.contains_literal("\t"); then return false; fi
+    val String residue = key
+      .replace_literal("a","").replace_literal("b","").replace_literal("c","")
+      .replace_literal("d","").replace_literal("e","").replace_literal("f","")
+      .replace_literal("g","").replace_literal("h","").replace_literal("i","")
+      .replace_literal("j","").replace_literal("k","").replace_literal("l","")
+      .replace_literal("m","").replace_literal("n","").replace_literal("o","")
+      .replace_literal("p","").replace_literal("q","").replace_literal("r","")
+      .replace_literal("s","").replace_literal("t","").replace_literal("u","")
+      .replace_literal("v","").replace_literal("w","").replace_literal("x","")
+      .replace_literal("y","").replace_literal("z","").replace_literal("-","")
+      .replace_literal("0","").replace_literal("1","").replace_literal("2","")
+      .replace_literal("3","").replace_literal("4","").replace_literal("5","")
+      .replace_literal("6","").replace_literal("7","").replace_literal("8","")
+      .replace_literal("9","");
+    return residue == "";
+  }
+
+  pub fnc canonical_name(String key): bool { return token(key); }
+
+  pub fnc value_safe(String value): bool {
+    return !value.contains_literal("\r") &&
+      !value.contains_literal("\n") &&
+      !value.contains_literal("\u0000") &&
+      !value.contains_literal("\t");
+  }
+
+  // Dynamic Connection hop-by-hop nominations must be normalized and removed
+  // on both request and response. This function additionally rejects malformed
+  // tokens in the nomination list; caller must reject malformed whole message.
+  pub fnc connection_safe(String key, String connection_tokens): bool {
+    if !token(key); then return false; fi
+    if connection_tokens == ""; then return true; fi
+    for (const original of connection_tokens.split_literal(",")) {
+      val String nominated = original.trim();
+      if !token(nominated); then return false; fi
+      if key == nominated; then return false; fi
+    }
+    return true;
+  }
+
+  fnc hop_by_hop(String key): bool {
+    return key == "connection" || key == "keep-alive" ||
+      key == "proxy-connection" || key == "te" ||
+      key == "trailer" || key == "transfer-encoding" ||
+      key == "upgrade" || key == "http2-settings" ||
+      key == "proxy-authenticate" || key == "proxy-authorization";
+  }
+
+  // Do not copy Host or framing from inbound traffic. The future source-level
+  // adapter will synthesize Host/SNI and Content-Length/TE from the validated
+  // upstream, and owns exact response/body/trailer consistency.
+  pub fnc request_copy(String key, String value,
+                       String connection_tokens): bool {
+    if !connection_safe(key, connection_tokens) || !value_safe(value) ||
+      hop_by_hop(key) || key == "host" ||
+      key == "content-length" || key == "authorization" ||
+      key == "cookie" || key == "forwarded" ||
+      key == "x-forwarded-for" || key == "x-forwarded-host" ||
+      key == "x-forwarded-proto" || key == "via"; then
+      return false;
+    fi
+    return true;
+  }
+
+  // Multiple Set-Cookie lines must remain independent; callers cannot use
+  // this scalar helper to coalesce them or make framing decisions.
+  pub fnc response_copy(String key, String value,
+                        String connection_tokens): bool {
+    if !connection_safe(key, connection_tokens) || !value_safe(value) ||
+      hop_by_hop(key) || key == "content-length" || key == "server" ||
+      key == "date" || key == "content-encoding"; then
+      return false;
+    fi
+    return true;
+  }
+end
