@@ -29,9 +29,14 @@ define module middleware_manifest as
     // supply canonical, complete headers and enforce the result before dispatch.
     pub permitted(String header, String value): bool {
       for (const rule of self.steps) {
+        if rule.kind == "trace"; then continue; fi
         if rule.kind == "deny"; then return false; fi
-        if rule.kind == "require_header" &&
-          (rule.header != header || value == ""); then return false; fi
+        if rule.kind == "require_header"; then
+          if rule.header != header || value == ""; then return false; fi
+          continue;
+        fi
+        // Unexpected/forged policy kinds never pass through by default.
+        return false;
       }
       return true;
     }
@@ -48,6 +53,15 @@ define module middleware_manifest as
         for (const definition of snapshot.configuration.middleware) {
           if definition.name == id; then
             if found; then return Err("ambiguous middleware identifier"); fi
+            if !(definition.kind == "trace" || definition.kind == "deny" ||
+              definition.kind == "require_header"); then
+              return Err("unknown middleware kind");
+            fi
+            for (const existing of steps) {
+              if existing.name == id; then
+                return Err("duplicate middleware in pipeline");
+              fi
+            }
             steps.add(new proxy_yaml.Middleware(
               definition.name, definition.kind, definition.header));
             found = true;
