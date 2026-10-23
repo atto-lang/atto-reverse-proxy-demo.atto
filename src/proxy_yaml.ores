@@ -3,6 +3,7 @@
 // includes or inline comments. This is not a general-purpose YAML 1.2 parser.
 // Configuration is NEVER a raw network authority: adapters enforce separate
 // canonicalization, DNS/IP admission, framing and TLS/CONNECT policies.
+import module header_policy from "./header_policy";
 define module proxy_yaml as
   pub define class Middleware as
     pub val String name;
@@ -189,8 +190,9 @@ define module proxy_yaml as
       return Err("unsupported middleware kind");
     fi
     if kind == "require_header"; then
-      if !valid_header_name(header); then
-        return Err("require_header needs a canonical header name");
+      if !valid_header_name(header) ||
+        !header_policy.middleware_header_allowed(header); then
+        return Err("require_header needs a safe canonical end-to-end field");
       fi
     else
       if header != ""; then return Err("header only applies to require_header"); fi
