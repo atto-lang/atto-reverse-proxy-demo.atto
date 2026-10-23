@@ -1,0 +1,58 @@
+// Compile a YAML backend pool into an immutable per-generation choice plan.
+// No DNS lookup, network capability, live health probing or socket admission.
+// Runtime ownership: a trusted actor later applies live health/active quotas,
+// then binds the chosen origin to a separately authorized egress capability.
+import module generation from "./generation";
+import module proxy_yaml from "./proxy_yaml";
+import module route_policy from "./route_policy";
+import module load_balancer from "./load_balancer";
+
+define module backend_pools as
+  fnc weight(String text): int {
+    if text == "1"; then return 1; fi
+    if text == "2"; then return 2; fi
+    if text == "3"; then return 3; fi
+    if text == "4"; then return 4; fi
+    if text == "5"; then return 5; fi
+    if text == "10"; then return 10; fi
+    return 0;
+  }
+
+  pub fnc choose(borrow generation.Snapshot snapshot, String pool,
+                 String algorithm, int cursor): Result<load_balancer.Choice, String> {
+    if !proxy_yaml.valid_identifier(pool); then
+      return Err("invalid pool identifier");
+    fi
+    let Array<load_balancer.Backend> entries = new Array<load_balancer.Backend>();
+    for (const entry of snapshot.configuration.backends) {
+      if entry.pool == pool; then
+        val int w = weight(entry.weight);
+        if w == 0 || !proxy_yaml.valid_upstream_origin(entry.origin); then
+          return Err("invalid backend origin or weight");
+        fi
+        entries.add(new load_balancer.Backend(entry.name,
+          entry.origin, w, 0, true, false));
+      fi
+    }
+    // The weights are used for a *stateless planned rotation*, not actual
+    // TCP load balancing: live in-flight counts and health are not wired.
+    return load_balancer.choose(entries, algorithm, cursor);
+  }
+
+  pub fnc reverse_route(borrow generation.Snapshot snapshot,
+                        String host, String path, String algorithm, int cursor):
+      Result<load_balancer.Choice, String> {
+    if snapshot.configuration.mode != "reverse"; then
+      return Err("pool route only valid for reverse proxy");
+    fi
+    val selected = route_policy.select(rt borrow snapshot.configuration, host, path);
+    if selected.is_err(); then return Err("unknown reverse route"); fi
+    val route = selected.unwrap();
+    if !proxy_yaml.valid_pool_ref(route.upstream); then
+      return Err("reverse route has no pool binding");
+    fi
+    val names = route.upstream.split_literal("pool://");
+    if names.size != 2; then return Err("malformed pool reference"); fi
+    return choose(snapshot, names.get(1), algorithm, cursor);
+  }
+end

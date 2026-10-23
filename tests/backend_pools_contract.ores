@@ -1,0 +1,50 @@
+import module proxy_yaml from "../src/proxy_yaml";
+import module generation from "../src/generation";
+import module backend_pools from "../src/backend_pools";
+
+pub routine main(): int {
+  val String doc = "version: ores.proxy/v1\nmode: reverse\nlisten:\n  host: 127.0.0.1\n  port: 8080\nruntime:\n  carriers: 20\n  actors: 100\n  max_inflight: 1024\n" +
+    "backends:\n  - name: blue\n    pool: core\n    origin: https://blue.example.test:443\n    weight: 3\n  - name: green\n    pool: core\n    origin: https://green.example.test:443\n    weight: 1\n" +
+    "routes:\n  - name: api\n    host: api.example.test\n    path_prefix: /\n    upstream: pool://core\n";
+  if proxy_yaml.parse(doc, "reverse").is_err(); then
+    stdio.println("FAIL weighted pool YAML"); return 1;
+  fi
+  val snapshot = generation.open(doc, "reverse").unwrap().snapshot().unwrap();
+  for (let cursor = 0; cursor < 4; cursor++) {
+    val selected = backend_pools.choose(rt borrow snapshot,
+      "core", "weighted-round-robin", cursor);
+    if selected.is_err(); then
+      stdio.println("FAIL backend pool choice"); return 1;
+    fi
+    val chosen = selected.unwrap();
+    if (cursor < 3 && chosen.name != "blue") ||
+      (cursor == 3 && chosen.name != "green"); then
+      stdio.println("FAIL deterministic backend rotation"); return 1;
+    fi
+  }
+  if backend_pools.choose(rt borrow snapshot,
+      "missing", "weighted-round-robin", 0).is_ok(); then
+    stdio.println("FAIL unknown backend pool"); return 1;
+  fi
+  if proxy_yaml.parse(doc.replace_literal("weight: 3", "weight: 1000000"),
+      "reverse").is_ok() ||
+    proxy_yaml.parse(doc.replace_literal("origin: https://green.example.test:443",
+      "origin: http://user@127.0.0.1:8080"), "reverse").is_ok() ||
+    proxy_yaml.parse(doc.replace_literal("- name: green",
+      "- name: blue"), "reverse").is_ok() ||
+    proxy_yaml.parse(doc.replace_literal("pool: core",
+      "pool: arbitrary/path"), "reverse").is_ok(); then
+    stdio.println("FAIL malformed backend pool admission"); return 1;
+  fi
+  val direct = backend_pools.reverse_route(rt borrow snapshot,
+      "api.example.test", "/other", "least-active", 0);
+  if direct.is_err() || direct.unwrap().name != "blue"; then
+    stdio.println("FAIL pool route binding"); return 1;
+  fi
+  if proxy_yaml.parse(doc.replace_literal("pool://core", "pool://missing"),
+      "reverse").is_ok(); then
+    stdio.println("FAIL dangling pool reference"); return 1;
+  fi
+  stdio.println("PASS native reverse YAML backend pool contracts (no sockets)");
+  return 0;
+}
