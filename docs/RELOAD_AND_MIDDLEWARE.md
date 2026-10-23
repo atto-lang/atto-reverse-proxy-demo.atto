@@ -1,6 +1,6 @@
 # Reload, actors and middleware: proposed native Oreslang contract
 
-**Implementation status:** the current `src/proxy_yaml.ores`, `src/route_policy.ores` and `src/middleware_policy.ores` are pure control-plane candidates. Neither repo has a serving data plane, an atomic generation publisher, streaming forwarding or a running reload manager. `tests/middleware_generation_contract.ores` checks two separately parsed policy snapshots only.
+**Implementation status:** the current `src/proxy_yaml.ores`, `src/route_policy.ores` and `src/middleware_policy.ores` are pure control-plane candidates; `src/generation.ores` also models single-writer prepare/publish/abort epoch fencing without changing a live listener. Neither repo has a serving data plane, an atomic generation publisher, streaming forwarding or a running reload manager. `tests/middleware_generation_contract.ores` checks two separately parsed policy snapshots only.
 
 ## Runtime topology
 
