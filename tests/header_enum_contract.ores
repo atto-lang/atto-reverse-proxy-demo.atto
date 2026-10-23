@@ -1,0 +1,77 @@
+// Pure Oreslang regression for the staged closed HeaderName vocabulary.
+// The wire parser still owns framing, name normalization and duplicates.
+import module header_policy from "../src/header_policy";
+
+fnc stripped(String name): bool {
+  if header_policy.request_copy(name, "ok", "") ||
+    header_policy.response_copy(name, "ok", ""); then
+    return false;
+  fi
+  return header_policy.response_action(name, "ok", "").unwrap() == "drop";
+}
+
+fnc request_only_blocked(String name): bool {
+  return !header_policy.request_copy(name, "ok", "");
+}
+
+pub routine main(): int {
+  // Standard hop-by-hop, legacy proxy, and HTTP/2 upgrade advisory fields.
+  if !stripped("connection") || !stripped("keep-alive") ||
+    !stripped("proxy-connection") || !stripped("te") ||
+    !stripped("trailer") || !stripped("transfer-encoding") ||
+    !stripped("upgrade") || !stripped("http2-settings"); then
+    stdio.println("FAIL fixed hop-by-hop classification"); return 1;
+  fi
+
+  // Proxy authentication has a distinct classification but remains stripped
+  // under the existing conservative copy policy.
+  if !stripped("proxy-authenticate") ||
+    !stripped("proxy-authorization"); then
+    stdio.println("FAIL proxy authentication boundaries"); return 1;
+  fi
+
+  // Request-only sensitive and synthesized headers are not forwarded.
+  if !request_only_blocked("host") ||
+    !request_only_blocked("content-length") ||
+    !request_only_blocked("authorization") ||
+    !request_only_blocked("cookie") ||
+    !request_only_blocked("forwarded") ||
+    !request_only_blocked("x-forwarded-for") ||
+    !request_only_blocked("x-forwarded-host") ||
+    !request_only_blocked("x-forwarded-proto") ||
+    !request_only_blocked("via"); then
+    stdio.println("FAIL request security classifications"); return 1;
+  fi
+
+  // The response-copy API regenerates framing, and refuses transformations
+  // that would require a body-aware adapter rather than silently copying.
+  if header_policy.response_action("content-length", "4", "").unwrap() != "drop" ||
+    header_policy.response_action("server", "proxy", "").unwrap() != "drop" ||
+    header_policy.response_action("date", "today", "").unwrap() != "drop" ||
+    !header_policy.response_action("content-encoding", "gzip", "").is_err() ||
+    !header_policy.response_action("content-range", "bytes 0-1/2", "").is_err(); then
+    stdio.println("FAIL response framing/body classifications"); return 1;
+  fi
+
+  // Unknown extension names must retain their original validated spelling
+  // for comparison against the dynamic Connection nomination list.
+  if !header_policy.request_copy("x-extension-7", "ok", "") ||
+    !header_policy.response_copy("x-extension-7", "ok", "") ||
+    header_policy.request_copy("x-extension-7", "ok", "x-extension-7") ||
+    header_policy.response_copy("x-extension-7", "ok", "keep-alive, x-extension-7") ||
+    !header_policy.response_action("x-extension-7", "ok", "x-extension-7").is_err() ||
+    header_policy.request_copy("x-extension-7", "ok", "X-Extension-7") ||
+    header_policy.request_copy("X-Extension-7", "ok", "") ||
+    header_policy.request_copy("x-extension-7", "ok", "x-extension-7,,x-next") ||
+    header_policy.response_copy("x-extension-7", "ok\r\nInjected: yes", ""); then
+    stdio.println("FAIL extension names / connection nominations"); return 1;
+  fi
+
+  if !header_policy.response_copy("set-cookie", "a=b", "") ||
+    !header_policy.response_copy("content-type", "text/plain", "") ||
+    header_policy.response_action("x-extra", "ok", "").unwrap() != "keep"; then
+    stdio.println("FAIL safe response preservation"); return 1;
+  fi
+  stdio.println("PASS typed HTTP header policy (wire parser still required)");
+  return 0;
+}
