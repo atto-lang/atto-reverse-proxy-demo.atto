@@ -1,0 +1,79 @@
+// Pure, generation-pinned middleware plan. No network delivery or active swap.
+// The coordinator/supervisor builds one plan per admitted route or actor scope.
+// This class owns a private copy of each referenced immutable rule definition.
+import module proxy_yaml from "./proxy_yaml";
+import module generation from "./generation";
+import module route_policy from "./route_policy";
+
+define module middleware_manifest as
+  pub define class Manifest as
+    pub val int epoch;
+    pub val String scope;
+    val Array<proxy_yaml.Middleware> steps;
+
+    pub constructor(int epoch, String scope, Array<proxy_yaml.Middleware> steps) {
+      self.epoch = epoch;
+      self.scope = scope;
+      self.steps = steps;
+    }
+
+    // Introspection only; the steps array never escapes this class.
+    pub first_kind(): String {
+      for (const rule of self.steps) {
+        return rule.kind;
+      }
+      return "";
+    }
+
+    // Pure admission decision for one header. The eventual HTTP adapter must
+    // supply canonical, complete headers and enforce the result before dispatch.
+    pub permitted(String header, String value): bool {
+      for (const rule of self.steps) {
+        if rule.kind == "deny"; then return false; fi
+        if rule.kind == "require_header" &&
+          (rule.header != header || value == ""); then return false; fi
+      }
+      return true;
+    }
+  end
+
+  // Binding does not fetch live/global middleware; it copies definitions only
+  // from the snapshot supplied by the owner of the request generation.
+  pub fnc bind(borrow generation.Snapshot snapshot, String scope, String chain):
+      Result<Manifest, String> {
+    let mut Array<proxy_yaml.Middleware> steps = new Array<proxy_yaml.Middleware>();
+    if chain != ""; then
+      for (const id of chain.split_literal(",")) {
+        let bool found = false;
+        for (const definition of snapshot.configuration.middleware) {
+          if definition.name == id; then
+            if found; then return Err("ambiguous middleware identifier"); fi
+            steps.add(new proxy_yaml.Middleware(
+              definition.name, definition.kind, definition.header));
+            found = true;
+          fi
+        }
+        if !found; then return Err("unknown middleware identifier"); fi
+      }
+    fi
+    return Ok(new Manifest(snapshot.epoch, scope, steps));
+  }
+
+  // Reverse routes bind at selection time. A new generation creates a new
+  // manifest; an in-flight request must keep its original manifest until done.
+  // Requires canonical Host/path from a future HTTP transport adapter.
+  pub fnc bind_reverse_route(borrow generation.Snapshot snapshot,
+                            String host, String path):
+      Result<Manifest, String> {
+    if snapshot.configuration.mode != "reverse"; then
+      return Err("route binding requires reverse mode");
+    fi
+    for (const route of snapshot.configuration.routes) {
+      if route.host == host &&
+        route_policy.prefix_match(route.path_prefix, path); then
+        return bind(snapshot, route.name, route.middleware);
+      fi
+    }
+    return Err("no reverse route for middleware binding");
+  }
+end
