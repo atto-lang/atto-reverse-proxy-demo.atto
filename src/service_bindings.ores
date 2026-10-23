@@ -1,0 +1,51 @@
+// Workerd-inspired symbolic service binding compiler, native Oreslang only.
+// NOT a network/socket capability and NOT an ActorRef. The trusted supervisor
+// must resolve the target against a pre-approved code image and capability
+// manifest before dispatch. No ambient fetch, FFI or dynamic class lookup.
+import module proxy_yaml from "./proxy_yaml";
+import module generation from "./generation";
+import module route_policy from "./route_policy";
+
+define module service_bindings as
+  pub define class Binding as
+    pub val int epoch;
+    pub val String name;
+    pub val String kind;
+    pub val String target;
+  end
+
+  pub fnc bind(borrow generation.Snapshot snapshot,
+               String service_name): Result<Binding, String> {
+    if !proxy_yaml.valid_identifier(service_name); then
+      return Err("invalid service binding name");
+    fi
+    for (const service of snapshot.configuration.services) {
+      if service.name == service_name; then
+        if service.kind != "actor"; then
+          return Err("unsupported service binding kind");
+        fi
+        return Ok(new Binding(snapshot.epoch, service.name,
+          service.kind, service.target));
+      fi
+    }
+    return Err("undeclared service binding");
+  }
+
+  // Reverse routes can target symbolic local actor services without gaining
+  // network authority. Both route and service are pinned to the SAME snapshot.
+  pub fnc reverse_route(borrow generation.Snapshot snapshot, String host,
+                        String path): Result<Binding, String> {
+    if snapshot.configuration.mode != "reverse"; then
+      return Err("not a reverse proxy configuration");
+    fi
+    val selected = route_policy.select(rt borrow snapshot.configuration, host, path);
+    if selected.is_err(); then return Err("route not found"); fi
+    val route = selected.unwrap();
+    if !proxy_yaml.valid_service_ref(route.upstream); then
+      return Err("route is not a service binding");
+    fi
+    val parts = route.upstream.split_literal("service://");
+    if parts.size != 2; then return Err("malformed local binding"); fi
+    return bind(snapshot, parts.get(1));
+  }
+end
