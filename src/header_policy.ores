@@ -100,7 +100,8 @@ define module header_policy as
                         String connection_tokens): bool {
     if !connection_safe(key, connection_tokens) || !value_safe(value) ||
       hop_by_hop(key) || key == "content-length" || key == "server" ||
-      key == "date" || key == "content-encoding"; then
+      key == "date" || key == "content-encoding" ||
+      key == "content-range"; then
       return false;
     fi
     return true;

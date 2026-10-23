@@ -22,6 +22,7 @@ pub routine main(): int {
     header_policy.response_copy("x-custom", "value", "x-custom") ||
     header_policy.response_copy("x-custom", "value", "x-custom,") ||
     header_policy.response_copy("content-encoding", "gzip", "") ||
+    header_policy.response_copy("content-range", "bytes 0-9/20", "") ||
     header_policy.response_copy("bad name", "x", ""); then
     stdio.println("FAIL forbidden header"); return 1;
   fi
