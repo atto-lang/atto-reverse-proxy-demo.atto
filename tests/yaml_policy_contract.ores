@@ -39,6 +39,39 @@ pub routine main(): int {
   if proxy_yaml.parse(document + padding, "reverse").is_ok(); then
     stdio.println("FAIL YAML line budget"); return 1;
   fi
+  // Syntax checks are configuration admission only: transport must still
+  // enforce HTTP framing, pinned resolution, port bounds and TLS validation.
+  if !proxy_yaml.valid_upstream_origin("https://api.example.test:443") ||
+    !proxy_yaml.valid_upstream_origin("http://127.0.0.1:9000") ||
+    !proxy_yaml.valid_upstream_origin("http://localhost:8080"); then
+    stdio.println("FAIL canonical upstream origin"); return 1;
+  fi
+  if proxy_yaml.valid_upstream_origin("http://") ||
+    proxy_yaml.valid_upstream_origin("http:///admin") ||
+    proxy_yaml.valid_upstream_origin("http://api.example.test/admin") ||
+    proxy_yaml.valid_upstream_origin("http://user@api.example.test") ||
+    proxy_yaml.valid_upstream_origin("http://api.example.test%2Fadmin") ||
+    proxy_yaml.valid_upstream_origin("http://api.example.test:0") ||
+    proxy_yaml.valid_upstream_origin("ftp://api.example.test"); then
+    stdio.println("FAIL ambiguous upstream authority"); return 1;
+  fi
+  if !proxy_yaml.valid_header_name("x-trace-id") ||
+    proxy_yaml.valid_header_name("X-Trace-ID") ||
+    proxy_yaml.valid_header_name("x_trace") ||
+    proxy_yaml.valid_header_name("x-header:forged") ||
+    proxy_yaml.valid_header_name("-bad"); then
+    stdio.println("FAIL canonical policy header"); return 1;
+  fi
+  if proxy_yaml.parse(document.replace_literal("path_prefix: /api",
+      "path_prefix: /api/../admin"), "reverse").is_ok() ||
+    proxy_yaml.parse(document.replace_literal("path_prefix: /api",
+      "path_prefix: /api%2Fadmin"), "reverse").is_ok() ||
+    proxy_yaml.parse(document.replace_literal("upstream: http://127.0.0.1:9000",
+      "upstream: http://127.0.0.1:9000/steal"), "reverse").is_ok() ||
+    proxy_yaml.parse(document.replace_literal("header: x-token",
+      "header: X-Token"), "reverse").is_ok(); then
+    stdio.println("FAIL reverse proxy origin/path/header admission"); return 1;
+  fi
   stdio.println("PASS native reverse YAML/policy contract");
   return 0;
 }
