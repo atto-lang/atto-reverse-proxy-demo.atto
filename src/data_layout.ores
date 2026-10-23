@@ -1,0 +1,140 @@
+// Native Oreslang reference data layouts for proxy hot-path design.
+// NOT a serving socket/HTTP loop and NOT a preallocated or lock-free slab.
+// Every instance is exclusively owned by one actor; never mutate from
+// independent carrier threads. Real engine must reserve/fill a fixed arena.
+define module data_layout as
+  // A handle contains both a slot and an incarnation to reject stale aliases.
+  // This reference model only appends; a reusable slab must advance the
+  // incarnation on every release/reuse and must never wrap to a live handle.
+  pub define class Ticket as
+    pub val int slot;
+    pub val int incarnation;
+    pub val int config_epoch;
+  end
+
+  // AoS is appropriate at a cold API boundary, not as per-request heap
+  // allocations in the transport fast path.
+  pub define class RequestView as
+    pub val int connection_slot;
+    pub val int route_slot;
+    pub val int pending_bytes;
+    pub val int component_mask;
+  end
+
+  // Structure-of-arrays: field-local scans touch just one column.
+  // This is a correctness/reference implementation of the intended packed,
+  // arena-owned columns, not a claim of cache-local native memory on JVM.
+  pub define class SoaRequests as
+    val int capacity;
+    val Array<int> incarnations;
+    val Array<int> config_epochs;
+    val Array<int> connection_slots;
+    val Array<int> route_slots;
+    val Array<int> pending_bytes;
+    val Array<int> component_masks;
+    let int next_incarnation = 1;
+
+    pub constructor(int capacity) {
+      self.capacity = capacity;
+      self.incarnations = new Array<int>();
+      self.config_epochs = new Array<int>();
+      self.connection_slots = new Array<int>();
+      self.route_slots = new Array<int>();
+      self.pending_bytes = new Array<int>();
+      self.component_masks = new Array<int>();
+    }
+
+    pub size(): int { return self.config_epochs.size; }
+
+    // A real bounded ring/slab must reserve the complete slot atomically before
+    // publishing it. This reference appender must remain single-owner only.
+    pub fnc append(mut self)(int epoch, int connection, int route,
+                            int bytes, int mask): Result<Ticket, String> {
+      if self.capacity <= 0 || self.capacity > 65536; then
+        return Err("invalid bounded SoA capacity");
+      fi
+      if self.config_epochs.size >= self.capacity; then
+        return Err("SoA admission capacity exhausted");
+      fi
+      if epoch <= 0 || connection < 0 || route < 0 || bytes < 0 || mask < 0; then
+        return Err("invalid request components");
+      fi
+      if self.next_incarnation >= 2147483647; then
+        return Err("incarnation sequence exhausted");
+      fi
+      val int slot = self.config_epochs.size;
+      val int serial = self.next_incarnation;
+      self.config_epochs.add(epoch);
+      self.connection_slots.add(connection);
+      self.route_slots.add(route);
+      self.pending_bytes.add(bytes);
+      self.component_masks.add(mask);
+      self.incarnations.add(serial);
+      self.next_incarnation = self.next_incarnation + 1;
+      return Ok(new Ticket(slot, serial, epoch));
+    }
+
+    pub accepts(Ticket ticket): bool {
+      if ticket.slot < 0 || ticket.slot >= self.config_epochs.size; then
+        return false;
+      fi
+      return self.incarnations.get(ticket.slot) == ticket.incarnation &&
+        self.config_epochs.get(ticket.slot) == ticket.config_epoch;
+    }
+
+    pub view(Ticket ticket): Result<RequestView, String> {
+      if !self.accepts(ticket); then return Err("stale or invalid request handle"); fi
+      val int slot = ticket.slot;
+      return Ok(new RequestView(self.connection_slots.get(slot),
+        self.route_slots.get(slot), self.pending_bytes.get(slot),
+        self.component_masks.get(slot)));
+    }
+
+    // Single-column scans avoid loading every request's AoS fields.
+    pub count_route(int route): int {
+      let int matched = 0;
+      for (const candidate of self.route_slots) {
+        if candidate == route; then matched = matched + 1; fi
+      }
+      return matched;
+    }
+
+    pub bytes_inflight(): int {
+      let int total = 0;
+      for (const amount of self.pending_bytes) {
+        total = total + amount;
+      }
+      return total;
+    }
+  end
+
+  // AoSoA (array-of-structures-of-arrays) tile arithmetic. A transport engine
+  // can reserve a tile with columns of 32/64 lanes (adjust after measurement).
+  // The pure result does not allocate or write to memory.
+  pub define class TileAddress as
+    pub val int tile;
+    pub val int lane;
+  end
+
+  pub fnc tile_address(int slot, int lanes, int capacity):
+      Result<TileAddress, String> {
+    if slot < 0 || lanes <= 0 || capacity <= 0 || slot >= capacity; then
+      return Err("invalid tile address");
+    fi
+    if lanes != 16 && lanes != 32 && lanes != 64; then
+      return Err("tile lanes must be 16, 32, or 64");
+    fi
+    val int tile = slot / lanes;
+    val int lane = slot % lanes;
+    return Ok(new TileAddress(tile, lane));
+  }
+
+  // ECS-style optional sparse components must check both component presence
+  // and generation identity before dereferencing a connection/request slot.
+  pub fnc ecs_component_live(int expected_incarnation,
+                             int observed_incarnation,
+                             bool component_present): bool {
+    return component_present && expected_incarnation > 0 &&
+      expected_incarnation == observed_incarnation;
+  }
+end
