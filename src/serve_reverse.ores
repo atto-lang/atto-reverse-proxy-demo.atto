@@ -1,11 +1,14 @@
 // Opt-in loopback-only ingress proof. Routes and middleware operate on a
 // single parsed snapshot in the Oreslang supervisor. No outbound proxy call.
-// Always responds 501 to admitted routes, so it cannot masquerade as a proxy.
+// HTTP upstream routes return 501; a pre-approved local actor service can
+// respond through the existing guest HTTP actor adapter. Not a full proxy.
 // This is NOT src/main.ores and is intentionally NOT a production entrypoint.
 import module proxy_yaml from "./proxy_yaml";
 import module proxy_wire from "./proxy_wire";
 import module route_policy from "./route_policy";
 import module config_path from "./config_path";
+import module generation from "./generation";
+import module service_bindings from "./service_bindings";
 
 // Reusable actor lifecycle: pooled handlers return after each request and do
 // not self.end(). HTTP transport owns the FD and single-use claim generation.
@@ -14,6 +17,17 @@ define isoactor UpstreamUnavailable as
     val exchange = http.claim(mail.value);
     await exchange.respond(501, "text/plain; charset=utf-8",
       "Upstream forwarding unavailable in this runtime");
+    return;
+  }
+end
+
+// Pre-registered code image. Only this exact image is bindable in this
+// demonstration. No dynamic eval, unrestricted ActorRef or ambient fetch.
+define isoactor HelloV1 as
+  receive(ActorMail<String> mail): void {
+    val exchange = http.claim(mail.value);
+    await exchange.respond(200, "text/plain; charset=utf-8",
+      "hello from native Oreslang actor service");
     return;
   }
 end
@@ -39,6 +53,7 @@ pub async routine main(): int {
     return 65;
   fi
   val config = parsed.unwrap();
+  val snapshot = new generation.Snapshot(1, config);
 
   // Port conversion and source-configurable bind scopes are not yet admitted.
   // Never accidentally expose this transport proof on a public listener.
@@ -49,8 +64,9 @@ pub async routine main(): int {
   fi
 
   val unavailable = http.handler("UpstreamUnavailable").pooled(100);
+  val hello = http.handler("HelloV1").pooled(100);
   val server = http.listen("127.0.0.1", 8080, 1024, 65536, 30000);
-  stdio.println("INCOMPLETE reverse proxy ingress; loopback only; 501 upstream response");
+  stdio.println("EXPERIMENTAL loopback actor ingress; HTTP upstream forwarding returns 501");
   loop {
     val exchange = await server.accept();
     val String host = exchange.header("Host");
@@ -66,7 +82,8 @@ pub async routine main(): int {
       continue;
     fi
     val target = matched.unwrap();
-    if proxy_wire.upstream_origin(target.upstream).is_err(); then
+    if !proxy_yaml.valid_service_ref(target.upstream) &&
+      proxy_wire.upstream_origin(target.upstream).is_err(); then
       await exchange.respond(502, "text/plain; charset=utf-8", "Invalid upstream origin");
       continue;
     fi
@@ -94,6 +111,22 @@ pub async routine main(): int {
     fi
     if !permit; then
       await exchange.respond(403, "text/plain; charset=utf-8", "Request denied");
+      continue;
+    fi
+    if proxy_yaml.valid_service_ref(target.upstream); then
+      val bound = service_bindings.reverse_route(rt borrow snapshot,
+        host, exchange.target);
+      if bound.is_err(); then
+        await exchange.respond(503, "text/plain; charset=utf-8",
+          "Service binding unavailable");
+        continue;
+      fi
+      if bound.unwrap().target == "hello-v1"; then
+        hello.dispatch(exchange);
+      else
+        await exchange.respond(501, "text/plain; charset=utf-8",
+          "Actor image not registered in this demonstration");
+      fi
       continue;
     fi
     unavailable.dispatch(exchange);
