@@ -4,6 +4,7 @@
 import module proxy_yaml from "./proxy_yaml";
 import module generation from "./generation";
 import module route_policy from "./route_policy";
+import module header_policy from "./header_policy";
 
 define module middleware_manifest as
   pub define class Manifest as
@@ -28,6 +29,10 @@ define module middleware_manifest as
     // Pure admission decision for one header. The eventual HTTP adapter must
     // supply canonical, complete headers and enforce the result before dispatch.
     pub permitted(String header, String value): bool {
+      if !header_policy.value_safe(value) ||
+        (header != "" && !header_policy.canonical_name(header)); then
+        return false;
+      fi
       for (const rule of self.steps) {
         if rule.kind == "trace"; then continue; fi
         if rule.kind == "deny"; then return false; fi
