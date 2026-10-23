@@ -1,0 +1,23 @@
+import module config_path from "../src/config_path";
+
+pub routine main(): int {
+  if !config_path.valid("/etc/ores/proxy.yaml") ||
+    !config_path.valid("/tmp/ores-proxy.yml"); then
+    stdio.println("FAIL canonical config path"); return 1;
+  fi
+  if config_path.valid("") || config_path.valid("config/example.yaml") ||
+    config_path.valid("./config/example.yaml") ||
+    config_path.valid("/etc/../proxy.yaml") ||
+    config_path.valid("/etc/./proxy.yaml") ||
+    config_path.valid("/etc//proxy.yaml") ||
+    config_path.valid("/etc/proxy.yaml/") ||
+    config_path.valid("/tmp/proxy.yaml\nother") ||
+    config_path.valid("/tmp/proxy.yaml\r") ||
+    config_path.valid("/tmp/proxy.yaml\t") ||
+    config_path.valid("/tmp/proxy.yaml\u0000") ||
+    config_path.valid("/tmp\\proxy.yaml"); then
+    stdio.println("FAIL lexical config path denial"); return 1;
+  fi
+  stdio.println("PASS pure config path admission");
+  return 0;
+}
