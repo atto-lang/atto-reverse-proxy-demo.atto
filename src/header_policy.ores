@@ -31,7 +31,10 @@ define module header_policy as
     return !value.contains_literal("\r") &&
       !value.contains_literal("\n") &&
       !value.contains_literal("\u0000") &&
-      !value.contains_literal("\t");
+      !value.contains_literal("\t") &&
+      !value.contains_literal("\u000b") &&
+      !value.contains_literal("\u000c") &&
+      !value.contains_literal("\u007f");
   }
 
   // Return the complete, validated dynamic nomination decision.
@@ -47,6 +50,9 @@ define module header_policy as
       connection_tokens.contains_literal("\n") ||
       connection_tokens.contains_literal("\t") ||
       connection_tokens.contains_literal("\u0000") ||
+      connection_tokens.contains_literal("\u000b") ||
+      connection_tokens.contains_literal("\u000c") ||
+      connection_tokens.contains_literal("\u007f") ||
       connection_tokens.starts_with(",") || connection_tokens.ends_with(",") ||
       connection_tokens.contains_literal(",,"); then
       return Err("invalid Connection token list");
@@ -170,6 +176,17 @@ define module header_policy as
     return header == HeaderName.ContentLength ||
       header == HeaderName.Server ||
       header == HeaderName.Date;
+  }
+
+  // Presence-only declarative middleware must not trust framing,
+  // connection-control, forwarding identity, proxy credentials, or body
+  // metadata. This gate is NOT authentication even for an allowed x-* name.
+  pub fnc middleware_header_allowed(String key): bool {
+    if !token(key); then return false; fi
+    val HeaderName header = known_header(key);
+    return !hop_by_hop(header) && !proxy_auth(header) &&
+      !request_sensitive(header) && !response_derived(header) &&
+      !response_unsupported(header) && header != HeaderName.SetCookie;
   }
 
   // Do not copy Host or framing from inbound traffic. The future source-level
