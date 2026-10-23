@@ -167,7 +167,13 @@ define module proxy_yaml as
     let String mk = "";
     let String mh = "";
 
-    for (const original of yaml.split_literal("\n")) {
+    // Limit parser work even for a locally trusted configuration source.
+    // A byte cap before fs.read_text remains a separate runtime dependency.
+    val lines = yaml.split_literal("\n");
+    if lines.size > 2048; then
+      return Err("YAML line-count budget exceeded");
+    fi
+    for (const original of lines) {
       val String line = original.trim();
       if original.contains_literal("\r") || original.contains_literal("\t"); then
         return Err("CR and tabs are forbidden; use LF and spaces");
@@ -334,6 +340,9 @@ define module proxy_yaml as
       }
       middlewares.add(last.unwrap());
     fi
+    if middlewares.size > 128; then
+      return Err("middleware definition budget exceeded");
+    fi
     if version != "ores.proxy/v1" || mode != expected_mode; then
       return Err("invalid schema version or proxy mode");
     fi
@@ -357,7 +366,11 @@ define module proxy_yaml as
         return Err("forward mode requires deny_private=true, allow_domains and connect_ports=443");
       fi
       // Every token must be syntactically admissible; empty entries fail.
-      for (const item of allowed.split_literal(",")) {
+      val domains = allowed.split_literal(",");
+      if domains.size > 128; then
+        return Err("forward domain budget exceeded");
+      fi
+      for (const item of domains) {
         if !valid_domain(item); then
           return Err("allow_domains requires canonical ASCII DNS names");
         fi
