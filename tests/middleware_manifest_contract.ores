@@ -42,6 +42,9 @@ pub routine main(): int {
   if middleware_manifest.bind(rt borrow now, "actor", "unknown").is_ok(); then
     stdio.println("FAIL unknown actor middleware"); return 1;
   fi
+  if middleware_manifest.bind(rt borrow now, "actor", "gate,gate").is_ok(); then
+    stdio.println("FAIL repeated middleware in chain"); return 1;
+  fi
   stdio.println("PASS reverse generation-pinned route/actor middleware manifests");
   return 0;
 }
