@@ -99,6 +99,66 @@ define module proxy_yaml as
     return labels >= 2 && has_letter;
   }
 
+  // Narrow, lower-case HTTP field-name subset for a declarative policy.
+  // Transport adapters must enforce complete RFC header framing separately.
+  pub fnc valid_header_name(String candidate): bool {
+    if candidate == "" || candidate.starts_with("-") ||
+      candidate.ends_with("-"); then return false; fi
+    val String other = candidate
+      .replace_literal("a", "").replace_literal("b", "").replace_literal("c", "")
+      .replace_literal("d", "").replace_literal("e", "").replace_literal("f", "")
+      .replace_literal("g", "").replace_literal("h", "").replace_literal("i", "")
+      .replace_literal("j", "").replace_literal("k", "").replace_literal("l", "")
+      .replace_literal("m", "").replace_literal("n", "").replace_literal("o", "")
+      .replace_literal("p", "").replace_literal("q", "").replace_literal("r", "")
+      .replace_literal("s", "").replace_literal("t", "").replace_literal("u", "")
+      .replace_literal("v", "").replace_literal("w", "").replace_literal("x", "")
+      .replace_literal("y", "").replace_literal("z", "").replace_literal("-", "")
+      .replace_literal("0", "").replace_literal("1", "").replace_literal("2", "")
+      .replace_literal("3", "").replace_literal("4", "").replace_literal("5", "")
+      .replace_literal("6", "").replace_literal("7", "").replace_literal("8", "")
+      .replace_literal("9", "");
+    return other == "";
+  }
+
+  // Syntax only. Do not use as an outbound network capability check.
+  fnc valid_ipv4_spelling(String candidate): bool {
+    val parts = candidate.split_literal(".");
+    if parts.size != 4; then return false; fi
+    for (const part of parts) {
+      if !decimal(part) || part == ""; then return false; fi
+    }
+    return true;
+  }
+
+  // Accept only HTTP(S) scheme + an unambiguous host and optional decimal
+  // port. The v1 schema deliberately excludes IPv6 and path-bearing origins.
+  // Resolved address, port range and TLS hostname checks belong to transport.
+  pub fnc valid_upstream_origin(String origin): bool {
+    if !safe_scalar(origin) || origin.contains_literal("@") ||
+      origin.contains_literal("%") || origin.contains_literal("?") ||
+      origin.contains_literal("#"); then return false; fi
+    val scheme_parts = origin.split_literal("://");
+    if scheme_parts.size != 2; then return false; fi
+    if scheme_parts.get(0) != "http" && scheme_parts.get(0) != "https"; then
+      return false;
+    fi
+    val String authority = scheme_parts.get(1);
+    if authority == "" || authority.contains_literal("/") ||
+      authority.contains_literal("[") || authority.contains_literal("]") ||
+      authority.contains_literal(" "); then return false; fi
+    val parts = authority.split_literal(":");
+    if parts.size == 0 || parts.size > 2; then return false; fi
+    val String hostname = parts.get(0);
+    if hostname != "localhost" && !valid_domain(hostname) &&
+      !valid_ipv4_spelling(hostname); then return false; fi
+    if parts.size == 2; then
+      val String port = parts.get(1);
+      if !decimal(port) || port == "0"; then return false; fi
+    fi
+    return true;
+  }
+
   fnc validate_route(String name, String host, String prefix, String upstream,
                      String chain): Result<Route, String> {
     if !safe_scalar(name) || !valid_domain(host) || !safe_scalar(prefix) ||
@@ -106,11 +166,13 @@ define module proxy_yaml as
       return Err("route requires safe name, host, path_prefix, upstream");
     fi
     if !prefix.starts_with("/") || prefix.starts_with("//") ||
-      prefix.contains_literal("?") || prefix.contains_literal("//"); then
+      prefix.contains_literal("?") || prefix.contains_literal("//") ||
+      prefix.contains_literal("%") || prefix.contains_literal(";") ||
+      prefix.contains_literal("/./") || prefix.contains_literal("/../") ||
+      prefix.ends_with("/.") || prefix.ends_with("/.."); then
       return Err("route path_prefix must be a canonical absolute path");
     fi
-    if !(upstream.starts_with("http://") || upstream.starts_with("https://")) ||
-      upstream.contains_literal("@") || upstream.contains_literal("?"); then
+    if !valid_upstream_origin(upstream); then
       return Err("upstream must be an explicit HTTP(S) origin without credentials/query");
     fi
     if chain != "" && !safe_scalar(chain); then
@@ -126,8 +188,7 @@ define module proxy_yaml as
       return Err("unsupported middleware kind");
     fi
     if kind == "require_header"; then
-      if !safe_scalar(header) || header.contains_literal(":") ||
-        header.contains_literal(" "); then
+      if !valid_header_name(header); then
         return Err("require_header needs a canonical header name");
       fi
     else
