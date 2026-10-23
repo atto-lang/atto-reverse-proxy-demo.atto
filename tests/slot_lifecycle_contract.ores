@@ -15,53 +15,53 @@ pub routine main(): int {
   if a.reusable() || a.incarnation != 1 || a.epoch != 7; then
     stdio.println("FAIL initial acquire"); return 1;
   fi
-  val p1 = a.pin(first).unwrap();
-  val p2 = p1.state.pin(first).unwrap();
+  val p1 = a.pin(rt borrow first).unwrap();
+  val p2 = p1.state.pin(rt borrow first).unwrap();
   if p2.state.outstanding() != 2; then
     stdio.println("FAIL two independent claims"); return 1;
   fi
-  val retired = p2.state.close(first).unwrap();
+  val retired = p2.state.close(rt borrow first).unwrap();
   if retired.phase != 2 || retired.quiescent() || retired.reserve(8).is_ok(); then
     stdio.println("FAIL pending claim prevents recycle"); return 1;
   fi
-  if retired.pin(first).is_ok(); then
+  if retired.pin(rt borrow first).is_ok(); then
     stdio.println("FAIL pin after cancellation"); return 1;
   fi
-  val retired_again = retired.close(first).unwrap();
+  val retired_again = retired.close(rt borrow first).unwrap();
   if retired_again.outstanding() != 2; then
     stdio.println("FAIL repeated cancellation dropped claims"); return 1;
   fi
   // Completion order deliberately differs from pin order.
-  val drained_one = retired_again.settle(p2.claim).unwrap();
+  val drained_one = retired_again.settle(rt borrow p2.claim).unwrap();
   if drained_one.phase != 2 || drained_one.outstanding() != 1; then
     stdio.println("FAIL first out-of-order completion"); return 1;
   fi
-  if drained_one.settle(p2.claim).is_ok(); then
+  if drained_one.settle(rt borrow p2.claim).is_ok(); then
     stdio.println("FAIL repeated completion poisoned remaining claim"); return 1;
   fi
-  val drained = drained_one.settle(p1.claim).unwrap();
+  val drained = drained_one.settle(rt borrow p1.claim).unwrap();
   if !drained.quiescent() || drained.outstanding() != 0; then
     stdio.println("FAIL termination waited for final claim"); return 1;
   fi
-  if drained.settle(p1.claim).is_ok(); then
+  if drained.settle(rt borrow p1.claim).is_ok(); then
     stdio.println("FAIL completion after quiescence"); return 1;
   fi
   val next = drained.reserve(8).unwrap();
   val second = next.ticket();
-  if next.incarnation != 2 || next.epoch != 8 || next.owns(first); then
+  if next.incarnation != 2 || next.epoch != 8 || next.owns(rt borrow first); then
     stdio.println("FAIL new incarnation and epoch"); return 1;
   fi
-  if next.close(first).is_ok() || next.pin(first).is_ok() ||
-    next.settle(p1.claim).is_ok(); then
+  if next.close(rt borrow first).is_ok() || next.pin(rt borrow first).is_ok() ||
+    next.settle(rt borrow p1.claim).is_ok(); then
     stdio.println("FAIL ABA/late event reached new owner"); return 1;
   fi
-  val fresh_pin = next.pin(second).unwrap();
-  val settled_open = fresh_pin.state.settle(fresh_pin.claim).unwrap();
+  val fresh_pin = next.pin(rt borrow second).unwrap();
+  val settled_open = fresh_pin.state.settle(rt borrow fresh_pin.claim).unwrap();
   if settled_open.phase != 1 || settled_open.quiescent(); then
     stdio.println("FAIL settling open slot is not retirement"); return 1;
   fi
-  val done = settled_open.close(second).unwrap();
-  if !done.quiescent() || !done.close(second).unwrap().quiescent(); then
+  val done = settled_open.close(rt borrow second).unwrap();
+  if !done.quiescent() || !done.close(rt borrow second).unwrap().quiescent(); then
     stdio.println("FAIL idempotent close"); return 1;
   fi
   val capped = new slot_lifecycle.Slot(2147483646, 7, 0, 1,
