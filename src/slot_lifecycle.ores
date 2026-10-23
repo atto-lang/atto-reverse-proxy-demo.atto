@@ -40,6 +40,9 @@ define module slot_lifecycle as
       self.claims = claims;
     }
 
+    // Deep-copy a state snapshot for persistent test-model pools.
+    pub fnc duplicate(): Slot { return self.clone_state(); }
+
     pub outstanding(): int { return self.claims.size; }
     pub reusable(): bool { return self.phase == 0 && self.claims.size == 0; }
     pub quiescent(): bool { return self.reusable(); }
