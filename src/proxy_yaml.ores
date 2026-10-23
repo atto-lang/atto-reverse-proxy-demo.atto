@@ -18,6 +18,14 @@ define module proxy_yaml as
     pub val String middleware;
   end
 
+  // Symbolic, generation-scoped service declarations. Only a trusted
+  // supervisor can resolve target into an actual actor capability.
+  pub define class Service as
+    pub val String name;
+    pub val String kind;
+    pub val String target;
+  end
+
   pub define class Config as
     pub val String mode;
     pub val String listen_host;
@@ -30,6 +38,7 @@ define module proxy_yaml as
     pub val String connect_ports;
     pub val Array<Middleware> middleware;
     pub val Array<Route> routes;
+    pub val Array<Service> services;
   end
 
   fnc decimal(String candidate): bool {
@@ -157,6 +166,22 @@ define module proxy_yaml as
       candidate != "connection" && candidate != "proxy-authorization";
   }
 
+  pub fnc valid_service_ref(String uri): bool {
+    if !uri.starts_with("service://"); then return false; fi
+    val parts = uri.split_literal("service://");
+    return parts.size == 2 && parts.get(0) == "" &&
+      valid_identifier(parts.get(1));
+  }
+
+  fnc validate_service(String name, String kind, String target):
+      Result<Service, String> {
+    if !valid_identifier(name) || kind != "actor" ||
+      !valid_identifier(target); then
+      return Err("service must bind a canonical name to a registered actor");
+    fi
+    return Ok(new Service(name, kind, target));
+  }
+
   fnc validate_route(String name, String host, String prefix, String upstream,
                      String chain): Result<Route, String> {
     if !valid_identifier(name) || !valid_domain(host) || !safe_scalar(prefix) ||
@@ -171,8 +196,8 @@ define module proxy_yaml as
       (prefix != "/" && prefix.ends_with("/")); then
       return Err("route path_prefix must be a canonical absolute path");
     fi
-    if !valid_upstream_origin(upstream); then
-      return Err("upstream must be an explicit HTTP(S) origin without credentials/query");
+    if !valid_upstream_origin(upstream) && !valid_service_ref(upstream); then
+      return Err("upstream must be an HTTP(S) origin or declared service://name");
     fi
     if chain != "" && !safe_scalar(chain); then
       return Err("invalid middleware reference");
@@ -222,8 +247,10 @@ define module proxy_yaml as
     let bool seen_policy = false;
     let bool seen_routes = false;
     let bool seen_middleware = false;
+    let bool seen_services = false;
     let Array<Route> routes = new Array<Route>();
     let Array<Middleware> middlewares = new Array<Middleware>();
+    let Array<Service> services = new Array<Service>();
     let String rn = "";
     let String rh = "";
     let String rp = "";
@@ -232,6 +259,9 @@ define module proxy_yaml as
     let String mn = "";
     let String mk = "";
     let String mh = "";
+    let String sn = "";
+    let String sk = "";
+    let String st = "";
 
     // Limit parser work even for a locally trusted configuration source.
     // A byte cap before fs.read_text remains a separate runtime dependency.
@@ -269,15 +299,27 @@ define module proxy_yaml as
             middlewares.add(previous.unwrap());
           fi
           mn = ""; mk = ""; mh = "";
+        elif section == "services"; then
+          if sn != ""; then
+            val previous = validate_service(sn, sk, st);
+            if previous.is_err(); then return Err("invalid previous service"); fi
+            for (const existing of services) {
+              if existing.name == sn; then return Err("duplicate service"); fi
+            }
+            services.add(previous.unwrap());
+          fi
+          sn = ""; sk = ""; st = "";
         else
-          return Err("list item outside routes/middleware");
+          return Err("list item outside routes/middleware/services");
         fi
         val pair = line.split_literal(": ");
         if pair.size != 2 || pair.get(0) != "- name" ||
           !valid_identifier(pair.get(1)); then
           return Err("list items must begin with '- name: VALUE'");
         fi
-        if section == "routes"; then rn = pair.get(1); else mn = pair.get(1); fi
+        if section == "routes"; then rn = pair.get(1);
+        elif section == "middleware"; then mn = pair.get(1);
+        else sn = pair.get(1); fi
         continue;
       fi
 
@@ -301,6 +343,10 @@ define module proxy_yaml as
           if key == "kind" && mk == ""; then mk = value;
           elif key == "header" && mh == ""; then mh = value;
           else return Err("unknown or duplicate middleware field"); fi
+        elif section == "services" && sn != ""; then
+          if key == "kind" && sk == ""; then sk = value;
+          elif key == "target" && st == ""; then st = value;
+          else return Err("unknown or duplicate service field"); fi
         else
           return Err("list field without list item");
         fi
@@ -358,6 +404,15 @@ define module proxy_yaml as
         middlewares.add(previous.unwrap());
         mn = ""; mk = ""; mh = "";
       fi
+      if sn != ""; then
+        val previous = validate_service(sn, sk, st);
+        if previous.is_err(); then return Err("invalid service"); fi
+        for (const existing of services) {
+          if existing.name == sn; then return Err("duplicate service"); fi
+        }
+        services.add(previous.unwrap());
+        sn = ""; sk = ""; st = "";
+      fi
       if line == "listen:"; then
         if seen_listen; then return Err("duplicate listen section"); fi
         seen_listen = true; section = "listen";
@@ -373,6 +428,9 @@ define module proxy_yaml as
       elif line == "middleware:"; then
         if seen_middleware; then return Err("duplicate middleware section"); fi
         seen_middleware = true; section = "middleware";
+      elif line == "services:"; then
+        if seen_services; then return Err("duplicate services section"); fi
+        seen_services = true; section = "services";
       else
         val pair = line.split_literal(": ");
         if pair.size != 2 || !safe_scalar(pair.get(1)); then
@@ -405,6 +463,17 @@ define module proxy_yaml as
         if existing.name == mn; then return Err("duplicate final middleware"); fi
       }
       middlewares.add(last.unwrap());
+    fi
+    if sn != ""; then
+      val last = validate_service(sn, sk, st);
+      if last.is_err(); then return Err("invalid final service"); fi
+      for (const existing of services) {
+        if existing.name == sn; then return Err("duplicate final service"); fi
+      }
+      services.add(last.unwrap());
+    fi
+    if services.size > 128; then
+      return Err("service binding budget exceeded");
     fi
     if middlewares.size > 128; then
       return Err("middleware definition budget exceeded");
@@ -444,6 +513,16 @@ define module proxy_yaml as
     fi
 
     for (const route of routes) {
+      if valid_service_ref(route.upstream); then
+        val binding = route.upstream.split_literal("service://");
+        let bool bound = false;
+        for (const service of services) {
+          if service.name == binding.get(1) && service.kind == "actor"; then
+            bound = true;
+          fi
+        }
+        if !bound; then return Err("unbound actor service route"); fi
+      fi
       if route.middleware != ""; then
         for (const id of route.middleware.split_literal(",")) {
           let bool present = false;
@@ -455,6 +534,6 @@ define module proxy_yaml as
       fi
     }
     return Ok(new Config(mode, host, port, carriers, actors, inflight,
-      deny_private, allowed, connect, middlewares, routes));
+      deny_private, allowed, connect, middlewares, routes, services));
   }
 end
