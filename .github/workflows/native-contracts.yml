@@ -109,3 +109,10 @@ jobs:
           oreslang tests/traffic_controls_contract.ores
       - name: Compiler-check opt-in local actor-service real TCP client
         run: oreslang --check tests/actor_ingress_tcp_smoke.ores
+
+      - name: Compiler-check YAML backend pool compiler
+        run: |
+          oreslang --check src/backend_pools.ores
+          oreslang --check tests/backend_pools_contract.ores
+      - name: Execute native YAML weighted backend pool contract
+        run: oreslang tests/backend_pools_contract.ores
