@@ -28,7 +28,7 @@ pub routine main(): int {
       .replace_literal("middleware: guard", "middleware: x- guard"), "reverse").is_err(); then
     stdio.println("FAIL list name with literal dash-space"); return 1;
   fi
-  if proxy_yaml.parse(document + "  # trailing comment\\r\\n", "reverse").is_ok(); then
+  if proxy_yaml.parse(document + "  # trailing comment\r\n", "reverse").is_ok(); then
     stdio.println("FAIL CR on comment"); return 1;
   fi
   stdio.println("PASS native reverse YAML/policy contract");
