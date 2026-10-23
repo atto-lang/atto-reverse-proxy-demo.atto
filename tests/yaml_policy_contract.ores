@@ -31,6 +31,14 @@ pub routine main(): int {
   if proxy_yaml.parse(document + "  # trailing comment\r\n", "reverse").is_ok(); then
     stdio.println("FAIL CR on comment"); return 1;
   fi
+  // A bounded native parser must not walk arbitrarily many comment lines.
+  let String padding = "# bounded comment\n";
+  for (let i = 0; i < 12; i++) {
+    padding = padding + padding;
+  }
+  if proxy_yaml.parse(document + padding, "reverse").is_ok(); then
+    stdio.println("FAIL YAML line budget"); return 1;
+  fi
   stdio.println("PASS native reverse YAML/policy contract");
   return 0;
 }
