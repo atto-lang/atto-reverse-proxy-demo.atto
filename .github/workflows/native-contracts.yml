@@ -1,0 +1,49 @@
+# Native compiler and contract gate. No runtime source checkout or cross-org mirror.
+# A trusted, isolated runner carrying the 'oreslang-jdk25' label must have an
+# approved Oreslang Java/Graal executable on PATH. Missing runtime is a failure.
+name: Native Oreslang Proxy Contracts
+on:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  native-contracts:
+    # Never execute untrusted fork code on the organization's self-hosted runner.
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: [self-hosted, linux, x64, oreslang-jdk25]
+    timeout-minutes: 20
+    steps:
+      - name: Checkout exact PR tree
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Set up JDK 25
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+      - name: Confirm native compiler availability
+        run: command -v oreslang
+      - name: Compiler-check entrypoint
+        run: oreslang --check src/main.ores
+      - name: Compiler-check YAML parser
+        run: oreslang --check src/proxy_yaml.ores
+      - name: Compiler-check routing policy
+        run: oreslang --check src/route_policy.ores
+      - name: Compiler-check middleware policy
+        run: oreslang --check src/middleware_policy.ores
+      - name: Compiler-check generation coordinator
+        run: oreslang --check src/generation.ores
+      - name: Compiler-check native YAML contract
+        run: oreslang --check tests/yaml_policy_contract.ores
+      - name: Compiler-check native generation contract
+        run: oreslang --check tests/generation_contract.ores
+      - name: Compiler-check native middleware contract
+        run: oreslang --check tests/middleware_generation_contract.ores
+      - name: Execute YAML / routing / policy contract
+        run: oreslang tests/yaml_policy_contract.ores
+      - name: Execute generation epoch / rollback contract
+        run: oreslang tests/generation_contract.ores
+      - name: Execute independent middleware snapshot contract
+        run: oreslang tests/middleware_generation_contract.ores
