@@ -40,3 +40,18 @@ Invoke canonical `flags2env shell-env --config .cli-flags.toml -- ores-proxy --c
 ## Inspiration
 
 NGINX separates master configuration/lifecycle from workers and drains old workers on reload. HAProxy's Runtime API can make some route/server changes without reload, while changes requiring a new worker use graceful drain. Neither guarantees that arbitrary new program code is live in an existing worker image.
+
+
+## Native policy hardening and transport dependency (October 22, 2026)
+
+The pure Oreslang control-plane now admits only canonical HTTP(S) upstream **origin** syntax for reverse routes: scheme, host, optional decimal port; no credentials, URL paths, fragments, encoded authorities or ambiguous IPv6 bracket forms in v1. The current IP and port helpers are syntax admission, **not** full RFC IP/port verification or an outbound connection authorization. Transport must still verify each resolved address, TLS peer, connection destination and numeric port range.
+
+Reverse routes use **most-specific boundary-safe path-prefix selection** regardless of YAML order. Raw request paths, Host and scheme must be strictly canonicalized before this pure helper; it does not defend against malformed wire framing by itself.
+
+Declarative middleware `require_header` now admits only a narrow lowercase ASCII header-name subset. Its pure nonempty-header predicate is **not authentication** and must not protect public ingress without a real identity/authentication adapter.
+
+Forward `configured_connect` requires an explicit `CONNECT` method, one unambiguous `host:443` authority, syntactically valid lowercase DNS name and configured domain allowlist. It is **not** permission to dial: the transport must check pinned DNS/IP addresses and forbid unsafe networks (including rebinding, link-local, metadata-service and other private endpoints) before opening or reusing a socket.
+
+**Blocking runtime dependency:** [Oreslang Java outbound proxy transport issue #1942](https://github.com/ores-truffle-oreslang/oreslang-source.java/issues/1942) specifies the missing status/header-preserving streaming client, bounded CONNECT duplex transport, cancellation/close semantics and real wire evidence. Current `http.get_text_async` is body-only and must not be used as a transparent proxy implementation.
+
+All new security and route-selection regressions live in native `tests/yaml_policy_contract.ores`. A workflow `queued` status, static source inspection or successful config parsing is not a compiler/test pass and does not make either demo a serving proxy.
