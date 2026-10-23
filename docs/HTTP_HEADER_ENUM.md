@@ -44,3 +44,18 @@ helpers; the module itself is not a complete HTTP parser.
 - Once the typed `std.http.HeaderName` module is available, replace the two
   local definitions with imports and add cross-backend consumer tests, rather
   than exposing conflicting nominal types at module boundaries.
+
+## Dynamic Connection header semantics
+
+A validated canonical `Connection` token list can nominate arbitrary known or
+extension fields. This helper now distinguishes: malformed token list => reject
+the message; valid nominated response field => `drop`; otherwise apply typed
+header classification. The entire nomination list is validated even if the
+requested key matched an earlier token. CR/LF, HTAB and NUL are rejected
+**before** whitespace trimming so obs-fold and injected lines cannot vanish
+during normalization. This is a deliberately conservative single-value helper;
+a real wire parser must aggregate and validate all Connection occurrences,
+enforce field size/count limits, and remove nomination fields in both directions.
+
+Do not silently drop response `Content-Encoding` / `Content-Range` metadata
+without proving body transformation semantics; these still return a rejection.
