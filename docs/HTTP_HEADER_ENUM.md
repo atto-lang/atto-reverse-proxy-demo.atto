@@ -59,3 +59,18 @@ enforce field size/count limits, and remove nomination fields in both directions
 
 Do not silently drop response `Content-Encoding` / `Content-Range` metadata
 without proving body transformation semantics; these still return a rejection.
+
+## Presence-only middleware admission
+
+`require_header` is explicitly **not** authentication. The YAML admission
+path rejects connection-control, forwarding-identity, sensitive credential,
+body-metadata, and derived framing header names. An allowed custom name such
+as `x-auth` is only a syntactic presence check: no identity, signature or
+trust verification is implied. An authenticated proxy must use a separate
+transport-attested authorization capability and the request's complete
+validated header set.
+
+The Connection token-list helper rejects non-ASCII whitespace before
+`trim()` (including Unicode whitespace that could otherwise disappear).
+Raw HTTP parsing still owns duplicate and framing validation. Native
+`tests/header_middleware_config_contract.ores` exercises both proxy modes.
