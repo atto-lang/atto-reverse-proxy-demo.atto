@@ -15,6 +15,10 @@ Exact-head compiler/contract execution is not yet available; no passing PR CI ch
 
 A native, **pure control-plane** coordinator in `src/generation.ores` exercises prepare/publish/abort fencing and snapshot epochs (see `tests/generation_contract.ores`). This does not publish a listener/actor generation or serve requests.
 
+The typed HTTP header enum refactor is staged in `src/header_policy.ores`.
+See [the header-enum design and release gates](docs/HTTP_HEADER_ENUM.md);
+nominal enum compiler support is still unverified and this is not a release.
+
 ## Native verification gate
 
 The exact-head native compiler/contract workflow is [`.github/workflows/native-contracts.yml`](.github/workflows/native-contracts.yml); runner prerequisites, executed commands and non-production release gates are in [`docs/NATIVE_VALIDATION.md`](docs/NATIVE_VALIDATION.md). A queued or absent workflow is **not** a passed compiler test. Network serving remains disabled.
