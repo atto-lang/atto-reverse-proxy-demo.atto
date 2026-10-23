@@ -27,10 +27,9 @@ define module route_policy as
   // Deny IP literals, IPv6 bracket forms, userinfo, encoded separators and
   // CNAME/DNS rebinding bypasses at the network capability boundary.
   pub fnc configured_domain(borrow proxy_yaml.Config snapshot, String candidate): bool {
-    if snapshot.mode != "forward" || candidate == "" ||
-      candidate.contains_literal(":") || candidate.contains_literal("/") ||
-      candidate.contains_literal("@") || candidate.contains_literal("%") ||
-      candidate.contains_literal("\\"); then return false; fi
+    if snapshot.mode != "forward" || !proxy_yaml.valid_domain(candidate); then
+      return false;
+    fi
     for (const item of snapshot.allow_domains.split_literal(",")) {
       val String domain = item.trim();
       if domain != "" && (candidate == domain ||
