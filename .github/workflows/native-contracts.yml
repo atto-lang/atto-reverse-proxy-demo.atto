@@ -31,6 +31,12 @@ jobs:
         run: oreslang --check src/config_path.ores
       - name: Compiler-check YAML parser
         run: oreslang --check src/proxy_yaml.ores
+      - name: Compiler-check typed HTTP header policy
+        run: oreslang --check src/header_policy.ores
+      - name: Compiler-check legacy header contract
+        run: oreslang --check tests/header_policy_contract.ores
+      - name: Compiler-check header enum contract
+        run: oreslang --check tests/header_enum_contract.ores
       - name: Compiler-check routing policy
         run: oreslang --check src/route_policy.ores
       - name: Compiler-check middleware policy
@@ -53,3 +59,7 @@ jobs:
         run: oreslang tests/generation_contract.ores
       - name: Execute independent middleware snapshot contract
         run: oreslang tests/middleware_generation_contract.ores
+      - name: Execute legacy HTTP header policy contract
+        run: oreslang tests/header_policy_contract.ores
+      - name: Execute typed HTTP header enum contract
+        run: oreslang tests/header_enum_contract.ores
