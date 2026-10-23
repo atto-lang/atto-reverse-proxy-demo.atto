@@ -1,0 +1,80 @@
+// Pure actor-local overload, rate-limit and circuit-breaker policies.
+// Time is supplied as a monotonic integer by a trusted runtime; no wall-clock
+// read or mutable global cache is present. Model only, not live middleware.
+define module traffic_controls as
+  pub define class Window as
+    pub val int epoch;
+    pub val int started_ms;
+    pub val int used;
+  end
+
+  pub define class WindowDecision as
+    pub val bool permitted;
+    pub val Window next;
+  end
+
+  // Fixed-window admission; real key cardinality, eviction, fairness and
+  // tenant quotas belong to the actor-owned bounded store.
+  pub fnc allow_window(borrow Window previous, int epoch, int now_ms,
+                       int duration_ms, int limit): Result<WindowDecision, String> {
+    if epoch <= 0 || now_ms < 0 || now_ms > 2000000000 ||
+      duration_ms <= 0 || duration_ms > 86400000 ||
+      limit <= 0 || limit > 1000000 ||
+      previous.used < 0 || previous.used > limit ||
+      previous.started_ms < 0 || previous.started_ms > now_ms ||
+      previous.epoch > epoch; then
+      return Err("invalid rate-limit time or budget");
+    fi
+    if previous.epoch != epoch ||
+      now_ms - previous.started_ms >= duration_ms; then
+      return Ok(new WindowDecision(true, new Window(epoch, now_ms, 1)));
+    fi
+    if previous.used >= limit; then
+      return Ok(new WindowDecision(false, new Window(epoch,
+        previous.started_ms, previous.used)));
+    fi
+    return Ok(new WindowDecision(true, new Window(epoch,
+      previous.started_ms, previous.used + 1)));
+  }
+
+  pub define class Breaker as
+    pub val int epoch;
+    pub val int failures;
+    pub val int open_until_ms;
+  end
+
+  pub fnc permits(borrow Breaker state, int epoch, int now_ms): bool {
+    return epoch > 0 && state.epoch == epoch &&
+      state.failures >= 0 && state.open_until_ms >= 0 &&
+      now_ms >= 0 && now_ms >= state.open_until_ms;
+  }
+
+  // Failing closed in half-open: the model requires supervisor-issued single
+  // probe credit; permissive permits() alone must never authorize mass probes.
+  // A real breaker must include an actor-owned half-open lease.
+  pub fnc record(borrow Breaker previous, int epoch, int now_ms,
+                 bool success, int threshold, int cooldown_ms):
+      Result<Breaker, String> {
+    if epoch <= 0 || now_ms < 0 || now_ms > 2000000000 ||
+      threshold <= 0 || threshold > 10000 ||
+      cooldown_ms <= 0 || cooldown_ms > 86400000 ||
+      now_ms > 2000000000 - cooldown_ms ||
+      previous.failures < 0 || previous.failures > threshold ||
+      previous.epoch > epoch; then
+      return Err("invalid breaker event");
+    fi
+    if previous.epoch != epoch; then
+      return Ok(new Breaker(epoch, success ? 0 : 1,
+        (!success && threshold == 1) ? now_ms + cooldown_ms : 0));
+    fi
+    if !success && previous.open_until_ms > now_ms; then
+      return Err("failure arrived while breaker is open");
+    fi
+    if success; then return Ok(new Breaker(epoch, 0, 0)); fi
+    let int count = previous.failures + 1;
+    if count >= threshold; then
+      return Ok(new Breaker(epoch, threshold, now_ms + cooldown_ms));
+    fi
+    return Ok(new Breaker(epoch, count, 0));
+  }
+end

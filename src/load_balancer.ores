@@ -1,0 +1,78 @@
+// Pure Oreslang upstream load-balancing policy oracle, not a socket
+// connector, DNS resolver, shared state manager or a live HAProxy replacement.
+// One trusted actor owns the health/active-count snapshot. The transport must
+// atomically reserve a backend credit before sending, and release exactly once.
+define module load_balancer as
+  pub define class Backend as
+    pub val String name;
+    pub val String origin;
+    pub val int weight;
+    pub val int active;
+    pub val bool healthy;
+    pub val bool draining;
+  end
+
+  pub define class Choice as
+    pub val String name;
+    pub val String origin;
+    pub val int index;
+    pub val int next_cursor;
+  end
+
+  // Algorithms: "weighted-round-robin" (block-weighted cycle),
+  // "least-active" (active requests / configured weight).
+  // No sticky hashing yet; input is a snapshot owned by a single actor.
+  pub fnc choose(Array<Backend> backends, String algorithm, int cursor):
+      Result<Choice, String> {
+    if !(algorithm == "weighted-round-robin" || algorithm == "least-active") ||
+      cursor < 0 || cursor > 1000000 || backends.size == 0 ||
+      backends.size > 128; then
+      return Err("invalid algorithm, cursor or backend count");
+    fi
+    let int total = 0;
+    for (const b of backends) {
+      if b.weight <= 0 || b.weight > 100 ||
+        b.active < 0 || b.active > 1000000 ||
+        b.name == "" || b.origin == ""; then
+        return Err("invalid backend metadata");
+      fi
+      if b.healthy && !b.draining; then
+        total = total + b.weight;
+      fi
+    }
+    if total == 0; then return Err("no healthy backend"); fi
+    if algorithm == "weighted-round-robin"; then
+      val int step = cursor % total;
+      let int running = 0;
+      for (let i = 0; i < backends.size; i++) {
+        val b = backends.get(i);
+        if b.healthy && !b.draining; then
+          running = running + b.weight;
+          if step < running; then
+            return Ok(new Choice(b.name, b.origin, i, (step + 1) % total));
+          fi
+        fi
+      }
+      return Err("weighted selection invariant violated");
+    fi
+    let int selected = -1;
+    let int selected_active = 0;
+    let int selected_weight = 1;
+    for (let i = 0; i < backends.size; i++) {
+      val b = backends.get(i);
+      if b.healthy && !b.draining; then
+        // int multiplication is bounded: 1_000_000 * 100 = 100M.
+        if selected == -1 ||
+          b.active * selected_weight < selected_active * b.weight; then
+          selected = i;
+          selected_active = b.active;
+          selected_weight = b.weight;
+        fi
+      fi
+    }
+    if selected == -1; then return Err("no healthy backend"); fi
+    val selected_backend = backends.get(selected);
+    return Ok(new Choice(selected_backend.name, selected_backend.origin,
+      selected, cursor));
+  }
+end

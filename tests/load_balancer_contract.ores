@@ -1,0 +1,38 @@
+import module load_balancer from "../src/load_balancer";
+pub routine main(): int {
+  let Array<load_balancer.Backend> nodes = new Array<load_balancer.Backend>();
+  nodes.add(new load_balancer.Backend("a", "https://a.example.test:443",
+    3, 5, true, false));
+  nodes.add(new load_balancer.Backend("b", "https://b.example.test:443",
+    1, 1, true, false));
+  for (let c = 0; c < 4; c++) {
+    val selected = load_balancer.choose(nodes, "weighted-round-robin", c);
+    if selected.is_err(); then stdio.println("FAIL weighted choice"); return 1; fi
+    val choice = selected.unwrap();
+    if (c < 3 && choice.name != "a") || (c == 3 && choice.name != "b"); then
+      stdio.println("FAIL deterministic weighted rotation"); return 1;
+    fi
+  }
+  val least = load_balancer.choose(nodes, "least-active", 0);
+  if least.is_err() || least.unwrap().name != "b"; then
+    stdio.println("FAIL weighted least-active"); return 1;
+  fi
+  let Array<load_balancer.Backend> only_b = new Array<load_balancer.Backend>();
+  only_b.add(new load_balancer.Backend("a", "https://a.example.test:443",
+    3, 0, false, false));
+  only_b.add(new load_balancer.Backend("b", "https://b.example.test:443",
+    1, 0, true, false));
+  if load_balancer.choose(only_b, "weighted-round-robin", 123).unwrap().name != "b"; then
+    stdio.println("FAIL passive health exclusion"); return 1;
+  fi
+  let Array<load_balancer.Backend> drained = new Array<load_balancer.Backend>();
+  drained.add(new load_balancer.Backend("a", "https://a.example.test:443",
+    3, 0, true, true));
+  if load_balancer.choose(drained, "least-active", 0).is_ok() ||
+    load_balancer.choose(nodes, "least-active", -1).is_ok() ||
+    load_balancer.choose(nodes, "random", 0).is_ok(); then
+    stdio.println("FAIL bounded backend admission"); return 1;
+  fi
+  stdio.println("PASS native load-balancing policy contract");
+  return 0;
+}

@@ -1,0 +1,52 @@
+import module traffic_controls from "../src/traffic_controls";
+pub routine main(): int {
+  val zero = new traffic_controls.Window(1, 1000, 0);
+  val a = traffic_controls.allow_window(rt borrow zero, 1, 1000, 1000, 2);
+  if a.is_err() || !a.unwrap().permitted || a.unwrap().next.used != 1; then
+    stdio.println("FAIL initial rate credit"); return 1;
+  fi
+  val b = traffic_controls.allow_window(rt borrow a.unwrap().next,
+    1, 1001, 1000, 2);
+  if b.is_err() || b.unwrap().next.used != 2; then
+    stdio.println("FAIL second rate credit"); return 1;
+  fi
+  val reject = traffic_controls.allow_window(rt borrow b.unwrap().next,
+    1, 1002, 1000, 2);
+  if reject.is_err() || reject.unwrap().permitted ||
+    reject.unwrap().next.used != 2; then
+    stdio.println("FAIL rate-limit rejection"); return 1;
+  fi
+  val changed = traffic_controls.allow_window(rt borrow b.unwrap().next,
+    2, 1002, 1000, 2);
+  if changed.is_err() || changed.unwrap().next.used != 1; then
+    stdio.println("FAIL epoch-specific rate reset"); return 1;
+  fi
+  if traffic_controls.allow_window(rt borrow zero, 1, 999, 1000, 2).is_ok(); then
+    stdio.println("FAIL time rollback"); return 1;
+  fi
+
+  val start = new traffic_controls.Breaker(1, 0, 0);
+  val fail1 = traffic_controls.record(rt borrow start, 1, 1000,
+    false, 2, 100);
+  if fail1.is_err() || fail1.unwrap().failures != 1; then
+    stdio.println("FAIL first breaker failure"); return 1;
+  fi
+  val fail2 = traffic_controls.record(rt borrow fail1.unwrap(), 1, 1001,
+    false, 2, 100);
+  if fail2.is_err() || traffic_controls.permits(rt borrow fail2.unwrap(),
+    1, 1002) || !traffic_controls.permits(rt borrow fail2.unwrap(), 1, 1101); then
+    stdio.println("FAIL circuit-open fencing"); return 1;
+  fi
+  if traffic_controls.record(rt borrow fail2.unwrap(), 1, 1002,
+    false, 2, 100).is_ok(); then
+    stdio.println("FAIL closed circuit unexpectedly admitted update"); return 1;
+  fi
+  val recovered = traffic_controls.record(rt borrow fail2.unwrap(), 1, 1101,
+    true, 2, 100);
+  if recovered.is_err() || recovered.unwrap().failures != 0 ||
+    !traffic_controls.permits(rt borrow recovered.unwrap(), 1, 1102); then
+    stdio.println("FAIL recovery event"); return 1;
+  fi
+  stdio.println("PASS native traffic control reference contract");
+  return 0;
+}
