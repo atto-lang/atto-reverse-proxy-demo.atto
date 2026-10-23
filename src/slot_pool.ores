@@ -1,0 +1,176 @@
+// Pure single-writer reference of a bounded reusable request-slot pool.
+// O(capacity) snapshot copies deliberately make this a specification oracle,
+// not a low-latency production allocator. Actor-owned SoA/AoSoA will replace it.
+import module slot_lifecycle from "./slot_lifecycle";
+
+define module slot_pool as
+  pub define class Handle as
+    pub val int slot;
+    pub val int nonce;
+    pub val slot_lifecycle.Ticket ticket;
+    pub constructor(int slot, int nonce, slot_lifecycle.Ticket ticket) {
+      self.slot = slot;
+      self.nonce = nonce;
+      self.ticket = ticket;
+    }
+  end
+
+  pub define class Receipt as
+    pub val int slot;
+    pub val int nonce;
+    pub val slot_lifecycle.Claim claim;
+    pub constructor(int slot, int nonce, slot_lifecycle.Claim claim) {
+      self.slot = slot;
+      self.nonce = nonce;
+      self.claim = claim;
+    }
+  end
+
+  pub define class Pool as
+    pub val int capacity;
+    pub val int next_nonce;
+    val Array<slot_lifecycle.Slot> rows;
+    val Array<int> nonces;
+
+    pub constructor(int capacity, int next_nonce,
+                    Array<slot_lifecycle.Slot> rows, Array<int> nonces) {
+      self.capacity = capacity;
+      self.next_nonce = next_nonce;
+      self.rows = rows;
+      self.nonces = nonces;
+    }
+
+    pub live_slots(): int {
+      let int count = 0;
+      for (const row of self.rows) {
+        if !row.reusable(); then count = count + 1; fi
+      }
+      return count;
+    }
+
+    pub retiring_slots(): int {
+      let int count = 0;
+      for (const row of self.rows) {
+        if row.phase == 2; then count = count + 1; fi
+      }
+      return count;
+    }
+
+    pub quiescent(): bool { return self.live_slots() == 0; }
+
+    pub permits(borrow Handle handle): bool {
+      if handle.slot < 0 || handle.slot >= self.capacity; then
+        return false;
+      fi
+      if self.nonces.get(handle.slot) != handle.nonce || handle.nonce <= 0; then
+        return false;
+      fi
+      return self.rows.get(handle.slot).owns(rt borrow handle.ticket);
+    }
+
+    pub fnc admit(int epoch): Result<Admitted, String> {
+      if epoch <= 0 || self.next_nonce >= 2147483646; then
+        return Err("invalid epoch or exhausted global lease nonce");
+      fi
+      for (let i = 0; i < self.capacity; i++) {
+        val old = self.rows.get(i);
+        if old.reusable(); then
+          val changed = old.reserve(epoch);
+          if changed.is_err(); then
+            return Err("slot generation exhausted");
+          fi
+          val next = changed.unwrap();
+          val int unique = self.next_nonce;
+          return Ok(new Admitted(self.replaced(i, next, unique, unique + 1),
+            new Handle(i, unique, next.ticket())));
+        fi
+      }
+      return Err("bounded pool exhausted");
+    }
+
+    pub fnc pin(borrow Handle handle): Result<Pinned, String> {
+      if !self.permits(rt borrow handle); then
+        return Err("stale reservation ticket");
+      fi
+      val pin = self.rows.get(handle.slot).pin(rt borrow handle.ticket);
+      if pin.is_err(); then return Err("slot closed or pin budget exhausted"); fi
+      val p = pin.unwrap();
+      return Ok(new Pinned(
+        self.replaced(handle.slot, p.state,
+                      handle.nonce, self.next_nonce),
+        new Receipt(handle.slot, handle.nonce, p.claim)));
+    }
+
+    pub fnc close(borrow Handle handle): Result<Pool, String> {
+      if !self.permits(rt borrow handle); then
+        return Err("stale close or recycled slot");
+      fi
+      val next = self.rows.get(handle.slot).close(rt borrow handle.ticket);
+      if next.is_err(); then return Err("slot close failed"); fi
+      return Ok(self.replaced(handle.slot, next.unwrap(),
+        handle.nonce, self.next_nonce));
+    }
+
+    pub fnc settle(borrow Receipt receipt): Result<Pool, String> {
+      if receipt.slot < 0 || receipt.slot >= self.capacity ||
+        receipt.nonce <= 0 || self.nonces.get(receipt.slot) != receipt.nonce; then
+        return Err("stale or forged pool receipt");
+      fi
+      val next = self.rows.get(receipt.slot).settle(rt borrow receipt.claim);
+      if next.is_err(); then return Err("duplicate, late or forged claim"); fi
+      return Ok(self.replaced(receipt.slot, next.unwrap(),
+        receipt.nonce, self.next_nonce));
+    }
+
+    // Copying is intentionally explicit in this persistent test model.
+    // The eventual actor-local arena uses in-place owner-exclusive writes.
+    fnc replaced(int index, slot_lifecycle.Slot changed, int nonce,
+                 int next_nonce): Pool {
+      let mut Array<slot_lifecycle.Slot> copy_rows =
+        new Array<slot_lifecycle.Slot>();
+      let mut Array<int> copy_nonces = new Array<int>();
+      for (let i = 0; i < self.capacity; i++) {
+        if i == index; then
+          copy_rows.add(changed);
+          copy_nonces.add(nonce);
+        else
+          copy_rows.add(self.rows.get(i).duplicate());
+          copy_nonces.add(self.nonces.get(i));
+        fi
+      }
+      return new Pool(self.capacity, next_nonce, copy_rows, copy_nonces);
+    }
+  end
+
+  pub define class Admitted as
+    pub val Pool state;
+    pub val Handle handle;
+    pub constructor(Pool state, Handle handle) {
+      self.state = state;
+      self.handle = handle;
+    }
+  end
+
+  pub define class Pinned as
+    pub val Pool state;
+    pub val Receipt receipt;
+    pub constructor(Pool state, Receipt receipt) {
+      self.state = state;
+      self.receipt = receipt;
+    }
+  end
+
+  pub fnc create(int capacity): Result<Pool, String> {
+    if capacity <= 0 || capacity > 1024; then
+      return Err("pool capacity must be 1..1024");
+    fi
+    let mut Array<slot_lifecycle.Slot> rows =
+      new Array<slot_lifecycle.Slot>();
+    let mut Array<int> nonces = new Array<int>();
+    for (let i = 0; i < capacity; i++) {
+      rows.add(slot_lifecycle.empty());
+      nonces.add(0);
+    }
+    return Ok(new Pool(capacity, 1, rows, nonces));
+  }
+end
