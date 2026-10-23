@@ -26,6 +26,13 @@ define module proxy_yaml as
     pub val String target;
   end
 
+  pub define class Backend as
+    pub val String name;
+    pub val String pool;
+    pub val String origin;
+    pub val String weight;
+  end
+
   pub define class Config as
     pub val String mode;
     pub val String listen_host;
@@ -39,6 +46,7 @@ define module proxy_yaml as
     pub val Array<Middleware> middleware;
     pub val Array<Route> routes;
     pub val Array<Service> services;
+    pub val Array<Backend> backends;
   end
 
   fnc decimal(String candidate): bool {
@@ -173,6 +181,24 @@ define module proxy_yaml as
       valid_identifier(parts.get(1));
   }
 
+  pub fnc valid_pool_ref(String uri): bool {
+    if !uri.starts_with("pool://"); then return false; fi
+    val parts = uri.split_literal("pool://");
+    return parts.size == 2 && parts.get(0) == "" &&
+      valid_identifier(parts.get(1));
+  }
+
+  fnc validate_backend(String name, String pool, String origin, String weight):
+      Result<Backend, String> {
+    if !valid_identifier(name) || !valid_identifier(pool) ||
+      !valid_upstream_origin(origin) ||
+      !(weight == "1" || weight == "2" || weight == "3" ||
+        weight == "4" || weight == "5" || weight == "10"); then
+      return Err("invalid backend pool, origin or v1 weight");
+    fi
+    return Ok(new Backend(name, pool, origin, weight));
+  }
+
   fnc validate_service(String name, String kind, String target):
       Result<Service, String> {
     if !valid_identifier(name) || kind != "actor" ||
@@ -196,8 +222,9 @@ define module proxy_yaml as
       (prefix != "/" && prefix.ends_with("/")); then
       return Err("route path_prefix must be a canonical absolute path");
     fi
-    if !valid_upstream_origin(upstream) && !valid_service_ref(upstream); then
-      return Err("upstream must be an HTTP(S) origin or declared service://name");
+    if !valid_upstream_origin(upstream) && !valid_service_ref(upstream) &&
+      !valid_pool_ref(upstream); then
+      return Err("upstream must be HTTP(S), service:// or pool:// binding");
     fi
     if chain != "" && !safe_scalar(chain); then
       return Err("invalid middleware reference");
@@ -248,9 +275,11 @@ define module proxy_yaml as
     let bool seen_routes = false;
     let bool seen_middleware = false;
     let bool seen_services = false;
+    let bool seen_backends = false;
     let Array<Route> routes = new Array<Route>();
     let Array<Middleware> middlewares = new Array<Middleware>();
     let Array<Service> services = new Array<Service>();
+    let Array<Backend> backends = new Array<Backend>();
     let String rn = "";
     let String rh = "";
     let String rp = "";
@@ -262,6 +291,10 @@ define module proxy_yaml as
     let String sn = "";
     let String sk = "";
     let String st = "";
+    let String bn = "";
+    let String bp = "";
+    let String bo = "";
+    let String bw = "";
 
     // Limit parser work even for a locally trusted configuration source.
     // A byte cap before fs.read_text remains a separate runtime dependency.
@@ -309,8 +342,19 @@ define module proxy_yaml as
             services.add(previous.unwrap());
           fi
           sn = ""; sk = ""; st = "";
+        elif section == "backends"; then
+          if bn != ""; then
+            val previous = validate_backend(bn, bp, bo, bw);
+            if previous.is_err(); then return Err("invalid previous backend"); fi
+            for (const existing of backends) {
+              if existing.name == bn || (existing.pool == bp &&
+                existing.origin == bo); then return Err("duplicate backend"); fi
+            }
+            backends.add(previous.unwrap());
+          fi
+          bn = ""; bp = ""; bo = ""; bw = "";
         else
-          return Err("list item outside routes/middleware/services");
+          return Err("list item outside declared sequence");
         fi
         val pair = line.split_literal(": ");
         if pair.size != 2 || pair.get(0) != "- name" ||
@@ -319,7 +363,8 @@ define module proxy_yaml as
         fi
         if section == "routes"; then rn = pair.get(1);
         elif section == "middleware"; then mn = pair.get(1);
-        else sn = pair.get(1); fi
+        elif section == "services"; then sn = pair.get(1);
+        else bn = pair.get(1); fi
         continue;
       fi
 
@@ -347,6 +392,11 @@ define module proxy_yaml as
           if key == "kind" && sk == ""; then sk = value;
           elif key == "target" && st == ""; then st = value;
           else return Err("unknown or duplicate service field"); fi
+        elif section == "backends" && bn != ""; then
+          if key == "pool" && bp == ""; then bp = value;
+          elif key == "origin" && bo == ""; then bo = value;
+          elif key == "weight" && bw == ""; then bw = value;
+          else return Err("unknown or duplicate backend field"); fi
         else
           return Err("list field without list item");
         fi
@@ -413,6 +463,16 @@ define module proxy_yaml as
         services.add(previous.unwrap());
         sn = ""; sk = ""; st = "";
       fi
+      if bn != ""; then
+        val previous = validate_backend(bn, bp, bo, bw);
+        if previous.is_err(); then return Err("invalid backend"); fi
+        for (const existing of backends) {
+          if existing.name == bn || (existing.pool == bp &&
+            existing.origin == bo); then return Err("duplicate backend"); fi
+        }
+        backends.add(previous.unwrap());
+        bn = ""; bp = ""; bo = ""; bw = "";
+      fi
       if line == "listen:"; then
         if seen_listen; then return Err("duplicate listen section"); fi
         seen_listen = true; section = "listen";
@@ -431,6 +491,9 @@ define module proxy_yaml as
       elif line == "services:"; then
         if seen_services; then return Err("duplicate services section"); fi
         seen_services = true; section = "services";
+      elif line == "backends:"; then
+        if seen_backends; then return Err("duplicate backends section"); fi
+        seen_backends = true; section = "backends";
       else
         val pair = line.split_literal(": ");
         if pair.size != 2 || !safe_scalar(pair.get(1)); then
@@ -472,6 +535,16 @@ define module proxy_yaml as
       }
       services.add(last.unwrap());
     fi
+    if bn != ""; then
+      val last = validate_backend(bn, bp, bo, bw);
+      if last.is_err(); then return Err("invalid final backend"); fi
+      for (const existing of backends) {
+        if existing.name == bn || (existing.pool == bp &&
+          existing.origin == bo); then return Err("duplicate final backend"); fi
+      }
+      backends.add(last.unwrap());
+    fi
+    if backends.size > 128; then return Err("backend budget exceeded"); fi
     if services.size > 128; then
       return Err("service binding budget exceeded");
     fi
@@ -513,6 +586,14 @@ define module proxy_yaml as
     fi
 
     for (const route of routes) {
+      if valid_pool_ref(route.upstream); then
+        val binding = route.upstream.split_literal("pool://");
+        let bool pool_exists = false;
+        for (const backend of backends) {
+          if backend.pool == binding.get(1); then pool_exists = true; fi
+        }
+        if !pool_exists; then return Err("unbound pool route"); fi
+      fi
       if valid_service_ref(route.upstream); then
         val binding = route.upstream.split_literal("service://");
         let bool bound = false;
@@ -534,6 +615,6 @@ define module proxy_yaml as
       fi
     }
     return Ok(new Config(mode, host, port, carriers, actors, inflight,
-      deny_private, allowed, connect, middlewares, routes, services));
+      deny_private, allowed, connect, middlewares, routes, services, backends));
   }
 end
