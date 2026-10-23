@@ -55,6 +55,18 @@ pub async routine main(): int {
     stdio.println("FAIL streaming actor body chunks not visible on wire");
     return 1;
   fi
+  // A YAML service binding is not authority to dynamically load guest code.
+  // Unknown target names must remain unavailable rather than spawning actors.
+  val forbidden = await network.connect_async("127.0.0.1", 8080);
+  await forbidden.write_text_async(
+    "GET /unregistered HTTP/1.1\r\nHost: worker.example.test\r\nConnection: close\r\n\r\n");
+  val forbidden_status = await forbidden.read_line_async();
+  await forbidden.close_async();
+  if forbidden_status.is_none() ||
+    !forbidden_status.unwrap().starts_with("HTTP/1.1 501"); then
+    stdio.println("FAIL unregistered actor code image must not execute");
+    return 1;
+  fi
   stdio.println("PASS native Oreslang actor-service and streaming TCP smoke");
   return 0;
 }
