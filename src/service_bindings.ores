@@ -97,7 +97,8 @@ define module service_bindings as
     if !proxy_yaml.valid_identifier(service_name); then
       return Err("invalid service binding request");
     fi
-    for (const service of snapshot.configuration.services) {
+    val proxy_yaml.Config configuration = snapshot.configuration;
+    for (const service of configuration.services) {
       if service.name == service_name; then
         if service.kind != "actor"; then
           return Err("unsupported service binding kind");
