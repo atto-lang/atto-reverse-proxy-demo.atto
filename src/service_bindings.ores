@@ -91,7 +91,10 @@ define module service_bindings as
 
   pub fnc bind(borrow generation.Snapshot snapshot, borrow Registry trusted,
                String service_name): Result<Binding, String> {
-    if snapshot.epoch <= 0 || !proxy_yaml.valid_identifier(service_name); then
+    // Snapshot epochs are minted and range-checked by generation.Coordinator.
+    // Avoid re-validating an imported field here; binding only accepts a
+    // coordinator snapshot and preserves its epoch unchanged.
+    if !proxy_yaml.valid_identifier(service_name); then
       return Err("invalid service binding request");
     fi
     for (const service of snapshot.configuration.services) {
