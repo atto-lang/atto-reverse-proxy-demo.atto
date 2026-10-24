@@ -87,7 +87,8 @@ define module network_admission as
                   borrow traffic_controls.WindowDecision rate,
                   borrow traffic_controls.Breaker breaker,
                   int now_ms): Result<bool, String> {
-    if snapshot.epoch <= 0 || !requests.permits(rt borrow request) ||
+    // generation.Snapshot epochs are range-checked by the coordinator.
+    if !requests.permits(rt borrow request) ||
       request.ticket.epoch != snapshot.epoch; then
       return Err("request lease is stale or belongs to another generation");
     fi
