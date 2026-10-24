@@ -55,6 +55,19 @@ pub async routine main(): int {
   val config = parsed.unwrap();
   val snapshot = new generation.Snapshot(1, config);
 
+  // Trusted runtime registry: YAML may refer to hello-v1 but cannot create it,
+  // select another code image, or grant it ambient network authority.
+  let Array<service_bindings.CodeImage> trusted_images =
+    new Array<service_bindings.CodeImage>();
+  trusted_images.add(new service_bindings.CodeImage(
+    "hello-v1", "abi-v1", false));
+  val trusted_result = service_bindings.registry(trusted_images);
+  if trusted_result.is_err(); then
+    stdio.println("ERROR: trusted actor image registry invalid");
+    return 78;
+  fi
+  val trusted_services = trusted_result.unwrap();
+
   // Port conversion and source-configurable bind scopes are not yet admitted.
   // Never accidentally expose this transport proof on a public listener.
   if config.listen_host != "127.0.0.1" || config.listen_port != "8080" ||
@@ -118,7 +131,7 @@ pub async routine main(): int {
     fi
     if proxy_yaml.valid_service_ref(target.upstream); then
       val bound = service_bindings.reverse_route(rt borrow snapshot,
-        host, exchange.target);
+        rt borrow trusted_services, host, exchange.target);
       if bound.is_err(); then
         await exchange.respond(503, "text/plain; charset=utf-8",
           "Service binding unavailable");
