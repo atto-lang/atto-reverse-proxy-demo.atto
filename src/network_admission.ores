@@ -54,8 +54,8 @@ define module network_admission as
     pub val String hostname;
     pub val String resolved_ip;
     pub val String port;
-    pub constructor(int epoch, int slot, int nonce, String hostname,
-                    String resolved_ip, String port) {
+    private constructor(int epoch, int slot, int nonce, String hostname,
+                        String resolved_ip, String port) {
       self.epoch = epoch;
       self.slot = slot;
       self.nonce = nonce;
@@ -71,8 +71,8 @@ define module network_admission as
     pub val int nonce;
     pub val String origin;
     pub val String resolved_ip;
-    pub constructor(int epoch, int slot, int nonce, String origin,
-                    String resolved_ip) {
+    private constructor(int epoch, int slot, int nonce, String origin,
+                        String resolved_ip) {
       self.epoch = epoch;
       self.slot = slot;
       self.nonce = nonce;
