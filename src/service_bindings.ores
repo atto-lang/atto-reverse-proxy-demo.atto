@@ -21,7 +21,7 @@ define module service_bindings as
   pub define class Registry as
     val Array<CodeImage> images;
 
-    pub constructor(Array<CodeImage> source) {
+    private constructor(Array<CodeImage> source) {
       self.images = new Array<CodeImage>();
       for (const image of source) {
         self.images.add(new CodeImage(image.target, image.abi,
@@ -78,8 +78,8 @@ define module service_bindings as
     pub val String target;
     pub val String abi;
     pub val bool network_capable;
-    pub constructor(int epoch, String name, String kind, String target,
-                    String abi, bool network_capable) {
+    private constructor(int epoch, String name, String kind, String target,
+                        String abi, bool network_capable) {
       self.epoch = epoch;
       self.name = name;
       self.kind = kind;
