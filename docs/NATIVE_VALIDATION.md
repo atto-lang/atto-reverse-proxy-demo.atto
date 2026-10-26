@@ -47,3 +47,15 @@ Real HTTP/1.1 wire tests, correct reverse proxy response status/header/trailer s
 The outbound HTTP/CONNECT transport required for a serving proxy is tracked in [Java backend issue #1942](https://github.com/ores-truffle-oreslang/oreslang-source.java/issues/1942). Route and CONNECT policy helpers make **syntactic and declarative decisions only**, not network access grants. Upstream numeric port/IP range checks, TLS identity, pinned DNS, egress restrictions and real HTTP smuggling defenses remain transport release gates.
 
 The `config_path` module enforces a canonical absolute POSIX spelling for `ores_proxy_conf_yaml`. It cannot prevent concurrent file replacement, ancestor symlinks or TOCTOU attacks; only a capability-based descriptor API can close that gap. Do not authorize hostile configuration paths based on this helper alone.
+
+
+## Reviewed verification inventory
+
+CI does not discover-and-trust new Oreslang files implicitly. Two committed manifests make the verification surface reviewable:
+
+- `ci/oreslang-files.txt` is the complete sorted inventory of `src/**/*.ores` and `tests/**/*.ores` that must be compiler-checked.
+- `ci/pure-contracts.txt` is the complete sorted inventory of standalone `tests/*_contract.ores` programs that must execute successfully.
+
+The workflow first regenerates both inventories from the checked-out tree and diffs them against the committed manifests. A source or pure contract added without updating the manifest fails before compilation. A manifest entry whose file is missing fails the same way. Only then does the runner compiler-check every reviewed Oreslang file and execute every reviewed pure contract.
+
+Integration fixtures that require a separately running listener or another process are compiler-checked through the complete source inventory but are not falsely treated as standalone pure tests. They need their own orchestration gate before any transport claim is promoted.
