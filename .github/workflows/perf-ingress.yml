@@ -158,6 +158,25 @@ jobs:
             for candidate in haproxy oreslang nginx; do run_case 3 "$candidate" "$workload"; done
           done
 
+          echo 'round,candidate,workload,p50,p99,requests_per_sec,transfer_per_sec' >"$out/summary.csv"
+          for round in 1 2 3; do
+            for candidate in oreslang nginx haproxy; do
+              for workload in actor deny; do
+                sample="$out/round-${round}-${candidate}-${workload}.txt"
+                awk -v round="$round" -v candidate="$candidate" -v workload="$workload" '
+                  $1 == "50%" { p50=$2 }
+                  $1 == "99%" { p99=$2 }
+                  $1 == "Requests/sec:" { rps=$2 }
+                  $1 == "Transfer/sec:" { transfer=$2 }
+                  END {
+                    if (p50 == "" || p99 == "" || rps == "" || transfer == "") exit 2
+                    printf "%s,%s,%s,%s,%s,%s,%s\n", round,candidate,workload,p50,p99,rps,transfer
+                  }
+                ' "$sample" >>"$out/summary.csv"
+              done
+            done
+          done
+
           cat "$ores_log" >>"$out/metadata.txt"
 
       - name: Upload raw benchmark evidence
