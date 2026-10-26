@@ -34,7 +34,7 @@ def stats: {median: median, min: min, max: max};
   schema: 2,
   interpretation: "Independent closed-loop connection-close repetitions; percentile medians are not pooled percentiles. Forward proxy results are comparable only when direct-origin median throughput is at least 1.20x the proxy median for the same body size and concurrency.",
   direct_capacity_margin_required: 1.20,
-  capacity_gate_passed: ([$annotated[] | select(.profile == "forward" and .target != "direct")] | all(.metrics_comparable == true)),
+  capacity_gate_passed: (([$annotated[] | select(.profile == "forward" and .target != "direct")] | length > 0) and ([$annotated[] | select(.profile == "forward" and .target != "direct")] | all(.metrics_comparable == true)) and ([.[] | select(.status != "PASS" and (.target == "direct" or .target == "nginx" or .target == "haproxy") and .profile == "forward")] | length == 0)),
   passed: $annotated,
   blocked_or_invalid: [.[] | select(.status != "PASS")]
 }
