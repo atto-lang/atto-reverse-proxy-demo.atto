@@ -33,25 +33,42 @@ jobs:
           java-version: '25'
       - name: Confirm native compiler availability
         run: command -v oreslang
-      - name: Compiler-check every Oreslang source and test
+      - name: Verify reviewed Oreslang inventory is complete
         shell: bash
         run: |
           set -euo pipefail
-          while IFS= read -r -d '' file; do
+          actual="$RUNNER_TEMP/oreslang-files.txt"
+          find src tests -type f -name '*.ores' -print | LC_ALL=C sort > "$actual"
+          if grep -Ev '^(src|tests)/[A-Za-z0-9_./-]+\.ores "$actual"; then
+            echo "Oreslang source path outside the reviewable path contract" >&2
+            exit 1
+          fi
+          diff -u ci/oreslang-files.txt "$actual"
+
+          contracts="$RUNNER_TEMP/pure-contracts.txt"
+          find tests -maxdepth 1 -type f -name '*_contract.ores' -print | LC_ALL=C sort > "$contracts"
+          diff -u ci/pure-contracts.txt "$contracts"
+      - name: Compiler-check every reviewed Oreslang source and test
+        shell: bash
+        run: |
+          set -euo pipefail
+          while IFS= read -r file; do
+            [[ -n "$file" ]] || continue
             echo "CHECK $file"
             oreslang --check "$file"
-          done < <(find src tests -type f -name '*.ores' -print0 | sort -z)
-      - name: Execute every pure contract test
+          done < ci/oreslang-files.txt
+      - name: Execute every reviewed pure contract test
         shell: bash
         run: |
           set -euo pipefail
           count=0
-          while IFS= read -r -d '' file; do
+          while IFS= read -r file; do
+            [[ -n "$file" ]] || continue
             echo "RUN $file"
             oreslang "$file"
             count=$((count + 1))
-          done < <(find tests -type f -name '*_contract.ores' -print0 | sort -z)
+          done < ci/pure-contracts.txt
           if (( count == 0 )); then
-            echo "No *_contract.ores tests found" >&2
+            echo "No pure contract tests declared" >&2
             exit 1
           fi
