@@ -46,16 +46,36 @@ if [[ -n "$proxy_cpu$load_cpu$origin_cpu" ]]; then
   [[ "$proxy_cpu" != "$load_cpu" && "$proxy_cpu" != "$origin_cpu" && "$load_cpu" != "$origin_cpu" ]] || { echo 'CPU IDs must be distinct' >&2; exit 2; }
   proxy_affinity=(taskset -c "$proxy_cpu"); load_affinity=(taskset -c "$load_cpu"); origin_affinity=(taskset -c "$origin_cpu")
 fi
+if [[ "$mode" == full && -z "$proxy_cpu$load_cpu$origin_cpu" ]]; then
+  echo 'Full benchmark mode requires distinct BENCH_PROXY_CPU, BENCH_LOAD_CPU and BENCH_ORIGIN_CPU values' >&2
+  exit 2
+fi
 cargo build --manifest-path "$bench/driver/Cargo.toml" --release --locked
 bin="$bench/driver/target/release/ores-proxy-bench"
 source_sha=${BENCH_SOURCE_SHA:-$(git -C "$bench" rev-parse HEAD 2>/dev/null || true)}
 [[ "$source_sha" =~ ^[0-9a-f]{40}$ ]] || { echo 'BENCH_SOURCE_SHA/source tree must be exactly 40 lowercase hex characters' >&2; exit 2; }
 origin_nonce=$(tr -d '-' < /proc/sys/kernel/random/uuid)
 [[ "$origin_nonce" =~ ^[0-9a-f]{32}$ ]] || { echo 'failed to generate origin nonce' >&2; exit 2; }
+origin_nonce_hash=$(printf '%s' "$origin_nonce" | sha256sum)
+origin_nonce_hash=${origin_nonce_hash%% *}
 {
   printf 'source_sha=%s\n' "$source_sha"
   printf 'mode=%s\nconnection=close\nload=closed-loop\nproxy_cpu=%s\nload_cpu=%s\norigin_cpu=%s\n' "$mode" "${proxy_cpu:-UNPINNED}" "${load_cpu:-UNPINNED}" "${origin_cpu:-UNPINNED}"
   printf 'nginx_global=%s\n' "$nginx_global"
+  printf 'origin_nonce_sha256=%s\n' "$origin_nonce_hash"
+  printf 'cpu_max='
+  cat /sys/fs/cgroup/cpu.max 2>/dev/null || printf 'UNAVAILABLE\n'
+  printf 'cpu_governors='
+  if compgen -G '/sys/devices/system/cpu/cpu*/cpufreq/scaling_governor' >/dev/null; then
+    cat /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor 2>/dev/null | sort -u | tr '\n' ',' || true
+    printf '\n'
+  else
+    printf 'UNAVAILABLE\n'
+  fi
+  printf 'cpu_boost='
+  if [[ -r /sys/devices/system/cpu/cpufreq/boost ]]; then cat /sys/devices/system/cpu/cpufreq/boost
+  elif [[ -r /sys/devices/system/cpu/intel_pstate/no_turbo ]]; then cat /sys/devices/system/cpu/intel_pstate/no_turbo
+  else printf 'UNAVAILABLE\n'; fi
   date -u; uname -a
   command -v lscpu >/dev/null && lscpu
   cargo --version; rustc --version
@@ -119,5 +139,9 @@ fi
 printf '{"schema":1,"status":"NOT_IMPLEMENTED","reason":"no_authenticated_CONNECT_relay_in_oreslang_demo","metrics_comparable":false}\n' > "$out/connect-status.json"
 ps -p "$origin_pid,$nginx_pid,$haproxy_pid" --ppid "$nginx_pid" -o pid,ppid,rss,pcpu,comm > "$out/processes-after.txt" 2>&1 || echo "Process telemetry unavailable" > "$out/processes-after.txt"
 jq -s -f "$bench/summarize.jq" "$out"/*-r*.json > "$out/summary.json"
+if [[ "$mode" == full ]] && ! jq -e '.capacity_gate_passed == true' "$out/summary.json" >/dev/null; then
+  echo 'Direct-origin capacity gate failed; full-run proxy metrics are not publishable' >&2
+  failures=$((failures + 1))
+fi
 printf 'Failures/blocked cases: %s\nResults: %s\n' "$failures" "$out"
 (( failures == 0 ))
