@@ -2,7 +2,7 @@
 # Starts only local fixture/baselines. Never starts or enables Oreslang egress.
 set -euo pipefail
 bench=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
-for cmd in cargo nginx haproxy sha256sum timeout ps jq; do
+for cmd in cargo nginx haproxy sha256sum timeout ps jq tr; do
   command -v "$cmd" >/dev/null || { echo "Missing dependency: $cmd" >&2; exit 2; }
 done
 out=$(mktemp -d "${TMPDIR:-/tmp}/ores-proxy-bench.XXXXXXXX")
@@ -48,8 +48,12 @@ if [[ -n "$proxy_cpu$load_cpu$origin_cpu" ]]; then
 fi
 cargo build --manifest-path "$bench/driver/Cargo.toml" --release --locked
 bin="$bench/driver/target/release/ores-proxy-bench"
+source_sha=${BENCH_SOURCE_SHA:-$(git -C "$bench" rev-parse HEAD 2>/dev/null || true)}
+[[ "$source_sha" =~ ^[0-9a-f]{40}$ ]] || { echo 'BENCH_SOURCE_SHA/source tree must be exactly 40 lowercase hex characters' >&2; exit 2; }
+origin_nonce=$(tr -d '-' < /proc/sys/kernel/random/uuid)
+[[ "$origin_nonce" =~ ^[0-9a-f]{32}$ ]] || { echo 'failed to generate origin nonce' >&2; exit 2; }
 {
-  printf 'source_sha=%s\n' "${BENCH_SOURCE_SHA:-$(git -C "$bench" rev-parse HEAD 2>/dev/null || echo UNVERSIONED)}"
+  printf 'source_sha=%s\n' "$source_sha"
   printf 'mode=%s\nconnection=close\nload=closed-loop\nproxy_cpu=%s\nload_cpu=%s\norigin_cpu=%s\n' "$mode" "${proxy_cpu:-UNPINNED}" "${load_cpu:-UNPINNED}" "${origin_cpu:-UNPINNED}"
   printf 'nginx_global=%s\n' "$nginx_global"
   date -u; uname -a
@@ -63,7 +67,7 @@ bin="$bench/driver/target/release/ores-proxy-bench"
 } > "$out/provenance.txt"
 nginx -t -p "$out/" -c "$bench/nginx.conf" -g "$nginx_global" > "$out/nginx-check.log" 2>&1
 haproxy -c -f "$bench/haproxy.cfg" > "$out/haproxy-check.log" 2>&1
-"${origin_affinity[@]}" "$bin" origin 127.0.0.1:9090 > "$out/origin.log" 2>&1 &
+"${origin_affinity[@]}" "$bin" origin 127.0.0.1:9090 "$origin_nonce" > "$out/origin.log" 2>&1 &
 origin_pid=$!; pids+=("$origin_pid")
 "${proxy_affinity[@]}" nginx -p "$out/" -c "$bench/nginx.conf" -g "$nginx_global" > "$out/nginx.log" 2>&1 &
 nginx_pid=$!; pids+=("$nginx_pid")
@@ -74,7 +78,7 @@ for addr in 127.0.0.1:9090 127.0.0.1:9081 127.0.0.1:9082; do
   ready=0
   for attempt in {1..30}; do
     for pid in "${pids[@]}"; do kill -0 "$pid" || { echo "Fixture exited; inspect $out" >&2; exit 1; }; done
-    if "$bin" run "$addr" forward 0 1 1 0 > /dev/null 2>&1; then ready=1; break; fi
+    if "$bin" run "$addr" forward 0 1 1 0 "$origin_nonce" > /dev/null 2>&1; then ready=1; break; fi
     sleep 0.1
   done
   [[ "$ready" == 1 ]] || { echo "Fixture failed readiness: $addr" >&2; exit 1; }
@@ -85,7 +89,7 @@ failures=0
 measure() {
   local label=$1 addr=$2 profile=$3 size=$4 c=$5 repeat=$6
   local name="$label-$profile-b$size-c$c-r$repeat"
-  if ! "${load_affinity[@]}" timeout 180 "$bin" run "$addr" "$profile" "$size" "$requests" "$c" "$warmup" > "$out/$name.raw" 2> "$out/$name.log"; then
+  if ! "${load_affinity[@]}" timeout 180 "$bin" run "$addr" "$profile" "$size" "$requests" "$c" "$warmup" "$origin_nonce" > "$out/$name.raw" 2> "$out/$name.log"; then
     jq -n --arg target "$label" --arg profile "$profile" --argjson bytes "$size" --argjson concurrency "$c" --argjson repeat "$repeat" \
       '{schema:1,status:"BLOCKED_OR_INVALID",metrics_comparable:false,target:$target,profile:$profile,bytes:$bytes,concurrency:$concurrency,repeat:$repeat}' > "$out/$name.json"
     failures=$((failures + 1))
