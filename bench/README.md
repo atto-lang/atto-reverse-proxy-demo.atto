@@ -33,7 +33,7 @@ cd bench
 cargo test --manifest-path driver/Cargo.toml --locked
 bash test-summary.sh
 bash run.sh                            # 128 requests/case, concurrency 1/8
-BENCH_MODE=full bash run.sh             # 10,000/case, 5 repetitions
+BENCH_MODE=full bash run.sh             # 10,000/case, 6 repetitions
 ```
 
 Each invocation creates a fresh private results directory and prints its path.
@@ -73,8 +73,9 @@ single-core budget comparison, not the language's default multi-pool topology.
 Smoke runs without explicit placement remain exploratory; full mode now
 fails closed unless all three CPU IDs are provided. Provenance records CPU
 quota, governor/boost state, NUMA/topology and process snapshots. For every
-forward profile, the matching direct-origin median must be at least 1.20x the
-proxy median. Otherwise the summary marks that proxy result `BOTTLENECKED` and
+forward profile, the complete expected body-size/concurrency matrix must exist
+for direct, NGINX and HAProxy at the required repetition count, and the matching
+direct-origin median must be at least 1.20x the proxy median. Otherwise the summary marks that proxy result `BOTTLENECKED` and
 `metrics_comparable=false`; full mode fails the capacity gate. This prevents a
 loopback fixture or load-generator ceiling from masquerading as proxy parity.
 
