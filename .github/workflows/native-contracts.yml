@@ -84,6 +84,52 @@ jobs:
         run: |
           oreslang --check src/serve_reverse.ores
           oreslang --check tests/ingress_tcp_smoke.ores
+      - name: Execute loopback ingress status and framing smoke
+        shell: bash
+        run: |
+          set -euo pipefail
+          cfg="$(realpath config/example.yaml)"
+          server_log="$RUNNER_TEMP/reverse-ingress-server.log"
+          smoke_log="$RUNNER_TEMP/reverse-ingress-smoke.log"
+          server_pid=""
+          cleanup() {
+            if [[ -n "$server_pid" ]]; then
+              kill "$server_pid" 2>/dev/null || true
+              wait "$server_pid" 2>/dev/null || true
+            fi
+          }
+          trap cleanup EXIT
+
+          ores_proxy_conf_yaml="$cfg" timeout 45s oreslang --no-prompt \
+            --allow-read="$cfg" \
+            --allow-env=ores_proxy_conf_yaml \
+            --allow-net=127.0.0.1:8080 \
+            src/serve_reverse.ores >"$server_log" 2>&1 &
+          server_pid=$!
+
+          passed=0
+          for attempt in {1..30}; do
+            if ! kill -0 "$server_pid" 2>/dev/null; then
+              cat "$server_log" >&2
+              echo "reverse ingress exited before readiness" >&2
+              exit 1
+            fi
+            if oreslang --no-prompt \
+                --allow-net=127.0.0.1:8080 \
+                tests/ingress_tcp_smoke.ores >"$smoke_log" 2>&1; then
+              passed=1
+              break
+            fi
+            sleep 0.1
+          done
+
+          if [[ "$passed" != 1 ]]; then
+            cat "$server_log" >&2 || true
+            cat "$smoke_log" >&2 || true
+            echo "reverse ingress smoke did not pass" >&2
+            exit 1
+          fi
+          grep -Fxq 'PASS native Oreslang loopback ingress status/framing contract' "$smoke_log"
       - name: Fail closed if reverse ingress configuration vanishes
         shell: bash
         run: |
