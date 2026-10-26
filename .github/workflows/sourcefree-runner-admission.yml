@@ -1,0 +1,21 @@
+name: Source-free hosted runner admission
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  allocation-only:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Prove hosted runner allocation without source checkout
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf 'RUNNER_ALLOCATED\n'
+          printf 'repository=%s\n' "$GITHUB_REPOSITORY"
+          printf 'event=%s\n' "$GITHUB_EVENT_NAME"
+          printf 'sha=%s\n' "$GITHUB_SHA"
+          uname -a
