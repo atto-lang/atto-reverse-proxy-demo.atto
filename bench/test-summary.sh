@@ -21,3 +21,12 @@ printf '%s\n' '[
 .capacity_gate_passed == false and
 (.blocked_or_invalid | length) == 1' >/dev/null
 printf '%s\n' 'PASS summary aggregation, blocked exclusion and direct-capacity gate'
+
+# An empty/invalid dataset must never qualify as a publishable comparison.
+printf '%s\n' '[]' | jq -f "$bench/summarize.jq" | jq -e '.capacity_gate_passed == false' >/dev/null
+printf '%s\n' '[
+{"status":"PASS","target":"direct","profile":"forward","bytes":0,"concurrency":1,"requests_per_second":100,"p50_us":1,"p95_us":2,"p99_us":3},
+{"status":"PASS","target":"nginx","profile":"forward","bytes":0,"concurrency":1,"requests_per_second":20,"p50_us":1,"p95_us":2,"p99_us":3},
+{"status":"BLOCKED_OR_INVALID","target":"direct","profile":"forward","bytes":0,"concurrency":1,"repeat":2}
+]' | jq -f "$bench/summarize.jq" | jq -e '.capacity_gate_passed == false' >/dev/null
+printf '%s\n' 'PASS empty and failed-direct-reference fail-closed gates'
