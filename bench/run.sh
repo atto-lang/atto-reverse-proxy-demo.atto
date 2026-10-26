@@ -2,7 +2,7 @@
 # Starts only local fixture/baselines. Never starts or enables Oreslang egress.
 set -euo pipefail
 bench=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
-for cmd in cargo nginx haproxy sha256sum timeout ps jq tr awk getconf; do
+for cmd in cargo git nginx haproxy sha256sum timeout ps jq tr awk getconf wc sort; do
   command -v "$cmd" >/dev/null || { echo "Missing dependency: $cmd" >&2; exit 2; }
 done
 [[ -x /usr/bin/time ]] || { echo "Missing dependency: /usr/bin/time" >&2; exit 2; }
@@ -82,9 +82,15 @@ source_root=$(cd "$bench/.." && pwd)
 [[ -n "$git_root" ]] || { echo 'benchmark provenance requires a Git worktree' >&2; exit 2; }
 local_head_sha=$(git -C "$git_root" rev-parse HEAD)
 if [[ "$source_root" == "$git_root" ]]; then
+  source_identity_mode=root-head
   source_tree_sha=$(git -C "$git_root" rev-parse 'HEAD^{tree}')
   [[ "$source_sha" == "$local_head_sha" ]] || { echo 'BENCH_SOURCE_SHA does not match the checked-out source HEAD' >&2; exit 2; }
 elif [[ "$source_root" == "$git_root/"* ]]; then
+  source_identity_mode=nested-tree
+  [[ "${BENCH_SOURCE_TREE_SHA:-}" =~ ^[0-9a-f]{40}$ ]] || {
+    echo 'Nested source validation requires independently pinned BENCH_SOURCE_TREE_SHA' >&2
+    exit 2
+  }
   source_rel=${source_root#"$git_root/"}
   source_tree_sha=$(git -C "$git_root" rev-parse "HEAD:$source_rel")
 else
@@ -101,7 +107,7 @@ origin_nonce=$(tr -d '-' < /proc/sys/kernel/random/uuid)
 origin_nonce_hash=$(printf '%s' "$origin_nonce" | sha256sum)
 origin_nonce_hash=${origin_nonce_hash%% *}
 {
-  printf 'source_sha=%s\nsource_tree_sha=%s\nlocal_checkout_head_sha=%s\n' "$source_sha" "$source_tree_sha" "$local_head_sha"
+  printf 'source_sha=%s\nsource_tree_sha=%s\nsource_identity_mode=%s\nlocal_checkout_head_sha=%s\n' "$source_sha" "$source_tree_sha" "$source_identity_mode" "$local_head_sha"
   printf 'mode=%s\nconnection=close\nload=closed-loop\nproxy_cpu=%s\nload_cpu=%s\norigin_cpu=%s\n' "$mode" "${proxy_cpu:-UNPINNED}" "${load_cpu:-UNPINNED}" "${origin_cpu:-UNPINNED}"
   printf 'nginx_global=%s\n' "$nginx_global"
   printf 'origin_nonce_sha256=%s\n' "$origin_nonce_hash"
