@@ -60,7 +60,7 @@ just to make a benchmark pass. Record Java/Graal JIT, Native Image or LLVM,
 compiler flags, artifact hashes and the source SHA of the actual serving
 runtime; a user-supplied address is not an identity attestation.
 
-For controlled runs use three distinct, allowed CPU IDs:
+Full/publishable runs require three distinct, allowed CPU IDs:
 
 ```sh
 BENCH_MODE=full BENCH_PROXY_CPU=2 BENCH_LOAD_CPU=3 BENCH_ORIGIN_CPU=4 bash bench/run.sh
@@ -70,10 +70,13 @@ That pins one NGINX worker / one HAProxy thread, generator and fixture to
 separate CPUs. If Oreslang is supplied, pin that separately started process to
 the same proxy CPU and record its actual carrier/actor limits. This is a
 single-core budget comparison, not the language's default multi-pool topology.
-Without explicit placement, results are exploratory. Use an idle host and
-record its governor, turbo, NUMA, CPU quota and background activity. Check that
-direct-origin/generator capacity exceeds proxy throughput before interpreting
-saturation; loopback and the bounded 16-worker fixture can be bottlenecks.
+Smoke runs without explicit placement remain exploratory; full mode now
+fails closed unless all three CPU IDs are provided. Provenance records CPU
+quota, governor/boost state, NUMA/topology and process snapshots. For every
+forward profile, the matching direct-origin median must be at least 1.20x the
+proxy median. Otherwise the summary marks that proxy result `BOTTLENECKED` and
+`metrics_comparable=false`; full mode fails the capacity gate. This prevents a
+loopback fixture or load-generator ceiling from masquerading as proxy parity.
 
 `BENCH_SANDBOX_SMOKE=1` permits config/wire testing in restricted UID namespaces
 using NGINX's single-process mode and the invoking user. Provenance records this
@@ -86,8 +89,10 @@ Full runs sweep concurrency 1/16/64/256 and 0/1 KiB/64 KiB bodies, with 200
 serial warm-up requests per case, five independent repetitions and alternating
 baseline order. Each measured request opens a TCP connection, sends a bodyless
 GET with fixed Host and `Connection: close`, reads the whole response through
-EOF and checks status, exactly one Content-Length, exact body and origin
-marker. Unsupported encodings, duplicate lengths, truncation, extra bytes or
+EOF and checks status, exactly one Content-Length, exact body and a fresh
+per-run origin nonce. The nonce is supplied only to the fixture and load
+generator, not to the proxy under test, so a static synthetic marker cannot
+qualify as upstream traversal. Unsupported encodings, duplicate lengths, truncation, extra bytes or
 any transport error invalidate the case. Every request is checked; preflight
 and warm-up are excluded from measurements.
 
@@ -107,14 +112,16 @@ profile, body size and concurrency, reporting median/min/max across repetitions.
 Medians of per-run percentiles are labelled as such, never pooled percentiles.
 No cross-profile ratios, automatic winners or flaky timing thresholds are used.
 
-`provenance.txt` captures source SHA (or explicitly UNVERSIONED), compiler and
+`provenance.txt` requires a canonical 40-lowercase-hex source SHA and captures compiler and
 product versions/build options, executable/config hashes, kernel/CPU information
 and optional affinity/runtime SHA. Distro package versions are recorded, not
 bit-for-bit pinned; use a reviewed pinned package/image manifest for published
 comparisons. Per-process RSS/current-CPU snapshots are diagnostic only; they
 are not peak memory, whole-tree CPU, per-request allocation or a leak proof.
 Unavailable telemetry is explicit. CI uploads raw case results, logs, provenance
-and summaries, and treats the suite as a functional harness test.
+and summaries, and treats the suite as a functional harness test. The Oreslang
+runtime source SHA is likewise required to be canonical before native policy
+timings are accepted.
 
 ## Oreslang policy workload
 
