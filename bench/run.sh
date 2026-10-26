@@ -43,7 +43,7 @@ expected_matrix_json=$(
     for size in $sizes; do
       printf '%s %s\n' "$size" "$c"
     done
-  done | jq -Rsc 'split("\n")[:-1] | map(split(" ") | [.[0] | tonumber, .[1] | tonumber]) | sort'
+  done | jq -Rsc -f "$bench/matrix.jq"
 )
 # Restricted UID namespaces can exercise config/wire smoke without a worker UID
 # transition. This is recorded and forbidden for full benchmark runs.
@@ -135,7 +135,7 @@ origin_nonce_hash=${origin_nonce_hash%% *}
   command -v lscpu >/dev/null && lscpu
   cargo --version; rustc --version
   nginx -V 2>&1; haproxy -vv
-  sha256sum "$bench/summarize.jq" "$bench/driver/Cargo.lock" "$bin" "$(command -v nginx)" "$(command -v haproxy)" "$bench/nginx.conf" "$bench/haproxy.cfg" "$bench/run.sh"
+  sha256sum "$bench/matrix.jq" "$bench/summarize.jq" "$bench/driver/Cargo.lock" "$bin" "$(command -v nginx)" "$(command -v haproxy)" "$bench/nginx.conf" "$bench/haproxy.cfg" "$bench/run.sh"
   if command -v oreslang >/dev/null; then sha256sum "$(command -v oreslang)"; fi
   printf 'oreslang_backend=%s\n' "${ORESLANG_BACKEND:-NOT_PROVIDED}"
   printf 'oreslang_runtime_source_sha=%s\n' "${ORESLANG_RUNTIME_SHA:-NOT_PROVIDED}"
