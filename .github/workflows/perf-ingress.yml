@@ -78,7 +78,7 @@ jobs:
             local port="$1" path="$2" expected_status="$3" expected_body="$4"
             local body status
             body="$(mktemp)"
-            status="$(curl --fail-with-body --silent --show-error               -H 'Host: worker.example.test'               -o "$body" -w '%{http_code}'               "http://127.0.0.1:${port}${path}" || true)"
+            status="$(curl --silent --show-error               -H 'Host: worker.example.test'               -o "$body" -w '%{http_code}'               "http://127.0.0.1:${port}${path}" || true)"
             if test "$status" != "$expected_status" ||               test "$(cat "$body")" != "$expected_body"; then
               echo "preflight mismatch port=$port path=$path status=$status" >&2
               cat "$body" >&2 || true
