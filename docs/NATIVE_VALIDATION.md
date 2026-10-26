@@ -59,3 +59,10 @@ CI does not discover-and-trust new Oreslang files implicitly. Two committed mani
 The workflow first regenerates both inventories from the checked-out tree and diffs them against the committed manifests. A source or pure contract added without updating the manifest fails before compilation. A manifest entry whose file is missing fails the same way. Only then does the runner compiler-check every reviewed Oreslang file and execute every reviewed pure contract.
 
 Integration fixtures that require a separately running listener or another process are compiler-checked through the complete source inventory but are not falsely treated as standalone pure tests. They need their own orchestration gate before any transport claim is promoted.
+
+
+## Orchestrated loopback ingress gate
+
+After all reviewed source files compiler-check and all pure contracts execute, CI now starts `src/serve_reverse.ores` as the real loopback listener with only the exact config read, config environment, and `127.0.0.1:8080` network permissions. It waits for listener readiness, then executes `tests/ingress_tcp_smoke.ores` as a separate Oreslang process with only loopback network authority.
+
+The client verifies 501 for an admitted route whose upstream transport is intentionally unavailable, 403 for missing required middleware input, 404 for an absent route, and 400 for an encoded noncanonical path. CI then proves the server is still alive and tears it down. This is ingress/ownership/wire-status evidence only; it does not implement or claim upstream forwarding.
