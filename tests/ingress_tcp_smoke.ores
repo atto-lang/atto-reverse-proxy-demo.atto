@@ -50,6 +50,37 @@ pub async routine main(): int {
     stdio.println("FAIL encoded-path rejection");
     return 1;
   fi
-  stdio.println("PASS native Oreslang loopback ingress status contract");
+
+  // The real HTTP transport must reject ambiguous framing before this
+  // application-level metadata parser can observe a canonical request.
+  val duplicate_host = await network.connect_async("127.0.0.1", 8080);
+  await duplicate_host.write_text_async(
+    "GET /api HTTP/1.1\r\nHost: api.example.test\r\nHost: evil.example.test\r\nx-internal-token: demo\r\nConnection: close\r\n\r\n"
+  );
+  val status_duplicate_host = await duplicate_host.read_line_async();
+  await duplicate_host.close_async();
+  if status_duplicate_host.is_some(); then
+    val line = status_duplicate_host.unwrap();
+    if !line.starts_with("HTTP/1.1 4"); then
+      stdio.println("FAIL duplicate Host reached an admitted/non-4xx path");
+      return 1;
+    fi
+  fi
+
+  val ambiguous_framing = await network.connect_async("127.0.0.1", 8080);
+  await ambiguous_framing.write_text_async(
+    "GET /api HTTP/1.1\r\nHost: api.example.test\r\nx-internal-token: demo\r\nContent-Length: 4\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n0\r\n\r\n"
+  );
+  val status_ambiguous = await ambiguous_framing.read_line_async();
+  await ambiguous_framing.close_async();
+  if status_ambiguous.is_some(); then
+    val line = status_ambiguous.unwrap();
+    if !line.starts_with("HTTP/1.1 4"); then
+      stdio.println("FAIL TE/CL ambiguity reached an admitted/non-4xx path");
+      return 1;
+    fi
+  fi
+
+  stdio.println("PASS native Oreslang loopback ingress status/framing contract");
   return 0;
 }
