@@ -45,6 +45,21 @@ define isoactor StreamV1 as
   }
 end
 
+fnc load_config(String path): Result<proxy_yaml.Config, String> {
+  // Lexical path admission is only the first boundary. Convert filesystem
+  // replacement/read failures into a closed result instead of crashing the
+  // experimental listener. A future descriptor-scoped API must still remove
+  // the remaining ancestor-symlink/TOCTOU window.
+  try {
+    if fs.is_symlink(path) || !fs.exists(path) || fs.is_dir(path); then
+      return Err("configuration is not a regular file");
+    fi
+    return proxy_yaml.parse(fs.read_text(path), "reverse");
+  } catch (failure) {
+    return Err("configuration read failed");
+  }
+}
+
 pub async routine main(): int {
   val selected = env.get("ores_proxy_conf_yaml");
   if selected.is_none(); then
@@ -56,14 +71,10 @@ pub async routine main(): int {
     stdio.println("ERROR: config path must be canonical and absolute");
     return 65;
   fi
-  if fs.is_symlink(path) || !fs.exists(path) || fs.is_dir(path); then
-    stdio.println("ERROR: nonregular configuration");
-    return 65;
-  fi
-  val parsed = proxy_yaml.parse(fs.read_text(path), "reverse");
+  val parsed = load_config(path);
   if parsed.is_err(); then
-    stdio.println("ERROR: invalid proxy config");
-    return 65;
+    stdio.println("ERROR: configuration admission failed");
+    return 74;
   fi
   val config = parsed.unwrap();
   val snapshot = new generation.Snapshot(1, config);
