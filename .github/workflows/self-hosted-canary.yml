@@ -1,0 +1,37 @@
+name: Oreslang self-hosted runner canary
+on:
+  pull_request:
+    branches:
+      - main
+permissions: {}
+jobs:
+  exact-label:
+    runs-on: [self-hosted, linux, x64, oreslang-private-ephemeral]
+    timeout-minutes: 5
+    steps:
+      - name: Prove exact-label runner admission and runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "runner=$RUNNER_NAME"
+          command -v oreslang
+          sha256sum "$(command -v oreslang)"
+          oreslang --version || true
+          java -version
+  generic-linux-x64:
+    runs-on: [self-hosted, linux, x64]
+    timeout-minutes: 5
+    steps:
+      - name: Probe generic source-local runner without checkout
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "runner=$RUNNER_NAME"
+          if command -v oreslang; then
+            sha256sum "$(command -v oreslang)"
+            oreslang --version || true
+          else
+            echo "ORESLANG_RUNTIME_MISSING"
+            exit 3
+          fi
+          java -version
