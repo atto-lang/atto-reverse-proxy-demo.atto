@@ -31,7 +31,7 @@ trap cleanup EXIT
 mode=${BENCH_MODE:-smoke}
 case "$mode" in
   smoke) requests=128; warmup=8; repeats=1; levels='1 8'; sizes='0 1024' ;;
-  full) requests=10000; warmup=200; repeats=5; levels='1 16 64 256'; sizes='0 1024 65536' ;;
+  full) requests=10000; warmup=200; repeats=6; levels='1 16 64 256'; sizes='0 1024 65536' ;;
   *) echo 'BENCH_MODE must be smoke or full' >&2; exit 2 ;;
 esac
 # Restricted UID namespaces can exercise config/wire smoke without a worker UID
@@ -50,6 +50,7 @@ if [[ -n "$proxy_cpu$load_cpu$origin_cpu" ]]; then
   command -v taskset >/dev/null
   for cpu in "$proxy_cpu" "$load_cpu" "$origin_cpu"; do
     [[ "$cpu" =~ ^[0-9]+$ ]] || { echo 'Supply all three numeric CPU IDs' >&2; exit 2; }
+    taskset -c "$cpu" true >/dev/null 2>&1 || { echo "CPU $cpu is outside the current allowed affinity" >&2; exit 2; }
   done
   [[ "$proxy_cpu" != "$load_cpu" && "$proxy_cpu" != "$origin_cpu" && "$load_cpu" != "$origin_cpu" ]] || { echo 'CPU IDs must be distinct' >&2; exit 2; }
   proxy_affinity=(taskset -c "$proxy_cpu"); load_affinity=(taskset -c "$load_cpu"); origin_affinity=(taskset -c "$origin_cpu")
@@ -71,13 +72,32 @@ fi
 cargo build --manifest-path "$bench/driver/Cargo.toml" --release --locked
 bin="$bench/driver/target/release/ores-proxy-bench"
 source_sha=${BENCH_SOURCE_SHA:-$(git -C "$bench" rev-parse HEAD 2>/dev/null || true)}
-[[ "$source_sha" =~ ^[0-9a-f]{40}$ ]] || { echo 'BENCH_SOURCE_SHA/source tree must be exactly 40 lowercase hex characters' >&2; exit 2; }
+[[ "$source_sha" =~ ^[0-9a-f]{40}$ ]] || { echo 'BENCH_SOURCE_SHA must be exactly 40 lowercase hex characters' >&2; exit 2; }
+git_root=$(git -C "$bench" rev-parse --show-toplevel 2>/dev/null || true)
+source_root=$(cd "$bench/.." && pwd)
+[[ -n "$git_root" ]] || { echo 'benchmark provenance requires a Git worktree' >&2; exit 2; }
+local_head_sha=$(git -C "$git_root" rev-parse HEAD)
+if [[ "$source_root" == "$git_root" ]]; then
+  source_tree_sha=$(git -C "$git_root" rev-parse 'HEAD^{tree}')
+  [[ "$source_sha" == "$local_head_sha" ]] || { echo 'BENCH_SOURCE_SHA does not match the checked-out source HEAD' >&2; exit 2; }
+elif [[ "$source_root" == "$git_root/"* ]]; then
+  source_rel=${source_root#"$git_root/"}
+  source_tree_sha=$(git -C "$git_root" rev-parse "HEAD:$source_rel")
+else
+  echo 'benchmark source root is outside its Git worktree' >&2
+  exit 2
+fi
+[[ "$source_tree_sha" =~ ^[0-9a-f]{40}$ ]] || { echo 'unable to resolve exact benchmark source tree SHA' >&2; exit 2; }
+if [[ -n "${BENCH_SOURCE_TREE_SHA:-}" ]]; then
+  [[ "$BENCH_SOURCE_TREE_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo 'BENCH_SOURCE_TREE_SHA must be exactly 40 lowercase hex characters' >&2; exit 2; }
+  [[ "$source_tree_sha" == "$BENCH_SOURCE_TREE_SHA" ]] || { echo 'BENCH_SOURCE_TREE_SHA does not match the checked-out source tree' >&2; exit 2; }
+fi
 origin_nonce=$(tr -d '-' < /proc/sys/kernel/random/uuid)
 [[ "$origin_nonce" =~ ^[0-9a-f]{32}$ ]] || { echo 'failed to generate origin nonce' >&2; exit 2; }
 origin_nonce_hash=$(printf '%s' "$origin_nonce" | sha256sum)
 origin_nonce_hash=${origin_nonce_hash%% *}
 {
-  printf 'source_sha=%s\n' "$source_sha"
+  printf 'source_sha=%s\nsource_tree_sha=%s\nlocal_checkout_head_sha=%s\n' "$source_sha" "$source_tree_sha" "$local_head_sha"
   printf 'mode=%s\nconnection=close\nload=closed-loop\nproxy_cpu=%s\nload_cpu=%s\norigin_cpu=%s\n' "$mode" "${proxy_cpu:-UNPINNED}" "${load_cpu:-UNPINNED}" "${origin_cpu:-UNPINNED}"
   printf 'nginx_global=%s\n' "$nginx_global"
   printf 'origin_nonce_sha256=%s\n' "$origin_nonce_hash"
@@ -155,7 +175,11 @@ measure() {
 }
 # Rotate target order per repeat to reduce systematic order/thermal bias.
 for ((repeat=1; repeat<=repeats; repeat++)); do
-  if (( repeat % 2 )); then targets='direct nginx haproxy'; else targets='haproxy nginx direct'; fi
+  case $((repeat % 3)) in
+    1) targets='direct nginx haproxy' ;;
+    2) targets='nginx haproxy direct' ;;
+    0) targets='haproxy direct nginx' ;;
+  esac
   for c in $levels; do
     for label in $targets; do
       case "$label" in direct) addr=127.0.0.1:9090 ;; nginx) addr=127.0.0.1:9081 ;; haproxy) addr=127.0.0.1:9082 ;; esac
