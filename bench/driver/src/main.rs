@@ -8,6 +8,16 @@ use std::time::{Duration, Instant};
 
 const LIMIT: usize = 1024 * 1024;
 const INGRESS: &[u8] = b"Upstream forwarding unavailable in this runtime";
+const TEST_NONCE: &str = "0123456789abcdef0123456789abcdef";
+
+fn nonce(s: &str) -> Result<&str, String> {
+    if s.len() != 32
+        || !s.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
+    {
+        return Err("origin nonce must be exactly 32 lowercase hex characters".into());
+    }
+    Ok(s)
+}
 
 fn address(s: &str) -> Result<SocketAddr, String> {
     let a: SocketAddr = s.parse().map_err(|_| "expected numeric loopback IP:port")?;
@@ -32,7 +42,12 @@ fn expected(profile: &str, size: usize) -> Result<(u16, Vec<u8>, String), String
 }
 // This fixture deliberately supports a bounded Content-Length/connection-close
 // response only. Reject unsupported framing rather than timing partial bodies.
-fn verify(bytes: &[u8], profile: &str, size: usize) -> Result<(), String> {
+fn verify_with_nonce(
+    bytes: &[u8],
+    profile: &str,
+    size: usize,
+    origin_nonce: &str,
+) -> Result<(), String> {
     let end = bytes
         .windows(4)
         .position(|w| w == b"\r\n\r\n")
@@ -82,15 +97,18 @@ fn verify(bytes: &[u8], profile: &str, size: usize) -> Result<(), String> {
     if length != Some(body.len()) || bytes[end + 4..] != body {
         return Err("fixture body mismatch".into());
     }
-    if profile == "forward" && marker != Some("fixture-v1") {
-        return Err("missing origin marker".into());
+    if profile == "forward" && marker != Some(origin_nonce) {
+        return Err("missing or stale origin nonce".into());
     }
     if profile == "ingress" && marker.is_some() {
         return Err("ingress unexpectedly reached origin".into());
     }
     Ok(())
 }
-fn request(addr: SocketAddr, profile: &str, size: usize) -> Result<u64, String> {
+fn verify(bytes: &[u8], profile: &str, size: usize) -> Result<(), String> {
+    verify_with_nonce(bytes, profile, size, "fixture-v1")
+}
+fn request(addr: SocketAddr, profile: &str, size: usize, origin_nonce: &str) -> Result<u64, String> {
     let (_, _, path) = expected(profile, size)?;
     let start = Instant::now();
     let mut s =
@@ -120,15 +138,15 @@ fn request(addr: SocketAddr, profile: &str, size: usize) -> Result<u64, String> 
     }
     // Time to complete EOF-delimited response, excluding correctness parsing.
     let micros = start.elapsed().as_micros().min(u64::MAX as u128) as u64;
-    verify(&response, profile, size)?;
+    verify_with_nonce(&response, profile, size, origin_nonce)?;
     Ok(micros)
 }
 fn percentile(sorted: &[u64], p: usize) -> u64 {
     sorted[(sorted.len() * p).div_ceil(100).saturating_sub(1)]
 }
 fn run(args: &[String]) -> Result<(), String> {
-    if args.len() != 6 {
-        return Err("run IP:PORT ingress|forward BYTES REQUESTS CONCURRENCY WARMUP".into());
+    if args.len() != 7 {
+        return Err("run IP:PORT ingress|forward BYTES REQUESTS CONCURRENCY WARMUP ORIGIN_NONCE".into());
     }
     let addr = address(&args[0])?;
     let profile = &args[1];
@@ -140,10 +158,11 @@ fn run(args: &[String]) -> Result<(), String> {
         return Err("concurrency exceeds requests".into());
     }
     let warmup = number(&args[5], 0, 10000)?;
+    let origin_nonce = nonce(&args[6])?.to_string();
     // Preflight/warmup must finish successfully before any measured request.
-    request(addr, profile, size).map_err(|e| format!("preflight: {e}"))?;
+    request(addr, profile, size, &origin_nonce).map_err(|e| format!("preflight: {e}"))?;
     for _ in 0..warmup {
-        request(addr, profile, size).map_err(|e| format!("warmup: {e}"))?;
+        request(addr, profile, size, &origin_nonce).map_err(|e| format!("warmup: {e}"))?;
     }
     let next = Arc::new(AtomicUsize::new(0));
     let barrier = Arc::new(Barrier::new(concurrency + 1));
@@ -152,6 +171,7 @@ fn run(args: &[String]) -> Result<(), String> {
         let next = next.clone();
         let barrier = barrier.clone();
         let profile = profile.clone();
+        let origin_nonce = origin_nonce.clone();
         workers.push(std::thread::spawn(move || {
             let mut samples = Vec::new();
             let mut errors = 0usize;
@@ -160,7 +180,7 @@ fn run(args: &[String]) -> Result<(), String> {
                 if next.fetch_add(1, Ordering::Relaxed) >= total {
                     break;
                 }
-                match request(addr, &profile, size) {
+                match request(addr, &profile, size, &origin_nonce) {
                     Ok(t) => samples.push(t),
                     Err(_) => errors += 1,
                 }
@@ -186,13 +206,14 @@ fn run(args: &[String]) -> Result<(), String> {
     println!("{{\"schema\":1,\"status\":\"PASS\",\"profile\":\"{profile}\",\"connection\":\"close\",\"load\":\"closed-loop\",\"bytes\":{size},\"requests\":{total},\"concurrency\":{concurrency},\"warmup\":{warmup},\"seconds\":{seconds:.6},\"requests_per_second\":{:.3},\"p50_us\":{},\"p95_us\":{},\"p99_us\":{},\"max_us\":{},\"errors\":0}}", total as f64 / seconds, percentile(&samples,50), percentile(&samples,95), percentile(&samples,99), samples.last().unwrap());
     Ok(())
 }
-fn origin(addr: SocketAddr) -> Result<(), String> {
+fn origin(addr: SocketAddr, origin_nonce: String) -> Result<(), String> {
     let listener = TcpListener::bind(addr).map_err(|e| e.to_string())?;
     // Bounded fixture workers with a bounded channel; never one thread/request.
     let (tx, rx) = std::sync::mpsc::sync_channel::<TcpStream>(256);
     let rx = Arc::new(std::sync::Mutex::new(rx));
     for _ in 0..16 {
         let rx = rx.clone();
+        let origin_nonce = origin_nonce.clone();
         std::thread::spawn(move || loop {
             let stream = rx.lock().unwrap().recv();
             let Ok(mut s) = stream else {
@@ -214,7 +235,7 @@ fn origin(addr: SocketAddr) -> Result<(), String> {
                 .strip_prefix("/bytes/")
                 .and_then(|s| number(s, 0, 65536).ok());
             if let Some(size) = size {
-                let head = format!("HTTP/1.1 200 OK\r\nContent-Length: {size}\r\nContent-Type: application/octet-stream\r\nX-Bench-Origin: fixture-v1\r\nConnection: close\r\n\r\n");
+                let head = format!("HTTP/1.1 200 OK\r\nContent-Length: {size}\r\nContent-Type: application/octet-stream\r\nX-Bench-Origin: {origin_nonce}\r\nConnection: close\r\n\r\n");
                 let _ = s.write_all(head.as_bytes());
                 let _ = s.write_all(&vec![b'x'; size]);
             } else {
@@ -234,8 +255,11 @@ fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let result = match args.first().map(String::as_str) {
         Some("run") => run(&args[1..]),
-        Some("origin") if args.len()==2 => address(&args[1]).and_then(origin),
-        _ => Err("usage: ores-proxy-bench origin IP:PORT | run IP:PORT ingress|forward BYTES REQUESTS CONCURRENCY WARMUP".into()),
+        Some("origin") if args.len() == 3 => address(&args[1]).and_then(|addr| {
+            let origin_nonce = nonce(&args[2])?.to_string();
+            origin(addr, origin_nonce)
+        }),
+        _ => Err("usage: ores-proxy-bench origin IP:PORT ORIGIN_NONCE | run IP:PORT ingress|forward BYTES REQUESTS CONCURRENCY WARMUP ORIGIN_NONCE".into()),
     };
     if let Err(e) = result {
         eprintln!("benchmark rejected: {e}");
@@ -270,6 +294,21 @@ mod tests {
         )
         .is_err());
     }
+    #[test]
+    fn stale_origin_marker_is_not_forwarding_proof() {
+        let stale = response(200, "X-Bench-Origin: fixture-v1\r\n", b"xxx");
+        assert!(verify_with_nonce(&stale, "forward", 3, TEST_NONCE).is_err());
+        let fresh = response(
+            200,
+            &format!("X-Bench-Origin: {TEST_NONCE}\r\n"),
+            b"xxx",
+        );
+        assert!(verify_with_nonce(&fresh, "forward", 3, TEST_NONCE).is_ok());
+        assert!(nonce(TEST_NONCE).is_ok());
+        assert!(nonce("fixture-v1").is_err());
+        assert!(nonce("ABCDEF0123456789ABCDEF0123456789").is_err());
+    }
+
     #[test]
     fn failure_is_not_forwarding() {
         assert!(verify(&response(501, "", INGRESS), "ingress", 0).is_ok());
@@ -325,6 +364,7 @@ mod tests {
             "1".into(),
             "1".into(),
             "0".into(),
+            TEST_NONCE.into(),
         ]);
         assert!(result.unwrap_err().contains("preflight"));
         server.join().unwrap();
@@ -347,10 +387,14 @@ mod tests {
             let (mut s, _) = listener.accept().unwrap();
             let mut b = [0; 1024];
             let _ = s.read(&mut b);
-            s.write_all(&response(200, "X-Bench-Origin: fixture-v1\r\n", b"xxx"))
-                .unwrap();
+            s.write_all(&response(
+                200,
+                &format!("X-Bench-Origin: {TEST_NONCE}\r\n"),
+                b"xxx",
+            ))
+            .unwrap();
         });
-        assert!(request(addr, "forward", 3).is_ok());
+        assert!(request(addr, "forward", 3, TEST_NONCE).is_ok());
         server.join().unwrap();
     }
 }
