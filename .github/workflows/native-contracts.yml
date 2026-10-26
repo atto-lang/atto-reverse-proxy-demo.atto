@@ -91,7 +91,10 @@ jobs:
           missing="$RUNNER_TEMP/ores-proxy-missing-config.yaml"
           rm -f "$missing"
           set +e
-          ores_proxy_conf_yaml="$missing" oreslang --no-prompt             --allow-read="$missing"             --allow-env=ores_proxy_conf_yaml             src/serve_reverse.ores >"$RUNNER_TEMP/missing-config.log" 2>&1
+          ores_proxy_conf_yaml="$missing" oreslang --no-prompt \
+            --allow-read="$missing" \
+            --allow-env=ores_proxy_conf_yaml \
+            src/serve_reverse.ores >"$RUNNER_TEMP/missing-config.log" 2>&1
           status=$?
           set -e
           test "$status" = 74
