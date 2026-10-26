@@ -288,14 +288,14 @@ mod tests {
     #[test]
     fn exact_origin_body_and_marker() {
         assert!(verify(
-            &response(200, &format!("X-Bench-Origin: {TEST_NONCE}\\r\\n"), b"xxx"),
+            &response(200, &format!("X-Bench-Origin: {TEST_NONCE}\r\n"), b"xxx"),
             "forward",
             3
         )
         .is_ok());
         assert!(verify(&response(200, "", b"xxx"), "forward", 3).is_err());
         assert!(verify(
-            &response(200, &format!("X-Bench-Origin: {TEST_NONCE}\\r\\n"), b"bad"),
+            &response(200, &format!("X-Bench-Origin: {TEST_NONCE}\r\n"), b"bad"),
             "forward",
             3
         )
@@ -317,7 +317,7 @@ mod tests {
         assert!(verify(&response(501, "", INGRESS), "ingress", 0).is_ok());
         assert!(verify(&response(501, "", INGRESS), "forward", 0).is_err());
         assert!(verify(
-            &response(200, &format!("X-Bench-Origin: {TEST_NONCE}\\r\\n"), b""),
+            &response(200, &format!("X-Bench-Origin: {TEST_NONCE}\r\n"), b""),
             "ingress",
             0
         )
@@ -329,11 +329,11 @@ mod tests {
             "Content-Length: 3\r\n",
             "Transfer-Encoding: chunked\r\n",
             "Content-Encoding: gzip\r\n",
-            &format!("X-Bench-Origin: {TEST_NONCE}\\r\\n"),
+            "X-Bench-Origin: fixture-v1\r\n",
             " folded: x\r\n",
         ] {
             assert!(verify(
-                &response(200, &format!("X-Bench-Origin: {TEST_NONCE}\\r\\n{h}"), b"xxx"),
+                &response(200, &format!("X-Bench-Origin: {TEST_NONCE}\r\n{h}"), b"xxx"),
                 "forward",
                 3
             )
