@@ -129,7 +129,7 @@ measure() {
   local name="$label-$profile-b$size-c$c-r$repeat"
   local origin_before origin_after
   origin_before=$(proc_ticks "$origin_pid") || { echo "Origin telemetry unavailable" >&2; exit 2; }
-  if ! /usr/bin/time -f 'load_user_s=%U load_sys_s=%S load_maxrss_kb=%M' -o "$out/$name.time" \
+  if ! /usr/bin/time -f 'load_user_s=%U\nload_sys_s=%S\nload_maxrss_kb=%M' -o "$out/$name.time" \
       "${load_affinity[@]}" timeout 180 "$bin" run "$addr" "$profile" "$size" "$requests" "$c" "$warmup" "$origin_nonce" > "$out/$name.raw" 2> "$out/$name.log"; then
     jq -n --arg target "$label" --arg profile "$profile" --argjson bytes "$size" --argjson concurrency "$c" --argjson repeat "$repeat" \
       '{schema:1,status:"BLOCKED_OR_INVALID",metrics_comparable:false,target:$target,profile:$profile,bytes:$bytes,concurrency:$concurrency,repeat:$repeat}' > "$out/$name.json"
