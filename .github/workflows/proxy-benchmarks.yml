@@ -1,0 +1,44 @@
+name: Proxy Benchmark Harness
+on:
+  pull_request:
+    paths: ['bench/**', 'tests/perf_policy_contract.ores', '.github/workflows/proxy-benchmarks.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  harness-smoke:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+      - name: Install benchmark dependencies
+        run: |
+          rustup toolchain install 1.90.0 --profile minimal --component rustfmt
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends nginx haproxy jq
+          # Use fixture-specific configs only; stop distribution default listeners.
+          sudo systemctl stop nginx haproxy || true
+      - name: Check Rust formatting and correctness tests
+        working-directory: bench
+        run: |
+          cargo fmt --manifest-path driver/Cargo.toml --check
+          cargo test --manifest-path driver/Cargo.toml --locked
+          bash -n run.sh policy.sh
+          bash test-summary.sh
+      - name: Run baseline correctness smoke (no performance release gate)
+        env:
+          BENCH_SOURCE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          TMPDIR: ${{ runner.temp }}
+        run: |
+          export PATH="/usr/sbin:$PATH"
+          bash bench/run.sh
+      - name: Preserve exact config, version, raw samples and summary evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: proxy-benchmark-smoke-${{ github.run_id }}
+          path: ${{ runner.temp }}/ores-proxy-bench.*/
+          retention-days: 14

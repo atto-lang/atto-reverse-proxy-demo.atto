@@ -34,3 +34,8 @@ The runtime is **NOT a forwarding proxy**. No destination capability may be crea
 The strict YAML subset now uses canonical [a-z0-9-] names for routes/middleware; forbids hop-by-hop, proxy credentials, and request-framing control header names as `require_header`; and rejects arbitrary IPv4 upstream spellings (v0 explicitly permits loopback `127.0.0.1`, `localhost`, or syntactically valid DNS names). Exact DNS/IP/TLS safety remains a separate network-layer release gate. Source policy still lacks a race-free configuration file descriptor and an input byte-size cap before `fs.read_text`.
 
 The Actions workflow now has explicit native Oreslang compile/execute gates for the larger source/test tree, not just YAML. Self-hosted runner admission and actual executed test results are still required; a queued job is not a passing check. The alternative opt-in reverse ingress remains loopback-only and must not be counted as a tested production service.
+
+
+## Performance laboratory
+
+See [bench/README.md](bench/README.md) for correctness-gated NGINX/HAProxy baselines, latency/throughput sweeps, provenance and native Oreslang policy workloads. Forwarding and CONNECT remain explicitly blocked until actual Oreslang transport gates pass.

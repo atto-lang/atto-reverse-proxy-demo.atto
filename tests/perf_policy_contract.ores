@@ -1,0 +1,37 @@
+// Repeatable native policy workload. Wall time includes runtime startup.
+// This is NOT network forwarding throughput or a cross-product benchmark.
+import module header_policy from "../src/header_policy";
+import module proxy_wire from "../src/proxy_wire";
+
+pub routine main(): int {
+  let int iterations = 0;
+  let int admitted = 0;
+  let int rejected = 0;
+  for (let i = 0; i < 10000; i++) {
+    // Vary the inputs; consume every result so work cannot be discarded.
+    let String host = "api.example.test";
+    let String field = "x-request-id";
+    if i < 5000; then host = "edge.example.test"; field = "x-trace-id"; fi
+    if proxy_wire.reverse("GET /ingress HTTP/1.1", host).is_ok(); then
+      admitted = admitted + 1;
+    fi
+    if proxy_wire.connect("CONNECT " + host + ":443 HTTP/1.1", host + ":443").is_ok(); then
+      admitted = admitted + 1;
+    fi
+    if header_policy.request_copy(field, "fixture", "keep-alive"); then
+      admitted = admitted + 1;
+    fi
+    if !header_policy.request_copy(field, "bad\u000bvalue", ""); then
+      rejected = rejected + 1;
+    fi
+    if proxy_wire.reverse("GET /../secret HTTP/1.1", host).is_err(); then
+      rejected = rejected + 1;
+    fi
+    iterations = iterations + 1;
+  }
+  if iterations != 10000 || admitted != 30000 || rejected != 20000; then
+    stdio.println("FAIL native policy workload checksum"); return 1;
+  fi
+  stdio.println("PASS native policy workload: 10000 iterations, 50000 checked operations");
+  return 0;
+}

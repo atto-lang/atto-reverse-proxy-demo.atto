@@ -100,3 +100,8 @@ jobs:
           oreslang --check tests/lexical_admission_contract.ores
       - name: Execute lexical admission regression
         run: oreslang tests/lexical_admission_contract.ores
+
+      - name: Compiler-check and execute native policy performance workload
+        run: |
+          oreslang --check tests/perf_policy_contract.ores
+          oreslang tests/perf_policy_contract.ores

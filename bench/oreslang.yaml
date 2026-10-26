@@ -1,0 +1,14 @@
+version: ores.proxy/v1
+mode: reverse
+listen:
+  host: 127.0.0.1
+  port: 8080
+runtime:
+  carriers: 20
+  actors: 100
+  max_inflight: 1024
+routes:
+  - name: fixture
+    host: bench.example.test
+    path_prefix: /
+    upstream: http://127.0.0.1:9000
