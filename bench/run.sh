@@ -38,6 +38,13 @@ level_count=$(wc -w <<<"$levels")
 size_count=$(wc -w <<<"$sizes")
 expected_baseline_groups=$((level_count * size_count))
 [[ "$expected_baseline_groups" -gt 0 ]] || { echo 'benchmark matrix must not be empty' >&2; exit 2; }
+expected_matrix_json=$(
+  for c in $levels; do
+    for size in $sizes; do
+      printf '%s %s\n' "$size" "$c"
+    done
+  done | jq -Rsc 'split("\n")[:-1] | map(split(" ") | [.[0] | tonumber, .[1] | tonumber]) | sort'
+)
 # Restricted UID namespaces can exercise config/wire smoke without a worker UID
 # transition. This is recorded and forbidden for full benchmark runs.
 nginx_global='daemon off;'
@@ -208,7 +215,8 @@ if [[ -z "${ORESLANG_ADDR:-}" ]]; then
 fi
 printf '{"schema":1,"status":"NOT_IMPLEMENTED","reason":"no_authenticated_CONNECT_relay_in_oreslang_demo","metrics_comparable":false}\n' > "$out/connect-status.json"
 ps -p "$origin_pid,$nginx_pid,$haproxy_pid" --ppid "$nginx_pid" -o pid,ppid,rss,pcpu,comm > "$out/processes-after.txt" 2>&1 || echo "Process telemetry unavailable" > "$out/processes-after.txt"
-jq -s --argjson expected_repetitions "$repeats" --argjson expected_baseline_groups "$expected_baseline_groups" -f "$bench/summarize.jq" "$out"/*-r*.json > "$out/summary.json"
+jq -s --argjson expected_repetitions "$repeats" --argjson expected_baseline_groups "$expected_baseline_groups" \
+  --argjson expected_matrix "$expected_matrix_json" -f "$bench/summarize.jq" "$out"/*-r*.json > "$out/summary.json"
 if [[ "$mode" == full ]] && ! jq -e '.capacity_gate_passed == true' "$out/summary.json" >/dev/null; then
   echo 'Direct-origin capacity gate failed; full-run proxy metrics are not publishable' >&2
   failures=$((failures + 1))
