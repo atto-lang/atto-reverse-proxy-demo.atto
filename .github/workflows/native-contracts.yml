@@ -1,5 +1,6 @@
-# Source-integrity plus native compiler/contract gate.
-# No compiler source checkout and no cross-org private-source mirror.
+# Native compiler and contract gate. No runtime source checkout or cross-org mirror.
+# A trusted source-org runner carrying the 'oreslang-jdk25' label must have an
+# approved Oreslang Java/Graal executable on PATH. Missing runtime is a failure.
 name: Native Oreslang Proxy Contracts
 on:
   push:
@@ -15,34 +16,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  source-integrity:
-    runs-on: ubuntu-24.04
-    timeout-minutes: 5
-    steps:
-      - name: Checkout exact event tree
-        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-        with:
-          persist-credentials: false
-      - name: Verify reviewed Oreslang inventory is complete
-        shell: bash
-        run: |
-          set -euo pipefail
-          actual="$RUNNER_TEMP/oreslang-files.txt"
-          find src tests -type f -name '*.ores' -print | LC_ALL=C sort > "$actual"
-          if grep -Ev '^(src|tests)/[A-Za-z0-9_./-]+\.ores$' "$actual"; then
-            echo "Oreslang source path outside the reviewable path contract" >&2
-            exit 1
-          fi
-          diff -u ci/oreslang-files.txt "$actual"
-
-          contracts="$RUNNER_TEMP/pure-contracts.txt"
-          find tests -maxdepth 1 -type f -name '*_contract.ores' -print | LC_ALL=C sort > "$contracts"
-          diff -u ci/pure-contracts.txt "$contracts"
-
-          test -z "$(find src tests -type l -name '*.ores' -print -quit)"
-
   native-contracts:
-    needs: source-integrity
     # Never execute untrusted fork code on the organization's self-hosted runner.
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: [self-hosted, linux, x64, oreslang-jdk25]
@@ -68,6 +42,23 @@ jobs:
           command -v oreslang
           oreslang --build-info
           java -version
+      - name: Verify reviewed Oreslang inventory is complete
+        shell: bash
+        run: |
+          set -euo pipefail
+          actual="$RUNNER_TEMP/oreslang-files.txt"
+          find src tests -type f -name '*.ores' -print | LC_ALL=C sort > "$actual"
+          if grep -Ev '^(src|tests)/[A-Za-z0-9_./-]+\.ores$' "$actual"; then
+            echo "Oreslang source path outside the reviewable path contract" >&2
+            exit 1
+          fi
+          diff -u ci/oreslang-files.txt "$actual"
+
+          contracts="$RUNNER_TEMP/pure-contracts.txt"
+          find tests -maxdepth 1 -type f -name '*_contract.ores' -print | LC_ALL=C sort > "$contracts"
+          diff -u ci/pure-contracts.txt "$contracts"
+
+          test -z "$(find src tests -type l -name '*.ores' -print -quit)"
       - name: Compiler-check every reviewed Oreslang source and test
         shell: bash
         run: |
@@ -148,4 +139,3 @@ jobs:
 
           kill -0 "$server_pid"
           grep -Fq 'INCOMPLETE reverse proxy ingress; loopback only; 501 upstream response' "$log"
- 
