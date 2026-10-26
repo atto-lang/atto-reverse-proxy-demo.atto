@@ -42,6 +42,19 @@ jobs:
           java -version
           oreslang --check src/serve_reverse.ores
           oreslang --check tests/actor_ingress_tcp_smoke.ores
+      - name: Fail closed if the configured file vanishes before read
+        shell: bash
+        run: |
+          set -euo pipefail
+          missing="$RUNNER_TEMP/ores-proxy-missing-config.yaml"
+          rm -f "$missing"
+          set +e
+          ores_proxy_conf_yaml="$missing" oreslang --no-prompt             --allow-read="$missing"             --allow-env=ores_proxy_conf_yaml             src/serve_reverse.ores >"$RUNNER_TEMP/missing-config.log" 2>&1
+          status=$?
+          set -e
+          test "$status" = 74
+          grep -Fq 'ERROR: configuration admission failed' "$RUNNER_TEMP/missing-config.log"
+
       - name: Real native Oreslang actor HTTP exchange over loopback
         shell: bash
         run: |
