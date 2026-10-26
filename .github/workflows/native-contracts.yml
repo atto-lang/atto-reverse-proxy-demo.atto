@@ -84,6 +84,18 @@ jobs:
         run: |
           oreslang --check src/serve_reverse.ores
           oreslang --check tests/ingress_tcp_smoke.ores
+      - name: Fail closed if reverse ingress configuration vanishes
+        shell: bash
+        run: |
+          set -euo pipefail
+          missing="$RUNNER_TEMP/ores-proxy-missing-config.yaml"
+          rm -f "$missing"
+          set +e
+          ores_proxy_conf_yaml="$missing" oreslang --no-prompt             --allow-read="$missing"             --allow-env=ores_proxy_conf_yaml             src/serve_reverse.ores >"$RUNNER_TEMP/missing-config.log" 2>&1
+          status=$?
+          set -e
+          test "$status" = 74
+          grep -Fq 'ERROR: configuration admission failed' "$RUNNER_TEMP/missing-config.log"
       - name: Execute complete Oreslang safety contracts
         run: |
           oreslang tests/security_admission_contract.ores
