@@ -60,7 +60,7 @@ just to make a benchmark pass. Record Java/Graal JIT, Native Image or LLVM,
 compiler flags, artifact hashes and the source SHA of the actual serving
 runtime; a user-supplied address is not an identity attestation.
 
-Full/publishable runs require three distinct, allowed CPU IDs:
+Controlled full runs require three distinct, allowed CPU IDs:
 
 ```sh
 BENCH_MODE=full BENCH_PROXY_CPU=2 BENCH_LOAD_CPU=3 BENCH_ORIGIN_CPU=4 bash bench/run.sh
@@ -119,7 +119,7 @@ and optional affinity/runtime SHA. Distro package versions are recorded, not
 bit-for-bit pinned; use a reviewed pinned package/image manifest for published
 comparisons. Per-process RSS/current-CPU snapshots are diagnostic only; they
 are not peak memory, whole-tree CPU, per-request allocation or a leak proof.
-Unavailable telemetry is explicit. CI uploads raw case results, logs, provenance
+When the source is nested inside a future authorized carrier repository, the harness requires an independently pinned `BENCH_SOURCE_TREE_SHA`; a free-form source commit claim alone cannot establish nested-tree identity. Provenance records `source_identity_mode=root-head|nested-tree`. Unavailable telemetry is explicit. CI uploads raw case results, logs, provenance
 and summaries, and treats the suite as a functional harness test. The Oreslang
 runtime source SHA is likewise required to be canonical before native policy
 timings are accepted.
