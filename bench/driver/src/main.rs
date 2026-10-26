@@ -8,6 +8,7 @@ use std::time::{Duration, Instant};
 
 const LIMIT: usize = 1024 * 1024;
 const INGRESS: &[u8] = b"Upstream forwarding unavailable in this runtime";
+#[cfg(test)]
 const TEST_NONCE: &str = "0123456789abcdef0123456789abcdef";
 
 fn nonce(s: &str) -> Result<&str, String> {
@@ -103,6 +104,7 @@ fn verify_with_nonce(
     }
     Ok(())
 }
+#[cfg(test)]
 fn verify(bytes: &[u8], profile: &str, size: usize) -> Result<(), String> {
     verify_with_nonce(bytes, profile, size, "fixture-v1")
 }
