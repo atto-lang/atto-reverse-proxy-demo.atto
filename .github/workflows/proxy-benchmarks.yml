@@ -28,9 +28,13 @@ jobs:
           cargo test --manifest-path driver/Cargo.toml --locked
           bash -n run.sh policy.sh
           bash test-summary.sh
+      - name: Bind benchmark provenance to checked-out Git objects
+        shell: bash
+        run: |
+          echo "BENCH_SOURCE_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+          echo "BENCH_SOURCE_TREE_SHA=$(git rev-parse 'HEAD^{tree}')" >> "$GITHUB_ENV"
       - name: Run baseline correctness smoke (no performance release gate)
         env:
-          BENCH_SOURCE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           TMPDIR: ${{ runner.temp }}
         run: |
           export PATH="/usr/sbin:$PATH"
