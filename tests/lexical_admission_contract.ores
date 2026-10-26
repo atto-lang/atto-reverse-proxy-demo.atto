@@ -1,0 +1,119 @@
+// Native regression vectors; only an executing Oreslang compiler can pass this.
+import module header_policy from "../src/header_policy";
+import module proxy_wire from "../src/proxy_wire";
+import module proxy_yaml from "../src/proxy_yaml";
+import module config_path from "../src/config_path";
+import module middleware_policy from "../src/middleware_policy";
+import module middleware_manifest from "../src/middleware_manifest";
+
+pub routine main(): int {
+  let mut Array<String> controls = new Array<String>();
+  controls.add("\u0000");
+  controls.add("\u0001");
+  controls.add("\u0002");
+  controls.add("\u0003");
+  controls.add("\u0004");
+  controls.add("\u0005");
+  controls.add("\u0006");
+  controls.add("\u0007");
+  controls.add("\u0008");
+  controls.add("\u0009");
+  controls.add("\u000a");
+  controls.add("\u000b");
+  controls.add("\u000c");
+  controls.add("\u000d");
+  controls.add("\u000e");
+  controls.add("\u000f");
+  controls.add("\u0010");
+  controls.add("\u0011");
+  controls.add("\u0012");
+  controls.add("\u0013");
+  controls.add("\u0014");
+  controls.add("\u0015");
+  controls.add("\u0016");
+  controls.add("\u0017");
+  controls.add("\u0018");
+  controls.add("\u0019");
+  controls.add("\u001a");
+  controls.add("\u001b");
+  controls.add("\u001c");
+  controls.add("\u001d");
+  controls.add("\u001e");
+  controls.add("\u001f");
+  controls.add("\u007f");
+
+  val String forward = "version: ores.proxy/v1\nmode: forward\nlisten:\n  host: 127.0.0.1\n  port: 8080\nruntime:\n  carriers: 20\n  actors: 100\n  max_inflight: 1024\npolicy:\n  deny_private: true\n  allow_domains: example.test\n  connect_ports: 443\nmiddleware:\n  - name: gate\n    kind: trace\n";
+  val String reverse = "version: ores.proxy/v1\nmode: reverse\nlisten:\n  host: 127.0.0.1\n  port: 8080\nruntime:\n  carriers: 20\n  actors: 100\n  max_inflight: 1024\nmiddleware:\n  - name: gate\n    kind: require_header\n    header: x-token\nroutes:\n  - name: api\n    host: api.example.test\n    path_prefix: /api\n    upstream: http://127.0.0.1:9000\n    middleware: gate\n";
+  val parsed = proxy_yaml.parse(forward, "forward");
+  if parsed.is_err() || proxy_yaml.parse(reverse, "reverse").is_err(); then
+    stdio.println("FAIL lexical baseline configurations"); return 1;
+  fi
+  val config = parsed.unwrap();
+  for (const control of controls) {
+    if header_policy.value_safe("a" + control + "b") ||
+      header_policy.request_copy("x-token", "a" + control + "b", "") ||
+      header_policy.response_copy("x-token", "a" + control + "b", "") ||
+      header_policy.response_action("x-token", "a" + control + "b", "").is_ok() ||
+      config_path.valid("/etc/a" + control + "b.yaml") ||
+      proxy_wire.reverse("GET /a" + control + "b HTTP/1.1", "api.example.test").is_ok() ||
+      middleware_policy.evaluate(rt borrow config, "gate", "x-token", "a" + control + "b").is_ok(); then
+      stdio.println("FAIL C0/DEL admission"); return 1;
+    fi
+  }
+  // LF is the YAML delimiter; every other C0 and DEL is illegal even in comments.
+  for (const control of controls) {
+    if control != "\u000a" && proxy_yaml.parse(forward + "# a" + control + "b\n", "forward").is_ok(); then
+      stdio.println("FAIL YAML raw control admission"); return 1;
+    fi
+  }
+  if !header_policy.value_safe("text/plain; charset=utf-8") ||
+    !header_policy.connection_safe("x-extra", " keep-alive , x-other ") ||
+    header_policy.connection_safe("x-extra", "keep-alive,\u00a0x-other") ||
+    header_policy.connection_safe("x-extra", "keep-alive,\u2003x-other") ||
+    header_policy.connection_safe("x-extra", "keep-alive,\u000bx-other") ||
+    header_policy.connection_safe("x-extra", "x-other,invalid name") ||
+    header_policy.connection_safe("x-extra", "x-extra,invalid name"); then
+    stdio.println("FAIL Connection list raw token validation"); return 1;
+  fi
+  if proxy_yaml.valid_domain("0x7f.0.0.1") ||
+    proxy_yaml.valid_domain("example.123") ||
+    proxy_yaml.valid_upstream_origin("http://0x7f.0.0.1:9000") ||
+    proxy_wire.connect("CONNECT 0x7f.0.0.1:443 HTTP/1.1", "0x7f.0.0.1:443").is_ok() ||
+    !proxy_yaml.valid_domain("api2.example.test"); then
+    stdio.println("FAIL numeric final DNS label"); return 1;
+  fi
+  if proxy_yaml.parse(forward.replace_literal("mode: forward", "mode: forward "), "forward").is_ok() ||
+    proxy_yaml.parse(forward.replace_literal("  actors: 100", "\u00a0  actors: 100"), "forward").is_ok() ||
+    proxy_yaml.parse(forward.replace_literal("  actors: 100", "  actors: 100\u2003"), "forward").is_ok(); then
+    stdio.println("FAIL whitespace erased before YAML validation"); return 1;
+  fi
+  let mut Array<String> forbidden = new Array<String>();
+  forbidden.add("te"); forbidden.add("trailer"); forbidden.add("upgrade");
+  forbidden.add("keep-alive"); forbidden.add("proxy-authenticate");
+  forbidden.add("http2-settings"); forbidden.add("expect");
+  forbidden.add("range"); forbidden.add("content-encoding"); forbidden.add("digest");
+  for (const name of forbidden) {
+    if proxy_yaml.parse(reverse.replace_literal("header: x-token", "header: " + name), "reverse").is_ok(); then
+      stdio.println("FAIL unsupported presence-only middleware header"); return 1;
+    fi
+  }
+  let mut Array<proxy_yaml.Middleware> rules = new Array<proxy_yaml.Middleware>();
+  rules.add(new proxy_yaml.Middleware("forged", "unknown", ""));
+  val forged = new proxy_yaml.Config("forward", "127.0.0.1", "8080", "20", "100", "1024", "true", "example.test", "443", rules, new Array<proxy_yaml.Route>());
+  if middleware_policy.evaluate(rt borrow forged, "forged", "", "").is_ok(); then
+    stdio.println("FAIL forged unknown middleware kind"); return 1;
+  fi
+  // Empty name/value is the existing no-header sentinel for trace/deny rules.
+  if !middleware_policy.evaluate(rt borrow config, "gate", "", "").unwrap(); then
+    stdio.println("FAIL trace no-header sentinel"); return 1;
+  fi
+  let mut Array<proxy_yaml.Middleware> trace_rules = new Array<proxy_yaml.Middleware>();
+  trace_rules.add(new proxy_yaml.Middleware("trace", "trace", ""));
+  val manifest = new middleware_manifest.Manifest(1, "test", trace_rules);
+  if !manifest.permitted("", "") || manifest.permitted("", "unbound") ||
+    manifest.permitted("X-Token", "ok") || manifest.permitted("x-token", "bad\u000bvalue"); then
+    stdio.println("FAIL manifest supplied header admission"); return 1;
+  fi
+  stdio.println("PASS lexical admission and middleware regressions");
+  return 0;
+}

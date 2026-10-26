@@ -3,6 +3,8 @@
 // includes or inline comments. This is not a general-purpose YAML 1.2 parser.
 // Configuration is NEVER a raw network authority: adapters enforce separate
 // canonicalization, DNS/IP admission, framing and TLS/CONNECT policies.
+import module admission_text from "./admission_text";
+import module header_policy from "./header_policy";
 define module proxy_yaml as
   pub define class Middleware as
     pub val String name;
@@ -46,7 +48,7 @@ define module proxy_yaml as
   }
 
   fnc safe_scalar(String value): bool {
-    if value == ""; then return false; fi
+    if value == "" || !admission_text.control_free(value); then return false; fi
     if value.contains_literal("#") || value.contains_literal("&") ||
       value.contains_literal("*") || value.contains_literal("!") ||
       value.contains_literal("{") || value.contains_literal("}") ||
@@ -68,7 +70,7 @@ define module proxy_yaml as
     if domain == "" || domain.starts_with(".") || domain.ends_with(".") ||
       domain.contains_literal(".."); then return false; fi
     let int labels = 0;
-    let bool has_letter = false;
+    let bool final_label_has_letter = false;
     for (const label of domain.split_literal(".")) {
       if label == "" || label.starts_with("-") || label.ends_with("-"); then
         return false;
@@ -94,10 +96,12 @@ define module proxy_yaml as
         .replace_literal("3", "").replace_literal("4", "").replace_literal("5", "")
         .replace_literal("6", "").replace_literal("7", "").replace_literal("8", "")
         .replace_literal("9", "");
-      if letters != ""; then has_letter = true; fi
+      final_label_has_letter = letters != "";
       labels = labels + 1;
     }
-    return labels >= 2 && has_letter;
+    // Numeric final labels include alternate dotted IPv4 spellings such as
+    // 0x7f.0.0.1. This syntax check still does not prevent DNS rebinding.
+    return labels >= 2 && final_label_has_letter;
   }
 
   // Narrow, lower-case HTTP field-name subset for a declarative policy.
@@ -187,7 +191,7 @@ define module proxy_yaml as
       return Err("unsupported middleware kind");
     fi
     if kind == "require_header"; then
-      if !valid_header_name(header) ||
+      if !valid_header_name(header) || !header_policy.request_copy(header, "", "") ||
         header == "host" || header == "connection" ||
         header == "content-length" || header == "transfer-encoding" ||
         header == "authorization" || header == "proxy-authorization" ||
@@ -241,10 +245,16 @@ define module proxy_yaml as
     fi
     for (const original of lines) {
       val String line = original.trim();
-      if original.contains_literal("\r") || original.contains_literal("\t"); then
-        return Err("CR and tabs are forbidden; use LF and spaces");
+      if !admission_text.control_free(original); then
+        return Err("control characters forbidden; use LF and spaces");
+      fi
+      // Do not let trim() erase non-ASCII indentation or trailing whitespace.
+      val String without_spaces = original.replace_literal(" ", "");
+      if without_spaces.trim() != without_spaces; then
+        return Err("noncanonical YAML whitespace");
       fi
       if line == "" || line.starts_with("#"); then continue; fi
+      if original.ends_with(" "); then return Err("trailing YAML space"); fi
       if original.starts_with("  - "); then
         if section == "routes"; then
           if rn != ""; then
@@ -458,3 +468,4 @@ define module proxy_yaml as
       deny_private, allowed, connect, middlewares, routes));
   }
 end
+

@@ -93,3 +93,10 @@ jobs:
           oreslang tests/data_layout_contract.ores
           oreslang tests/slot_lifecycle_contract.ores
           oreslang tests/slot_pool_contract.ores
+
+      - name: Compiler-check lexical admission regression
+        run: |
+          oreslang --check src/admission_text.ores
+          oreslang --check tests/lexical_admission_contract.ores
+      - name: Execute lexical admission regression
+        run: oreslang tests/lexical_admission_contract.ores
