@@ -21,7 +21,7 @@ The exact-head native compiler/contract workflow is [`.github/workflows/native-c
 
 ## Opt-in native Oreslang loopback ingress
 
-`src/serve_reverse.ores` is a separate **experimental** Java/Graal HTTP/1.1 entrypoint. It reads the YAML path from `ores_proxy_conf_yaml` exactly once, accepts only loopback port 8080, matches routes, applies declarative `deny` / `require_header` middleware, and uses 100 pooled isolated request actors. Matched requests **always return HTTP 501**, because the runtime does not yet provide a safe status/header/binary-stream-preserving upstream HTTP client. It does not forward any request. Admission overload can reject requests separately.
+`src/serve_reverse.ores` is a separate **experimental** Java/Graal HTTP/1.1 entrypoint. It reads the YAML path from `ores_proxy_conf_yaml` exactly once, accepts only loopback port 8080, matches routes, applies declarative `deny` / `require_header` middleware, and uses bounded pooled isolated request actors. Pre-registered local actor-service routes can return 200 and stream through the guest HTTP adapter; external HTTP upstream routes still return 501 because the runtime does not yet provide a safe status/header/binary-stream-preserving guest outbound client. It does not forward an external upstream request. Admission overload can reject requests separately.
 
 `tests/ingress_tcp_smoke.ores` is a **native Oreslang** TCP test client, intended to run as a separate process while the experimental ingress is listening. It checks 501/403/404/400, including a path-normalization trap. The application and test client both require explicitly scoped Oreslang network capabilities. These tests have not yet been executed on the current PR head; treat the 400 path test as an open semantic gate until real wire evidence exists.
 
@@ -34,3 +34,9 @@ The runtime is **NOT a forwarding proxy**. No destination capability may be crea
 The strict YAML subset now uses canonical [a-z0-9-] names for routes/middleware; forbids hop-by-hop, proxy credentials, and request-framing control header names as `require_header`; and rejects arbitrary IPv4 upstream spellings (v0 explicitly permits loopback `127.0.0.1`, `localhost`, or syntactically valid DNS names). Exact DNS/IP/TLS safety remains a separate network-layer release gate. Source policy still lacks a race-free configuration file descriptor and an input byte-size cap before `fs.read_text`.
 
 The Actions workflow now has explicit native Oreslang compile/execute gates for the larger source/test tree, not just YAML. Self-hosted runner admission and actual executed test results are still required; a queued job is not a passing check. The alternative opt-in reverse ingress remains loopback-only and must not be counted as a tested production service.
+
+## Performance evidence
+
+The manual `.github/workflows/perf-ingress.yml` workflow runs a semantics-first ingress benchmark against native Oreslang, nginx 1.31.8 and HAProxy 3.4.7 on the same host. It validates exact status/body behavior before timing, pins each server to one CPU and the load generator to another, rotates run order, and uploads raw latency/throughput samples plus machine/runtime/image provenance.
+
+This is deliberately labeled an **ingress / actor-dispatch benchmark**. It does not claim reverse-proxy throughput because Oreslang external upstream forwarding still fails closed with 501. See [`bench/README.md`](bench/README.md) for the comparability rules and the true-forwarding gate.
