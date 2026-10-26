@@ -2,6 +2,12 @@
 set -euo pipefail
 bench=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 
+# Matrix construction must produce numeric [bytes, concurrency] pairs. Parentheses
+# are intentional: jq's comma/pipe precedence otherwise indexes a string.
+expected_matrix=$(printf '%s\n' '0 1' '1024 1' '0 8' '1024 8' | jq -Rsc -f "$bench/matrix.jq")
+printf '%s\n' "$expected_matrix" | jq -e '. == [[0,1],[0,8],[1024,1],[1024,8]]' >/dev/null
+printf '%s\n' 'PASS expected benchmark matrix is numeric and deterministically sorted'
+
 # Complete matrix, but HAProxy lacks enough direct headroom: gate must fail.
 printf '%s\n' '[
 {"status":"PASS","target":"nginx","profile":"forward","bytes":0,"concurrency":1,"requests_per_second":10,"p50_us":1,"p95_us":2,"p99_us":3},
