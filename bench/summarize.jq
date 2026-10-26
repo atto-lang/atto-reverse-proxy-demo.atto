@@ -1,5 +1,6 @@
 def median: sort | if length % 2 == 1 then .[length / 2 | floor] else (.[length / 2 - 1] + .[length / 2]) / 2 end;
 def stats: {median: median, min: min, max: max};
+def baseline_target: . == "direct" or . == "nginx" or . == "haproxy";
 ([.[] | select(.status == "PASS")]
   | group_by([.target, .profile, .bytes, .concurrency])
   | map({target: .[0].target, profile: .[0].profile, bytes: .[0].bytes,
@@ -30,11 +31,25 @@ def stats: {median: median, min: min, max: max};
       . + {metrics_comparable:true, capacity_status:"NOT_APPLICABLE"}
     end
   )) as $annotated
+| ([.[] | select(.profile == "forward" and (.target | baseline_target)) | [.bytes, .concurrency]] | unique) as $baseline_keys
+| ([$baseline_keys[] as $k |
+    {bytes:$k[0], concurrency:$k[1], complete:
+      (["direct","nginx","haproxy"] | all(. as $t |
+        ([$annotated[] | select(.target == $t and .profile == "forward" and
+          .bytes == $k[0] and .concurrency == $k[1] and
+          .repetitions == $expected_repetitions)] | length) == 1
+      ))}
+  ]) as $matrix
+| (($matrix | length) > 0 and ($matrix | all(.complete == true))) as $matrix_complete
+| ([.[] | select(.status != "PASS" and .profile == "forward" and (.target | baseline_target))] | length == 0) as $baseline_failures_absent
 | {
-  schema: 2,
-  interpretation: "Independent closed-loop connection-close repetitions; percentile medians are not pooled percentiles. Forward proxy results are comparable only when direct-origin median throughput is at least 1.20x the proxy median for the same body size and concurrency.",
+  schema: 3,
+  interpretation: "Independent closed-loop connection-close repetitions; percentile medians are not pooled percentiles. Forward proxy results are comparable only when the complete direct/NGINX/HAProxy matrix is present at the expected repetition count and direct-origin median throughput is at least 1.20x the proxy median for the same body size and concurrency.",
+  expected_repetitions: $expected_repetitions,
   direct_capacity_margin_required: 1.20,
-  capacity_gate_passed: (([$annotated[] | select(.profile == "forward" and .target != "direct")] | length > 0) and ([$annotated[] | select(.profile == "forward" and .target != "direct")] | all(.metrics_comparable == true)) and ([.[] | select(.status != "PASS" and (.target == "direct" or .target == "nginx" or .target == "haproxy") and .profile == "forward")] | length == 0)),
+  baseline_matrix_complete: $matrix_complete,
+  baseline_matrix: $matrix,
+  capacity_gate_passed: ($matrix_complete and $baseline_failures_absent and ([$annotated[] | select(.profile == "forward" and .target != "direct")] | length > 0) and ([$annotated[] | select(.profile == "forward" and .target != "direct")] | all(.metrics_comparable == true))),
   passed: $annotated,
   blocked_or_invalid: [.[] | select(.status != "PASS")]
 }
