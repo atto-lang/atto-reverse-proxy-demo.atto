@@ -14,7 +14,7 @@ printf '%s\n' '[
 {"status":"PASS","target":"direct","profile":"forward","bytes":0,"concurrency":1,"requests_per_second":60,"p50_us":1,"p95_us":2,"p99_us":3},
 {"status":"PASS","target":"direct","profile":"forward","bytes":0,"concurrency":1,"requests_per_second":55,"p50_us":1,"p95_us":2,"p99_us":3},
 {"status":"BLOCKED_OR_INVALID","target":"oreslang","profile":"forward"}
-]' | jq --argjson expected_repetitions 3 --argjson expected_baseline_groups 1 -f "$bench/summarize.jq" | jq -e '
+]' | jq --argjson expected_repetitions 3 --argjson expected_baseline_groups 1 --argjson expected_matrix '[[0,1]]' -f "$bench/summarize.jq" | jq -e '
 .schema == 4 and
 .baseline_matrix_complete == true and
 (.passed[] | select(.target == "nginx")).repetitions == 3 and
@@ -28,7 +28,7 @@ printf '%s\n' '[
 printf '%s\n' 'PASS complete matrix detects bottlenecked proxy'
 
 # Empty input must never qualify.
-printf '%s\n' '[]' | jq --argjson expected_repetitions 1 --argjson expected_baseline_groups 1 -f "$bench/summarize.jq" | jq -e '
+printf '%s\n' '[]' | jq --argjson expected_repetitions 1 --argjson expected_baseline_groups 1 --argjson expected_matrix '[[0,1]]' -f "$bench/summarize.jq" | jq -e '
 .baseline_matrix_complete == false and .capacity_gate_passed == false' >/dev/null
 
 # A failed direct reference must fail closed.
@@ -37,7 +37,7 @@ printf '%s\n' '[
 {"status":"PASS","target":"nginx","profile":"forward","bytes":0,"concurrency":1,"requests_per_second":20,"p50_us":1,"p95_us":2,"p99_us":3},
 {"status":"PASS","target":"haproxy","profile":"forward","bytes":0,"concurrency":1,"requests_per_second":20,"p50_us":1,"p95_us":2,"p99_us":3},
 {"status":"BLOCKED_OR_INVALID","target":"direct","profile":"forward","bytes":0,"concurrency":1,"repeat":2}
-]' | jq --argjson expected_repetitions 1 --argjson expected_baseline_groups 1 -f "$bench/summarize.jq" | jq -e '.capacity_gate_passed == false' >/dev/null
+]' | jq --argjson expected_repetitions 1 --argjson expected_baseline_groups 1 --argjson expected_matrix '[[0,1]]' -f "$bench/summarize.jq" | jq -e '.capacity_gate_passed == false' >/dev/null
 printf '%s\n' 'PASS empty and failed-direct-reference fail-closed gates'
 
 # A healthy complete matrix with >=1.20x headroom must make the gate reachable.
@@ -45,7 +45,7 @@ printf '%s\n' '[
 {"status":"PASS","target":"direct","profile":"forward","bytes":0,"concurrency":1,"requests_per_second":120,"p50_us":1,"p95_us":2,"p99_us":3},
 {"status":"PASS","target":"nginx","profile":"forward","bytes":0,"concurrency":1,"requests_per_second":80,"p50_us":2,"p95_us":3,"p99_us":4},
 {"status":"PASS","target":"haproxy","profile":"forward","bytes":0,"concurrency":1,"requests_per_second":90,"p50_us":2,"p95_us":3,"p99_us":4}
-]' | jq --argjson expected_repetitions 1 --argjson expected_baseline_groups 1 -f "$bench/summarize.jq" | jq -e '
+]' | jq --argjson expected_repetitions 1 --argjson expected_baseline_groups 1 --argjson expected_matrix '[[0,1]]' -f "$bench/summarize.jq" | jq -e '
 .capacity_gate_passed == true and
 .baseline_matrix_complete == true and
 ([.passed[] | select(.target != "direct")] | all(.capacity_status == "PASS" and .metrics_comparable == true))' >/dev/null
@@ -55,7 +55,7 @@ printf '%s\n' 'PASS healthy direct-capacity gate is reachable'
 printf '%s\n' '[
 {"status":"PASS","target":"direct","profile":"forward","bytes":0,"concurrency":1,"requests_per_second":120,"p50_us":1,"p95_us":2,"p99_us":3},
 {"status":"PASS","target":"nginx","profile":"forward","bytes":0,"concurrency":1,"requests_per_second":80,"p50_us":2,"p95_us":3,"p99_us":4}
-]' | jq --argjson expected_repetitions 1 --argjson expected_baseline_groups 1 -f "$bench/summarize.jq" | jq -e '
+]' | jq --argjson expected_repetitions 1 --argjson expected_baseline_groups 1 --argjson expected_matrix '[[0,1]]' -f "$bench/summarize.jq" | jq -e '
 .baseline_matrix_complete == false and .capacity_gate_passed == false' >/dev/null
 
 # A complete target set with fewer repetitions than required must also fail.
@@ -63,14 +63,14 @@ printf '%s\n' '[
 {"status":"PASS","target":"direct","profile":"forward","bytes":0,"concurrency":1,"requests_per_second":120,"p50_us":1,"p95_us":2,"p99_us":3},
 {"status":"PASS","target":"nginx","profile":"forward","bytes":0,"concurrency":1,"requests_per_second":80,"p50_us":2,"p95_us":3,"p99_us":4},
 {"status":"PASS","target":"haproxy","profile":"forward","bytes":0,"concurrency":1,"requests_per_second":90,"p50_us":2,"p95_us":3,"p99_us":4}
-]' | jq --argjson expected_repetitions 2 --argjson expected_baseline_groups 1 -f "$bench/summarize.jq" | jq -e '
+]' | jq --argjson expected_repetitions 2 --argjson expected_baseline_groups 1 --argjson expected_matrix '[[0,1]]' -f "$bench/summarize.jq" | jq -e '
 .baseline_matrix_complete == false and .capacity_gate_passed == false' >/dev/null
 printf '%s\n' 'PASS missing target and incomplete repetition matrix fail closed'
 
 # A proxy result without the matching direct reference must remain non-comparable.
 printf '%s\n' '[
 {"status":"PASS","target":"nginx","profile":"forward","bytes":1024,"concurrency":16,"requests_per_second":100,"p50_us":2,"p95_us":3,"p99_us":4}
-]' | jq --argjson expected_repetitions 1 --argjson expected_baseline_groups 1 -f "$bench/summarize.jq" | jq -e '
+]' | jq --argjson expected_repetitions 1 --argjson expected_baseline_groups 1 --argjson expected_matrix '[[0,1]]' -f "$bench/summarize.jq" | jq -e '
 .capacity_gate_passed == false and
 .baseline_matrix_complete == false and
 (.passed[] | select(.target == "nginx")).capacity_status == "NO_DIRECT_BASELINE" and
@@ -83,8 +83,23 @@ printf '%s\n' '[
 {"status":"PASS","target":"direct","profile":"forward","bytes":0,"concurrency":1,"requests_per_second":120,"p50_us":1,"p95_us":2,"p99_us":3},
 {"status":"PASS","target":"nginx","profile":"forward","bytes":0,"concurrency":1,"requests_per_second":80,"p50_us":2,"p95_us":3,"p99_us":4},
 {"status":"PASS","target":"haproxy","profile":"forward","bytes":0,"concurrency":1,"requests_per_second":90,"p50_us":2,"p95_us":3,"p99_us":4}
-]' | jq --argjson expected_repetitions 1 --argjson expected_baseline_groups 2 -f "$bench/summarize.jq" | jq -e '
+]' | jq --argjson expected_repetitions 1 --argjson expected_baseline_groups 2 --argjson expected_matrix '[[0,1],[1024,1]]' -f "$bench/summarize.jq" | jq -e '
 .baseline_matrix_complete == false and
 (.baseline_matrix | length) == 1 and
 .capacity_gate_passed == false' >/dev/null
 printf '%s\n' 'PASS wholly missing matrix combination fails closed'
+
+
+# Cardinality alone is insufficient: an unexpected key must not substitute for an expected one.
+printf '%s\n' '[
+{"status":"PASS","target":"direct","profile":"forward","bytes":0,"concurrency":1,"requests_per_second":120,"p50_us":1,"p95_us":2,"p99_us":3},
+{"status":"PASS","target":"nginx","profile":"forward","bytes":0,"concurrency":1,"requests_per_second":80,"p50_us":2,"p95_us":3,"p99_us":4},
+{"status":"PASS","target":"haproxy","profile":"forward","bytes":0,"concurrency":1,"requests_per_second":90,"p50_us":2,"p95_us":3,"p99_us":4},
+{"status":"PASS","target":"direct","profile":"forward","bytes":2048,"concurrency":1,"requests_per_second":120,"p50_us":1,"p95_us":2,"p99_us":3},
+{"status":"PASS","target":"nginx","profile":"forward","bytes":2048,"concurrency":1,"requests_per_second":80,"p50_us":2,"p95_us":3,"p99_us":4},
+{"status":"PASS","target":"haproxy","profile":"forward","bytes":2048,"concurrency":1,"requests_per_second":90,"p50_us":2,"p95_us":3,"p99_us":4}
+]' | jq --argjson expected_repetitions 1 --argjson expected_baseline_groups 2 --argjson expected_matrix '[[0,1],[1024,1]]' -f "$bench/summarize.jq" | jq -e '
+.baseline_matrix_membership_exact == false and
+.baseline_matrix_complete == false and
+.capacity_gate_passed == false' >/dev/null
+printf '%s\n' 'PASS unexpected matrix substitution fails closed'
