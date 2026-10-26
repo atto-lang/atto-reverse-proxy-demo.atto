@@ -2,9 +2,17 @@
 # Starts only local fixture/baselines. Never starts or enables Oreslang egress.
 set -euo pipefail
 bench=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
-for cmd in cargo nginx haproxy sha256sum timeout ps jq tr; do
+for cmd in cargo nginx haproxy sha256sum timeout ps jq tr awk getconf; do
   command -v "$cmd" >/dev/null || { echo "Missing dependency: $cmd" >&2; exit 2; }
 done
+[[ -x /usr/bin/time ]] || { echo "Missing dependency: /usr/bin/time" >&2; exit 2; }
+clk_tck=$(getconf CLK_TCK)
+[[ "$clk_tck" =~ ^[0-9]+$ && "$clk_tck" -gt 0 ]] || { echo "Invalid CLK_TCK" >&2; exit 2; }
+proc_ticks() {
+  local pid=$1
+  [[ -r "/proc/$pid/stat" ]] || return 1
+  awk '{print $14 + $15}' "/proc/$pid/stat"
+}
 out=$(mktemp -d "${TMPDIR:-/tmp}/ores-proxy-bench.XXXXXXXX")
 chmod 700 "$out"
 mkdir "$out/config"
@@ -49,6 +57,16 @@ fi
 if [[ "$mode" == full && -z "$proxy_cpu$load_cpu$origin_cpu" ]]; then
   echo 'Full benchmark mode requires distinct BENCH_PROXY_CPU, BENCH_LOAD_CPU and BENCH_ORIGIN_CPU values' >&2
   exit 2
+fi
+if [[ "$mode" == full && -r /sys/fs/cgroup/cpu.max ]]; then
+  read -r quota period < /sys/fs/cgroup/cpu.max
+  if [[ "$quota" != max ]]; then
+    quota_cpus=$(awk -v q="$quota" -v p="$period" 'BEGIN { if (p <= 0) exit 2; printf "%.3f", q / p }')
+    awk -v c="$quota_cpus" 'BEGIN { exit !(c >= 3.0) }' || {
+      echo "Full benchmark mode requires at least 3 cgroup CPUs; quota is $quota_cpus" >&2
+      exit 2
+    }
+  fi
 fi
 cargo build --manifest-path "$bench/driver/Cargo.toml" --release --locked
 bin="$bench/driver/target/release/ores-proxy-bench"
@@ -109,12 +127,30 @@ failures=0
 measure() {
   local label=$1 addr=$2 profile=$3 size=$4 c=$5 repeat=$6
   local name="$label-$profile-b$size-c$c-r$repeat"
-  if ! "${load_affinity[@]}" timeout 180 "$bin" run "$addr" "$profile" "$size" "$requests" "$c" "$warmup" "$origin_nonce" > "$out/$name.raw" 2> "$out/$name.log"; then
+  local origin_before origin_after
+  origin_before=$(proc_ticks "$origin_pid") || { echo "Origin telemetry unavailable" >&2; exit 2; }
+  if ! /usr/bin/time -f 'load_user_s=%U load_sys_s=%S load_maxrss_kb=%M' -o "$out/$name.time" \
+      "${load_affinity[@]}" timeout 180 "$bin" run "$addr" "$profile" "$size" "$requests" "$c" "$warmup" "$origin_nonce" > "$out/$name.raw" 2> "$out/$name.log"; then
     jq -n --arg target "$label" --arg profile "$profile" --argjson bytes "$size" --argjson concurrency "$c" --argjson repeat "$repeat" \
       '{schema:1,status:"BLOCKED_OR_INVALID",metrics_comparable:false,target:$target,profile:$profile,bytes:$bytes,concurrency:$concurrency,repeat:$repeat}' > "$out/$name.json"
     failures=$((failures + 1))
   else
-    jq --arg target "$label" --argjson repeat "$repeat" '. + {target:$target,repeat:$repeat}' "$out/$name.raw" > "$out/$name.json"
+    origin_after=$(proc_ticks "$origin_pid") || { echo "Origin telemetry unavailable" >&2; exit 2; }
+    local seconds load_user load_sys load_rss load_cpu_pct origin_cpu_pct
+    seconds=$(jq -er '.seconds | select(. > 0)' "$out/$name.raw")
+    load_user=$(awk -F= '$1=="load_user_s"{print $2}' "$out/$name.time")
+    load_sys=$(awk -F= '$1=="load_sys_s"{print $2}' "$out/$name.time")
+    load_rss=$(awk -F= '$1=="load_maxrss_kb"{print $2}' "$out/$name.time")
+    [[ "$load_user" =~ ^[0-9]+([.][0-9]+)?$ && "$load_sys" =~ ^[0-9]+([.][0-9]+)?$ && "$load_rss" =~ ^[0-9]+$ ]] || {
+      echo "Invalid load-generator telemetry for $name" >&2
+      exit 2
+    }
+    load_cpu_pct=$(awk -v u="$load_user" -v y="$load_sys" -v s="$seconds" 'BEGIN { printf "%.3f", ((u + y) / s) * 100.0 }')
+    origin_cpu_pct=$(awk -v a="$origin_before" -v b="$origin_after" -v hz="$clk_tck" -v s="$seconds" 'BEGIN { printf "%.3f", (((b - a) / hz) / s) * 100.0 }')
+    jq --arg target "$label" --argjson repeat "$repeat" --argjson load_cpu_pct "$load_cpu_pct" \
+      --argjson load_maxrss_kb "$load_rss" --argjson origin_cpu_pct "$origin_cpu_pct" \
+      '. + {target:$target,repeat:$repeat,load_cpu_pct:$load_cpu_pct,load_maxrss_kb:$load_maxrss_kb,origin_cpu_pct:$origin_cpu_pct}' \
+      "$out/$name.raw" > "$out/$name.json"
   fi
 }
 # Rotate target order per repeat to reduce systematic order/thermal bias.
