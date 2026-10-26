@@ -28,8 +28,11 @@ The benchmark now additionally:
   all three ordering positions over six full-mode repetitions.
 
 The current Rust suite therefore includes an additional stale-nonce regression,
-and the summary regression now covers both passing and `BOTTLENECKED` capacity
-outcomes. Do not carry the earlier 7-test/smoke evidence forward as proof of
+and the summary regression now covers passing and `BOTTLENECKED` capacity outcomes,
+missing baseline targets, missing direct references, incomplete repetition sets,
+failed direct rows, and an entire expected body-size/concurrency combination
+missing from every baseline. Schema v4 binds completeness to the matrix cardinality
+computed by `run.sh`, so observed output cannot redefine the expected test matrix. Do not carry the earlier 7-test/smoke evidence forward as proof of
 these new gates until the exact current Git head executes successfully.
 
 **Oreslang native workload execution remains NOT_EXECUTED** until a trusted
