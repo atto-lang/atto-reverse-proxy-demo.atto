@@ -11,9 +11,7 @@ const INGRESS: &[u8] = b"Upstream forwarding unavailable in this runtime";
 const TEST_NONCE: &str = "0123456789abcdef0123456789abcdef";
 
 fn nonce(s: &str) -> Result<&str, String> {
-    if s.len() != 32
-        || !s.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
-    {
+    if s.len() != 32 || !s.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f')) {
         return Err("origin nonce must be exactly 32 lowercase hex characters".into());
     }
     Ok(s)
@@ -108,7 +106,12 @@ fn verify_with_nonce(
 fn verify(bytes: &[u8], profile: &str, size: usize) -> Result<(), String> {
     verify_with_nonce(bytes, profile, size, "fixture-v1")
 }
-fn request(addr: SocketAddr, profile: &str, size: usize, origin_nonce: &str) -> Result<u64, String> {
+fn request(
+    addr: SocketAddr,
+    profile: &str,
+    size: usize,
+    origin_nonce: &str,
+) -> Result<u64, String> {
     let (_, _, path) = expected(profile, size)?;
     let start = Instant::now();
     let mut s =
@@ -146,7 +149,9 @@ fn percentile(sorted: &[u64], p: usize) -> u64 {
 }
 fn run(args: &[String]) -> Result<(), String> {
     if args.len() != 7 {
-        return Err("run IP:PORT ingress|forward BYTES REQUESTS CONCURRENCY WARMUP ORIGIN_NONCE".into());
+        return Err(
+            "run IP:PORT ingress|forward BYTES REQUESTS CONCURRENCY WARMUP ORIGIN_NONCE".into(),
+        );
     }
     let addr = address(&args[0])?;
     let profile = &args[1];
@@ -298,11 +303,7 @@ mod tests {
     fn stale_origin_marker_is_not_forwarding_proof() {
         let stale = response(200, "X-Bench-Origin: fixture-v1\r\n", b"xxx");
         assert!(verify_with_nonce(&stale, "forward", 3, TEST_NONCE).is_err());
-        let fresh = response(
-            200,
-            &format!("X-Bench-Origin: {TEST_NONCE}\r\n"),
-            b"xxx",
-        );
+        let fresh = response(200, &format!("X-Bench-Origin: {TEST_NONCE}\r\n"), b"xxx");
         assert!(verify_with_nonce(&fresh, "forward", 3, TEST_NONCE).is_ok());
         assert!(nonce(TEST_NONCE).is_ok());
         assert!(nonce("fixture-v1").is_err());
