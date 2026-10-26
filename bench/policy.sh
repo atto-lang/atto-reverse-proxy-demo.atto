@@ -3,7 +3,7 @@ set -euo pipefail
 repo=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 command -v oreslang >/dev/null
 [[ -x /usr/bin/time ]] || { echo '/usr/bin/time is required' >&2; exit 2; }
-[[ -n "${ORESLANG_RUNTIME_SHA:-}" ]] || { echo 'Set the compiler/runtime source SHA in ORESLANG_RUNTIME_SHA' >&2; exit 2; }
+[[ "${ORESLANG_RUNTIME_SHA:-}" =~ ^[0-9a-f]{40}$ ]] || { echo 'ORESLANG_RUNTIME_SHA must be exactly 40 lowercase hex characters' >&2; exit 2; }
 out=$(mktemp -d "${TMPDIR:-/tmp}/ores-policy-bench.XXXXXXXX")
 printf 'Results: %s\n' "$out"
 printf 'runtime_source_sha=%s\n' "$ORESLANG_RUNTIME_SHA" > "$out/provenance.txt"
