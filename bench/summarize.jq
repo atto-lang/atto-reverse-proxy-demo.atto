@@ -32,7 +32,8 @@ def baseline_target: . == "direct" or . == "nginx" or . == "haproxy";
     end
   )) as $annotated
 | ([.[] | select(.profile == "forward" and (.target | baseline_target)) | [.bytes, .concurrency]] | unique) as $baseline_keys
-| ([$baseline_keys[] as $k |
+| (($baseline_keys | sort) == ($expected_matrix | sort)) as $matrix_membership_exact
+| ([$expected_matrix[] as $k |
     {bytes:$k[0], concurrency:$k[1], complete:
       (["direct","nginx","haproxy"] | all(. as $t |
         ([$annotated[] | select(.target == $t and .profile == "forward" and
@@ -40,14 +41,16 @@ def baseline_target: . == "direct" or . == "nginx" or . == "haproxy";
           .repetitions == $expected_repetitions)] | length) == 1
       ))}
   ]) as $matrix
-| (($matrix | length) == $expected_baseline_groups and $expected_baseline_groups > 0 and ($matrix | all(.complete == true))) as $matrix_complete
+| ($matrix_membership_exact and ($matrix | length) == $expected_baseline_groups and $expected_baseline_groups > 0 and ($matrix | all(.complete == true))) as $matrix_complete
 | ([.[] | select(.status != "PASS" and .profile == "forward" and (.target | baseline_target))] | length == 0) as $baseline_failures_absent
 | {
   schema: 4,
   interpretation: "Independent closed-loop connection-close repetitions; percentile medians are not pooled percentiles. Forward proxy results are comparable only when the complete expected body-size/concurrency matrix is present for direct/NGINX/HAProxy at the expected repetition count and direct-origin median throughput is at least 1.20x the proxy median for the same body size and concurrency.",
   expected_repetitions: $expected_repetitions,
   expected_baseline_groups: $expected_baseline_groups,
+  expected_matrix: $expected_matrix,
   direct_capacity_margin_required: 1.20,
+  baseline_matrix_membership_exact: $matrix_membership_exact,
   baseline_matrix_complete: $matrix_complete,
   baseline_matrix: $matrix,
   capacity_gate_passed: ($matrix_complete and $baseline_failures_absent and ([$annotated[] | select(.profile == "forward" and .target != "direct")] | length > 0) and ([$annotated[] | select(.profile == "forward" and .target != "direct")] | all(.metrics_comparable == true))),
