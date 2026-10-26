@@ -1,6 +1,5 @@
-# Native compiler and contract gate. No runtime source checkout or cross-org mirror.
-# A trusted, isolated runner carrying the 'oreslang-jdk25' label must have an
-# approved Oreslang Java/Graal executable on PATH. Missing runtime is a failure.
+# Source-integrity plus native compiler/contract gate.
+# No compiler source checkout and no cross-org private-source mirror.
 name: Native Oreslang Proxy Contracts
 on:
   push:
@@ -16,11 +15,38 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  source-integrity:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Checkout exact event tree
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - name: Verify reviewed Oreslang inventory is complete
+        shell: bash
+        run: |
+          set -euo pipefail
+          actual="$RUNNER_TEMP/oreslang-files.txt"
+          find src tests -type f -name '*.ores' -print | LC_ALL=C sort > "$actual"
+          if grep -Ev '^(src|tests)/[A-Za-z0-9_./-]+\.ores$' "$actual"; then
+            echo "Oreslang source path outside the reviewable path contract" >&2
+            exit 1
+          fi
+          diff -u ci/oreslang-files.txt "$actual"
+
+          contracts="$RUNNER_TEMP/pure-contracts.txt"
+          find tests -maxdepth 1 -type f -name '*_contract.ores' -print | LC_ALL=C sort > "$contracts"
+          diff -u ci/pure-contracts.txt "$contracts"
+
+          test -z "$(find src tests -type l -name '*.ores' -print -quit)"
+
   native-contracts:
+    needs: source-integrity
     # Never execute untrusted fork code on the organization's self-hosted runner.
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: [self-hosted, linux, x64, oreslang-jdk25]
-    timeout-minutes: 20
+    timeout-minutes: 25
     steps:
       - name: Checkout exact event tree
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
@@ -33,21 +59,15 @@ jobs:
           java-version: '25'
       - name: Confirm native compiler availability
         run: command -v oreslang
-      - name: Verify reviewed Oreslang inventory is complete
+      - name: Record executable provenance
         shell: bash
         run: |
           set -euo pipefail
-          actual="$RUNNER_TEMP/oreslang-files.txt"
-          find src tests -type f -name '*.ores' -print | LC_ALL=C sort > "$actual"
-          if grep -Ev '^(src|tests)/[A-Za-z0-9_./-]+\.ores "$actual"; then
-            echo "Oreslang source path outside the reviewable path contract" >&2
-            exit 1
-          fi
-          diff -u ci/oreslang-files.txt "$actual"
-
-          contracts="$RUNNER_TEMP/pure-contracts.txt"
-          find tests -maxdepth 1 -type f -name '*_contract.ores' -print | LC_ALL=C sort > "$contracts"
-          diff -u ci/pure-contracts.txt "$contracts"
+          echo "repo_head=$(git rev-parse HEAD)"
+          echo "repo_tree=$(git rev-parse HEAD^{tree})"
+          command -v oreslang
+          oreslang --build-info
+          java -version
       - name: Compiler-check every reviewed Oreslang source and test
         shell: bash
         run: |
@@ -72,3 +92,60 @@ jobs:
             echo "No pure contract tests declared" >&2
             exit 1
           fi
+      - name: Execute loopback ingress and native TCP smoke together
+        shell: bash
+        run: |
+          set -euo pipefail
+          log="$RUNNER_TEMP/reverse-ingress.log"
+          config="$GITHUB_WORKSPACE/config/example.yaml"
+          server_pid=""
+
+          cleanup() {
+            if [[ -n "$server_pid" ]] && kill -0 "$server_pid" 2>/dev/null; then
+              kill -TERM "$server_pid" 2>/dev/null || true
+              for _ in {1..50}; do
+                kill -0 "$server_pid" 2>/dev/null || break
+                sleep 0.1
+              done
+              kill -KILL "$server_pid" 2>/dev/null || true
+            fi
+            if [[ -n "$server_pid" ]]; then
+              wait "$server_pid" 2>/dev/null || true
+            fi
+          }
+          trap cleanup EXIT
+
+          env ores_proxy_conf_yaml="$config" \
+            oreslang \
+              --allow-env=ores_proxy_conf_yaml \
+              --allow-read="$config" \
+              --allow-net=127.0.0.1:8080 \
+              src/serve_reverse.ores >"$log" 2>&1 &
+          server_pid=$!
+
+          ready=0
+          for _ in {1..100}; do
+            if ! kill -0 "$server_pid" 2>/dev/null; then
+              cat "$log" >&2
+              echo "reverse ingress exited before readiness" >&2
+              exit 1
+            fi
+            if (exec 3<>/dev/tcp/127.0.0.1/8080) 2>/dev/null; then
+              exec 3>&-
+              ready=1
+              break
+            fi
+            sleep 0.1
+          done
+          if [[ "$ready" -ne 1 ]]; then
+            cat "$log" >&2
+            echo "reverse ingress did not become ready" >&2
+            exit 1
+          fi
+
+          timeout --signal=TERM --kill-after=5s 30s \
+            oreslang --allow-net=127.0.0.1:8080 tests/ingress_tcp_smoke.ores
+
+          kill -0 "$server_pid"
+          grep -Fq 'INCOMPLETE reverse proxy ingress; loopback only; 501 upstream response' "$log"
+ 
