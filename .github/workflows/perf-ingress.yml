@@ -1,0 +1,164 @@
+name: Reverse proxy ingress performance
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: reverse-proxy-perf-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  ingress-benchmark:
+    runs-on: [self-hosted, linux, x64, oreslang-jdk25]
+    timeout-minutes: 20
+    steps:
+      - name: Checkout exact benchmark tree
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Verify trusted benchmark prerequisites
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${GITHUB_SHA}"
+          command -v oreslang
+          command -v docker
+          command -v curl
+          command -v wrk
+          command -v taskset
+          command -v sha256sum
+          test "$(nproc)" -ge 2
+          sha256sum "$(command -v oreslang)"
+          java -version
+          docker --version
+          wrk --version
+
+      - name: Validate pinned baseline configurations
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker pull nginx:1.31.8
+          docker pull haproxy:3.4.7
+          docker run --rm             -v "$GITHUB_WORKSPACE/bench/ingress/nginx.conf:/etc/nginx/nginx.conf:ro"             nginx:1.31.8 nginx -t -c /etc/nginx/nginx.conf
+          docker run --rm             -v "$GITHUB_WORKSPACE/bench/ingress/haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro"             haproxy:3.4.7 haproxy -c -f /usr/local/etc/haproxy/haproxy.cfg
+
+      - name: Run semantic preflights and rotated ingress benchmarks
+        shell: bash
+        run: |
+          set -euo pipefail
+          out="$RUNNER_TEMP/reverse-proxy-perf"
+          mkdir -p "$out"
+          export ores_proxy_conf_yaml="$GITHUB_WORKSPACE/config/worker-example.yaml"
+          ores_log="$out/oreslang-server.log"
+          nginx_name="ores-bench-nginx-${GITHUB_RUN_ID}"
+          haproxy_name="ores-bench-haproxy-${GITHUB_RUN_ID}"
+
+          cleanup() {
+            kill "${ores_pid:-0}" 2>/dev/null || true
+            if test -n "${ores_pid:-}"; then wait "$ores_pid" 2>/dev/null || true; fi
+            docker rm -f "$nginx_name" "$haproxy_name" >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+
+          taskset -c 1 oreslang --no-prompt             --allow-net=127.0.0.1:8080             --allow-read="$ores_proxy_conf_yaml"             --allow-env=ores_proxy_conf_yaml             src/serve_reverse.ores >"$ores_log" 2>&1 &
+          ores_pid=$!
+
+          docker run -d --rm --name "$nginx_name" --network host --cpuset-cpus=1             -v "$GITHUB_WORKSPACE/bench/ingress/nginx.conf:/etc/nginx/nginx.conf:ro"             nginx:1.31.8 >/dev/null
+          docker run -d --rm --name "$haproxy_name" --network host --cpuset-cpus=1             -v "$GITHUB_WORKSPACE/bench/ingress/haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro"             haproxy:3.4.7 >/dev/null
+
+          check() {
+            local port="$1" path="$2" expected_status="$3" expected_body="$4"
+            local body status
+            body="$(mktemp)"
+            status="$(curl --fail-with-body --silent --show-error               -H 'Host: worker.example.test'               -o "$body" -w '%{http_code}'               "http://127.0.0.1:${port}${path}" || true)"
+            if test "$status" != "$expected_status" ||               test "$(cat "$body")" != "$expected_body"; then
+              echo "preflight mismatch port=$port path=$path status=$status" >&2
+              cat "$body" >&2 || true
+              rm -f "$body"
+              exit 1
+            fi
+            rm -f "$body"
+          }
+
+          ready=0
+          for attempt in $(seq 1 30); do
+            if ! kill -0 "$ores_pid" 2>/dev/null; then
+              cat "$ores_log"
+              exit 1
+            fi
+            if curl --silent --output /dev/null -H 'Host: worker.example.test'               http://127.0.0.1:8080/actor; then
+              ready=1
+              break
+            fi
+            sleep 1
+          done
+          if test "$ready" != 1; then
+            cat "$ores_log"
+            echo "Oreslang ingress did not become ready" >&2
+            exit 1
+          fi
+
+          for port in 8080 18080 18081; do
+            check "$port" /actor 200 "hello from native Oreslang actor service"
+            check "$port" /api 403 "Request denied"
+            body="$(mktemp)"
+            status="$(curl --silent --show-error               -H 'Host: worker.example.test' -H 'x-demo-token: present'               -o "$body" -w '%{http_code}' "http://127.0.0.1:${port}/api")"
+            test "$status" = 501
+            test "$(cat "$body")" = "Upstream forwarding unavailable in this runtime"
+            rm -f "$body"
+          done
+
+          {
+            echo "git_sha=$(git rev-parse HEAD)"
+            echo "oreslang_sha256=$(sha256sum "$(command -v oreslang)" | awk '{print $1}')"
+            echo "nginx_image=$(docker image inspect nginx:1.31.8 --format '{{index .RepoDigests 0}}')"
+            echo "haproxy_image=$(docker image inspect haproxy:3.4.7 --format '{{index .RepoDigests 0}}')"
+            echo "kernel=$(uname -a)"
+            echo "cpus=$(nproc)"
+            lscpu
+            java -version 2>&1
+          } >"$out/metadata.txt"
+
+          port_for() {
+            case "$1" in
+              oreslang) echo 8080 ;;
+              nginx) echo 18080 ;;
+              haproxy) echo 18081 ;;
+              *) return 2 ;;
+            esac
+          }
+
+          run_case() {
+            local round="$1" candidate="$2" workload="$3" path port
+            port="$(port_for "$candidate")"
+            case "$workload" in
+              actor) path=/actor ;;
+              deny) path=/api ;;
+              *) return 2 ;;
+            esac
+            taskset -c 0 wrk -t1 -c64 -d10s --latency               -H 'Host: worker.example.test'               "http://127.0.0.1:${port}${path}"               >"$out/round-${round}-${candidate}-${workload}.txt"
+          }
+
+          for candidate in oreslang nginx haproxy; do
+            port="$(port_for "$candidate")"
+            taskset -c 0 wrk -t1 -c64 -d3s -H 'Host: worker.example.test'               "http://127.0.0.1:${port}/actor" >/dev/null
+          done
+
+          for workload in actor deny; do
+            for candidate in oreslang nginx haproxy; do run_case 1 "$candidate" "$workload"; done
+            for candidate in nginx haproxy oreslang; do run_case 2 "$candidate" "$workload"; done
+            for candidate in haproxy oreslang nginx; do run_case 3 "$candidate" "$workload"; done
+          done
+
+          cat "$ores_log" >>"$out/metadata.txt"
+
+      - name: Upload raw benchmark evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: reverse-proxy-ingress-${{ github.sha }}
+          path: ${{ runner.temp }}/reverse-proxy-perf
+          if-no-files-found: error
+          retention-days: 30
