@@ -85,7 +85,7 @@ printf '%s\n' '[
 {"status":"PASS","target":"haproxy","profile":"forward","bytes":0,"concurrency":1,"requests_per_second":90,"p50_us":2,"p95_us":3,"p99_us":4}
 ]' | jq --argjson expected_repetitions 1 --argjson expected_baseline_groups 2 --argjson expected_matrix '[[0,1],[1024,1]]' -f "$bench/summarize.jq" | jq -e '
 .baseline_matrix_complete == false and
-(.baseline_matrix | length) == 1 and
+(.baseline_matrix | length) == 2 and
 .capacity_gate_passed == false' >/dev/null
 printf '%s\n' 'PASS wholly missing matrix combination fails closed'
 
