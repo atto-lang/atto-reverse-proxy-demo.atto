@@ -31,6 +31,11 @@ jobs:
           command -v taskset
           command -v sha256sum
           test "$(nproc)" -ge 2
+          # This benchmark deliberately uses CPU 0 for the generator and CPU 1
+          # for the server. Fail instead of silently losing isolation on a
+          # runner whose cpuset does not expose those logical CPUs.
+          taskset -c 0 true
+          taskset -c 1 true
           sha256sum "$(command -v oreslang)"
           java -version
           docker --version
