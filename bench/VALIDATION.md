@@ -15,15 +15,17 @@
 
 The benchmark now additionally:
 
-- requires canonical 40-lowercase-hex source/runtime provenance;
+- requires canonical 40-lowercase-hex source/runtime provenance and binds published provenance to the exact checked-out Git tree;
 - generates a fresh 128-bit-equivalent lowercase-hex origin nonce per run and
   requires that nonce in real forwarding responses;
 - rejects the old static origin marker as stale forwarding proof;
 - labels forward-proxy metrics non-comparable unless the matching direct-origin
   median has at least **1.20x** throughput headroom;
 - fails full mode when that direct-capacity gate does not pass;
-- requires explicit, distinct proxy/load/origin CPU affinity in full mode and
-  records CPU quota, governor/boost state and topology.
+- requires explicit, distinct proxy/load/origin CPU affinity in full mode,
+  rejects CPU IDs outside the current allowed cpuset, records CPU quota,
+  governor/boost state and topology, and rotates direct/NGINX/HAProxy through
+  all three ordering positions over six full-mode repetitions.
 
 The current Rust suite therefore includes an additional stale-nonce regression,
 and the summary regression now covers both passing and `BOTTLENECKED` capacity
