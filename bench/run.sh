@@ -198,7 +198,7 @@ if [[ -z "${ORESLANG_ADDR:-}" ]]; then
 fi
 printf '{"schema":1,"status":"NOT_IMPLEMENTED","reason":"no_authenticated_CONNECT_relay_in_oreslang_demo","metrics_comparable":false}\n' > "$out/connect-status.json"
 ps -p "$origin_pid,$nginx_pid,$haproxy_pid" --ppid "$nginx_pid" -o pid,ppid,rss,pcpu,comm > "$out/processes-after.txt" 2>&1 || echo "Process telemetry unavailable" > "$out/processes-after.txt"
-jq -s -f "$bench/summarize.jq" "$out"/*-r*.json > "$out/summary.json"
+jq -s --argjson expected_repetitions "$repeats" -f "$bench/summarize.jq" "$out"/*-r*.json > "$out/summary.json"
 if [[ "$mode" == full ]] && ! jq -e '.capacity_gate_passed == true' "$out/summary.json" >/dev/null; then
   echo 'Direct-origin capacity gate failed; full-run proxy metrics are not publishable' >&2
   failures=$((failures + 1))
