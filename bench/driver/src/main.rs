@@ -353,7 +353,8 @@ mod tests {
         invalid_utf8.extend_from_slice(b"\r\n\r\n");
         assert!(origin_request_size(&invalid_utf8).is_err());
 
-        let mut oversized = b"GET /bytes/3 HTTP/1.1\r\nHost: bench.example.test\r\nX-Fill: ".to_vec();
+        let mut oversized =
+            b"GET /bytes/3 HTTP/1.1\r\nHost: bench.example.test\r\nX-Fill: ".to_vec();
         oversized.extend(std::iter::repeat_n(b'a', 16384));
         oversized.extend_from_slice(b"\r\n\r\n");
         assert!(origin_request_size(&oversized).is_err());
