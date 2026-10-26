@@ -86,7 +86,7 @@ numbers are not production comparisons.
 ## Workload and outputs
 
 Full runs sweep concurrency 1/16/64/256 and 0/1 KiB/64 KiB bodies, with 200
-serial warm-up requests per case, five independent repetitions and alternating
+serial warm-up requests per case, six independent repetitions and alternating
 baseline order. Each measured request opens a TCP connection, sends a bodyless
 GET with fixed Host and `Connection: close`, reads the whole response through
 EOF and checks status, exactly one Content-Length, exact body and a fresh
