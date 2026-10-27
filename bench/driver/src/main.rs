@@ -35,6 +35,9 @@ fn number(s: &str, min: usize, max: usize) -> Result<usize, String> {
 fn header_name_valid(name: &str) -> bool {
     !name.is_empty() && name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
 }
+fn header_value_valid(value: &str) -> bool {
+    value.bytes().all(|b| b == b' ' || (0x21..=0x7e).contains(&b))
+}
 fn expected(profile: &str, size: usize) -> Result<(u16, Vec<u8>, String), String> {
     match profile {
         "ingress" if size == 0 => Ok((501, INGRESS.to_vec(), "/ingress".into())),
@@ -64,10 +67,13 @@ fn origin_request_size(wire: &[u8]) -> Result<usize, String> {
     if parts.next().is_some() || method != "GET" || version != "HTTP/1.1" {
         return Err("unexpected request line".into());
     }
-    let size = target
+    let size_text = target
         .strip_prefix("/bytes/")
-        .and_then(|s| number(s, 0, 65536).ok())
         .ok_or("unexpected request target")?;
+    let size = number(size_text, 0, 65536).map_err(|_| "unexpected request target")?;
+    if size_text != size.to_string() {
+        return Err("noncanonical request target".into());
+    }
     let mut host_seen = false;
     for line in lines {
         if line.starts_with(' ') || line.starts_with('\t') {
@@ -76,6 +82,9 @@ fn origin_request_size(wire: &[u8]) -> Result<usize, String> {
         let (key, value) = line.split_once(':').ok_or("malformed request header")?;
         if !header_name_valid(key) {
             return Err("invalid request header name".into());
+        }
+        if !header_value_valid(value) {
+            return Err("invalid request header value".into());
         }
         if matches!(
             key.to_ascii_lowercase().as_str(),
@@ -129,6 +138,9 @@ fn verify_with_nonce(
         let (key, value) = line.split_once(':').ok_or("malformed header")?;
         if !header_name_valid(key) {
             return Err("invalid response header name".into());
+        }
+        if !header_value_valid(value) {
+            return Err("invalid response header value".into());
         }
         let key = key.to_ascii_lowercase();
         let value = value.trim();
@@ -367,6 +379,10 @@ mod tests {
             b"GET /bytes/3 HTTP/1.1\r\nHost: bench.example.test\r\nTrailer: x-checksum\r\n\r\n",
             b"GET /bytes/3 HTTP/1.1\r\nHost: bench.example.test\r\nUpgrade: websocket\r\n\r\n",
             b"GET /bytes/3 HTTP/1.1\r\nHost: bench.example.test\r\n\r\njunk",
+            b"GET /bytes/03 HTTP/1.1\r\nHost: bench.example.test\r\n\r\n",
+            b"GET /bytes/+3 HTTP/1.1\r\nHost: bench.example.test\r\n\r\n",
+            b"GET /bytes/3 HTTP/1.1\r\nHost: bench.example.test\r\nX-Test: bad\x00value\r\n\r\n",
+            b"GET /bytes/3 HTTP/1.1\r\nHost: bench.example.test\r\nX-Test:\tbad\r\n\r\n",
         ] {
             assert!(origin_request_size(invalid).is_err());
         }
@@ -448,6 +464,29 @@ mod tests {
             &response(
                 200,
                 &format!("X-Bench-Origin: {TEST_NONCE}\r\nBad Header: x\r\n"),
+                b"xxx",
+            ),
+            "forward",
+            3
+        )
+        .is_err());
+    }
+    #[test]
+    fn malformed_response_header_value_is_rejected() {
+        assert!(verify(
+            &response(
+                200,
+                &format!("X-Bench-Origin: {TEST_NONCE}\r\nX-Test: bad\u{0000}value\r\n"),
+                b"xxx",
+            ),
+            "forward",
+            3
+        )
+        .is_err());
+        assert!(verify(
+            &response(
+                200,
+                &format!("X-Bench-Origin: {TEST_NONCE}\r\nX-Test:\tbad\r\n"),
                 b"xxx",
             ),
             "forward",
