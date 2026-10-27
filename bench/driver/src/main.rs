@@ -34,11 +34,11 @@ fn number(s: &str, min: usize, max: usize) -> Result<usize, String> {
 }
 fn header_name_valid(name: &str) -> bool {
     !name.is_empty()
-        && name.bytes().all(|b| {
-            b.is_ascii_alphanumeric()
-                || matches!(
-                    b,
-                    b'!' | b'#' | b'fn expected(profile: &str, size: usize) -> Result<(u16, Vec<u8>, String), String> {
+        && name
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-')
+}
+fn expected(profile: &str, size: usize) -> Result<(u16, Vec<u8>, String), String> {
     match profile {
         "ingress" if size == 0 => Ok((501, INGRESS.to_vec(), "/ingress".into())),
         "forward" if size <= 65536 => Ok((200, vec![b'x'; size], format!("/bytes/{size}"))),
