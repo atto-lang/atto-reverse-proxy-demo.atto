@@ -1,0 +1,35 @@
+name: Oreslang JDK25 source-free runner canary
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/oreslang-jdk25-sourcefree-canary.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  canary:
+    runs-on: [self-hosted, linux, x64, oreslang-jdk25]
+    timeout-minutes: 5
+    steps:
+      - name: Record runner identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          uname -a
+          printf 'runner_name=%s\n' "${RUNNER_NAME:-UNKNOWN}"
+          printf 'runner_os=%s\n' "${RUNNER_OS:-UNKNOWN}"
+          printf 'runner_arch=%s\n' "${RUNNER_ARCH:-UNKNOWN}"
+      - name: Verify JDK 25
+        shell: bash
+        run: |
+          set -euo pipefail
+          java -version
+          major="$(java -version 2>&1 | awk -F'[ ".]' '/version/ {print $3; exit}')"
+          test "$major" = "25"
+      - name: Verify approved Oreslang runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          command -v oreslang
+          sha256sum "$(command -v oreslang)"
+          (oreslang --version || oreslang --build-info || oreslang --help >/dev/null)
