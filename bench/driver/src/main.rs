@@ -33,10 +33,7 @@ fn number(s: &str, min: usize, max: usize) -> Result<usize, String> {
     Ok(n)
 }
 fn header_name_valid(name: &str) -> bool {
-    !name.is_empty()
-        && name
-            .bytes()
-            .all(|b| b.is_ascii_alphanumeric() || b == b'-')
+    !name.is_empty() && name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
 }
 fn expected(profile: &str, size: usize) -> Result<(u16, Vec<u8>, String), String> {
     match profile {
