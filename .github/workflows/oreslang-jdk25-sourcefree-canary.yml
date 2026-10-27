@@ -8,11 +8,17 @@ on:
 permissions: {}
 jobs:
   canary:
-    # A self-hosted runner must never be scheduled for a fork-origin PR.
+    # Pin immutable repo identity before reserving a trusted self-hosted runner.
+    # A matching repo name or fork-controlled PR payload is insufficient.
     if: >-
       (github.event_name == 'pull_request' &&
-       github.event.pull_request.head.repo.full_name == github.repository) ||
+       github.event.repository.id == 1429954649 &&
+       github.event.pull_request.head.repo.id == 1429954649 &&
+       github.event.pull_request.base.repo.id == 1429954649 &&
+       github.event.pull_request.head.repo.full_name == github.repository &&
+       github.event.pull_request.base.ref == 'main') ||
       (github.event_name == 'workflow_dispatch' &&
+       github.event.repository.id == 1429954649 &&
        github.ref == 'refs/heads/main')
     runs-on: [self-hosted, linux, x64, oreslang-jdk25]
     timeout-minutes: 5
@@ -21,17 +27,27 @@ jobs:
         shell: bash
         env:
           EXPECTED_REPOSITORY: ${{ github.repository }}
+          APPROVED_REPOSITORY_ID: '1429954649'
+          EVENT_REPOSITORY_ID: ${{ github.event.repository.id }}
+          EVENT_HEAD_REPO_ID: ${{ github.event.pull_request.head.repo.id }}
+          EVENT_BASE_REPO_ID: ${{ github.event.pull_request.base.repo.id }}
+          EVENT_NAME: ${{ github.event_name }}
           EXPECTED_PR_HEAD: ${{ github.event.pull_request.head.sha }}
           WORKFLOW_RUN_ID: ${{ github.run_id }}
           WORKFLOW_RUN_ATTEMPT: ${{ github.run_attempt }}
         run: |
           set -euo pipefail
+          test "$EVENT_REPOSITORY_ID" = "$APPROVED_REPOSITORY_ID" || { echo 'unexpected event repository ID' >&2; exit 1; }
+          if [[ "$EVENT_NAME" == 'pull_request' ]]; then
+            test "$EVENT_HEAD_REPO_ID" = "$APPROVED_REPOSITORY_ID" || { echo 'unexpected PR head repository ID' >&2; exit 1; }
+            test "$EVENT_BASE_REPO_ID" = "$APPROVED_REPOSITORY_ID" || { echo 'unexpected PR base repository ID' >&2; exit 1; }
+          fi
           test -n "${RUNNER_NAME:-}" || { echo 'missing runner name' >&2; exit 1; }
           test "${RUNNER_OS:-}" = Linux
           test "${RUNNER_ARCH:-}" = X64
           test "$(uname -m)" = x86_64
           printf 'runner_name=%s\nrunner_os=%s\nrunner_arch=%s\n' "$RUNNER_NAME" "$RUNNER_OS" "$RUNNER_ARCH"
-          printf 'repository=%s\npr_head_sha=%s\nrun_id=%s\nrun_attempt=%s\n' "$EXPECTED_REPOSITORY" "$EXPECTED_PR_HEAD" "$WORKFLOW_RUN_ID" "$WORKFLOW_RUN_ATTEMPT"
+          printf 'repository=%s\nrepository_id=%s\npr_head_sha=%s\nrun_id=%s\nrun_attempt=%s\n' "$EXPECTED_REPOSITORY" "$EVENT_REPOSITORY_ID" "$EXPECTED_PR_HEAD" "$WORKFLOW_RUN_ID" "$WORKFLOW_RUN_ATTEMPT"
           uname -a
       - name: Verify installed JDK major 25
         shell: bash
