@@ -4,32 +4,60 @@ on:
     paths:
       - '.github/workflows/oreslang-jdk25-sourcefree-canary.yml'
   workflow_dispatch:
-permissions:
-  contents: read
+# No checkout, GitHub API, artifacts, or repository token is needed.
+permissions: {}
 jobs:
   canary:
+    # A self-hosted runner must never be scheduled for a fork-origin PR.
+    if: >-
+      (github.event_name == 'pull_request' &&
+       github.event.pull_request.head.repo.full_name == github.repository) ||
+      (github.event_name == 'workflow_dispatch' &&
+       github.ref == 'refs/heads/main')
     runs-on: [self-hosted, linux, x64, oreslang-jdk25]
     timeout-minutes: 5
     steps:
-      - name: Record runner identity
+      - name: Record trusted runner and source identity
         shell: bash
+        env:
+          EXPECTED_REPOSITORY: ${{ github.repository }}
+          EXPECTED_PR_HEAD: ${{ github.event.pull_request.head.sha }}
+          WORKFLOW_RUN_ID: ${{ github.run_id }}
+          WORKFLOW_RUN_ATTEMPT: ${{ github.run_attempt }}
         run: |
           set -euo pipefail
+          test -n "${RUNNER_NAME:-}" || { echo 'missing runner name' >&2; exit 1; }
+          test "${RUNNER_OS:-}" = Linux
+          test "${RUNNER_ARCH:-}" = X64
+          test "$(uname -m)" = x86_64
+          printf 'runner_name=%s\nrunner_os=%s\nrunner_arch=%s\n' "$RUNNER_NAME" "$RUNNER_OS" "$RUNNER_ARCH"
+          printf 'repository=%s\npr_head_sha=%s\nrun_id=%s\nrun_attempt=%s\n' "$EXPECTED_REPOSITORY" "$EXPECTED_PR_HEAD" "$WORKFLOW_RUN_ID" "$WORKFLOW_RUN_ATTEMPT"
           uname -a
-          printf 'runner_name=%s\n' "${RUNNER_NAME:-UNKNOWN}"
-          printf 'runner_os=%s\n' "${RUNNER_OS:-UNKNOWN}"
-          printf 'runner_arch=%s\n' "${RUNNER_ARCH:-UNKNOWN}"
-      - name: Verify JDK 25
+      - name: Verify installed JDK major 25
         shell: bash
         run: |
           set -euo pipefail
           java -version
-          major="$(java -version 2>&1 | awk -F'[ ".]' '/version/ {print $3; exit}')"
-          test "$major" = "25"
-      - name: Verify approved Oreslang runtime
+          spec="$(java -XshowSettings:properties -version 2>&1 | sed -nE 's/^[[:space:]]*java\.specification\.version[[:space:]]*=[[:space:]]*([^[:space:]]+).*$/\1/p' | head -n 1)"
+          test "$spec" = "25" || { printf 'JDK 25 required, found java.specification.version=%s\n' "${spec:-missing}" >&2; exit 1; }
+          printf 'jdk_specification_version=%s\n' "$spec"
+      - name: Verify resolved Oreslang launcher and bounded invocation
         shell: bash
         run: |
           set -euo pipefail
-          command -v oreslang
-          sha256sum "$(command -v oreslang)"
-          (oreslang --version || oreslang --build-info || oreslang --help >/dev/null)
+          launcher="$(type -P oreslang || true)"
+          test -n "$launcher" || { echo 'oreslang not on PATH' >&2; exit 1; }
+          launcher="$(readlink -f -- "$launcher")"
+          test -f "$launcher" && test -x "$launcher" || { echo 'oreslang is not an executable regular file' >&2; exit 1; }
+          printf 'oreslang_path=%s\n' "$launcher"
+          sha256sum -- "$launcher"
+          if timeout 15s "$launcher" --version; then
+            echo 'oreslang_probe=--version'
+          elif timeout 15s "$launcher" --build-info; then
+            echo 'oreslang_probe=--build-info'
+          elif timeout 15s "$launcher" --help; then
+            echo 'oreslang_probe=--help'
+          else
+            echo 'oreslang launcher failed all bounded probes' >&2
+            exit 1
+          fi
