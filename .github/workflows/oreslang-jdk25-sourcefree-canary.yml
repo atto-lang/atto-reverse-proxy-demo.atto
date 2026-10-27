@@ -43,6 +43,9 @@ jobs:
           printf 'jdk_specification_version=%s\n' "$spec"
       - name: Verify resolved Oreslang launcher and bounded invocation
         shell: bash
+        env:
+          # Set by the trusted repo/org administrator, never from PR source.
+          APPROVED_ORESLANG_SHA256: ${{ vars.ORESLANG_APPROVED_SHA256 }}
         run: |
           set -euo pipefail
           launcher="$(type -P oreslang || true)"
@@ -50,7 +53,19 @@ jobs:
           launcher="$(readlink -f -- "$launcher")"
           test -f "$launcher" && test -x "$launcher" || { echo 'oreslang is not an executable regular file' >&2; exit 1; }
           printf 'oreslang_path=%s\n' "$launcher"
-          sha256sum -- "$launcher"
+          # A printed hash alone does not prove this is the approved runtime.
+          # Require an administrator-provisioned exact digest, fail closed.
+          if [[ ! "${APPROVED_ORESLANG_SHA256:-}" =~ ^[0-9a-fA-F]{64}$ ]]; then
+            echo 'missing or invalid ORESLANG_APPROVED_SHA256 repository/org variable' >&2
+            exit 1
+          fi
+          actual_sha256="$(sha256sum -- "$launcher" | cut -d ' ' -f 1)"
+          printf 'oreslang_sha256=%s\\n' "$actual_sha256"
+          if [[ "$actual_sha256" != "${APPROVED_ORESLANG_SHA256,,}" ]]; then
+            echo 'oreslang binary digest differs from approved runtime' >&2
+            exit 1
+          fi
+          echo 'oreslang_digest_verified=true'
           if timeout 15s "$launcher" --version; then
             echo 'oreslang_probe=--version'
           elif timeout 15s "$launcher" --build-info; then
