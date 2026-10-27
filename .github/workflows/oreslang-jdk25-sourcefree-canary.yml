@@ -60,7 +60,7 @@ jobs:
             exit 1
           fi
           actual_sha256="$(sha256sum -- "$launcher" | cut -d ' ' -f 1)"
-          printf 'oreslang_sha256=%s\\n' "$actual_sha256"
+          printf 'oreslang_sha256=%s\n' "$actual_sha256"
           if [[ "$actual_sha256" != "${APPROVED_ORESLANG_SHA256,,}" ]]; then
             echo 'oreslang binary digest differs from approved runtime' >&2
             exit 1
