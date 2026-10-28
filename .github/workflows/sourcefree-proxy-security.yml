@@ -1,0 +1,45 @@
+name: Source-free reverse proxy security audit
+on:
+  push:
+    branches:
+      - feat/worker-service-bindings-20261023
+      - feat/yaml-backend-pools-20261023
+      - feat/yaml-backend-pools-20261023
+      - feat/executable-actor-ingress-gate-20261023
+  pull_request:
+    branches:
+      - audit/strict-proxy-boundaries-20261022
+      - feat/worker-service-bindings-20261023
+permissions:
+  contents: read
+concurrency:
+  group: reverse-sourcefree-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  security-contracts:
+    if: >-
+      github.event.repository.id == 1429954649 &&
+      (github.event_name == 'push' ||
+       (github.event_name == 'pull_request' &&
+        github.event.pull_request.head.repo.id == 1429954649 &&
+        github.event.pull_request.base.repo.id == 1429954649))
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Checkout exact event head
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+      - name: Verify source identity and execute source-free audit
+        shell: bash
+        env:
+          EXPECTED_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          EXPECTED_REPO_ID: '1429954649'
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY_ID" = "$EXPECTED_REPO_ID"
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          printf 'source_head=%s\nsource_tree=%s\nrun_id=%s\nrun_attempt=%s\n' \
+            "$EXPECTED_SHA" "$(git rev-parse HEAD^{tree})" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT"
+          python3 -I ci/sourcefree_proxy_audit.py

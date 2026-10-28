@@ -151,6 +151,14 @@ define module network_admission as
       request_host, request_path);
     if selected.is_err(); then return Err("reverse route not found"); fi
     val route = selected.unwrap();
+    // A route match is not middleware admission. The eventual serving actor
+    // must supply an unforgeable, generation-pinned middleware receipt before
+    // egress; this pure reference oracle has no such authority. Deny all
+    // middleware-bearing routes rather than interpreting a symbolic chain as
+    // successful authentication, header validation or policy enforcement.
+    if route.middleware != ""; then
+      return Err("middleware admission receipt required before upstream egress");
+    fi
     if route.upstream != endpoint.origin ||
       !proxy_yaml.valid_upstream_origin(route.upstream); then
       return Err("resolved endpoint does not match admitted HTTP origin");
