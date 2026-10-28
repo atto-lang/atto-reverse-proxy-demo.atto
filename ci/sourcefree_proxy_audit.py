@@ -65,6 +65,19 @@ def source_guards() -> None:
     yaml = read("src/proxy_yaml.ores")
     check('import module admission_text from "./admission_text";' in yaml,
           "YAML imports raw lexical guard")
+    # Schema evolution must update handwritten malformed-policy fixtures.
+    config_schema = section(yaml, "  pub define class Config as", "  end")
+    config_fields = config_schema.count("pub val ")
+    lexical = read("tests/lexical_admission_contract.ores")
+    forged = section(lexical, "  val forged = new proxy_yaml.Config(",
+                     "  );\n  if middleware_policy.evaluate")
+    forged_args = forged.split("Config(", 1)[1]
+    check(config_fields == 13 and forged_args.count(",") + 1 == config_fields,
+          "forged lexical Config fixture retains full nominal constructor arity")
+    check("new Array<proxy_yaml.Route>()" in forged_args
+          and "new Array<proxy_yaml.Service>()" in forged_args
+          and "new Array<proxy_yaml.Backend>()" in forged_args,
+          "forged lexical Config fixture preserves all three collection fields")
     check('import module header_policy from "./header_policy";' in yaml,
           "YAML imports conservative header policy")
     loop = section(yaml, "    for (const original of lines) {",
