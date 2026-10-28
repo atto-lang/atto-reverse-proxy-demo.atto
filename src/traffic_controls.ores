@@ -22,7 +22,7 @@ define module traffic_controls as
       limit <= 0 || limit > 1000000 ||
       previous.used < 0 || previous.used > limit ||
       previous.started_ms < 0 || previous.started_ms > now_ms ||
-      previous.epoch > epoch; then
+      previous.epoch < 0 || previous.epoch > epoch; then
       return Err("invalid rate-limit time or budget");
     fi
     if previous.epoch != epoch ||
@@ -69,7 +69,8 @@ define module traffic_controls as
       cooldown_ms <= 0 || cooldown_ms > 86400000 ||
       now_ms > 2000000000 - cooldown_ms ||
       previous.failures < 0 || previous.failures > threshold ||
-      previous.epoch > epoch; then
+      previous.epoch < 0 || previous.epoch > epoch ||
+      previous.open_until_ms < 0 || previous.open_until_ms > 2000000000; then
       return Err("invalid breaker event");
     fi
     if previous.epoch != epoch; then
