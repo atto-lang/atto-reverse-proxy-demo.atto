@@ -88,6 +88,16 @@ pub routine main(): int {
     stdio.println("FAIL corrupt breaker or clock bypassed admission fence");
     return 1;
   fi
+  // A same-generation breaker at threshold with no cooldown is impossible.
+  // In particular, a success receipt must not erase this corrupt state.
+  val missing_open = new traffic_controls.Breaker(1, 2, 0);
+  if traffic_controls.record(rt borrow missing_open, 1, 1102,
+      true, 2, 100).is_ok() ||
+    traffic_controls.record(rt borrow missing_open, 1, 1102,
+      false, 2, 100).is_ok(); then
+    stdio.println("FAIL threshold breaker without open fence was accepted");
+    return 1;
+  fi
   stdio.println("PASS native traffic control reference contract");
   return 0;
 }
