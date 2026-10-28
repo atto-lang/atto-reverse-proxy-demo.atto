@@ -20,18 +20,22 @@ from a YAML string.
 `kind: actor` and `target`. All three identifiers are ASCII lower-case,
 digits/hyphens only; every referenced service must exist. Duplicate names,
 missing fields, unsupported kinds, whitespace, path escapes and arbitrary URL
-bindings fail. `src/service_bindings.ores` produces immutable
-generation-scoped **symbolic descriptors**, not runtime ActorRefs.
+bindings fail. `src/service_bindings.ores` now also requires a
+supervisor-owned trusted code-image registry before a YAML target can bind.
+YAML cannot register a code image or widen its capability manifest. The result
+remains an immutable, generation-scoped **symbolic descriptor**, not a runtime
+ActorRef or network grant.
 
-The opt-in `src/serve_reverse.ores` now contains exactly ONE trusted local
-code-image binding: `hello-v1` -> `HelloV1` HTTP actor pool.
-`config/worker-example.yaml` binds `service://greeting` to it.
-For that exact route the actor may return 200 through the existing
-Java/Graal host HTTP transport; arbitrary targets get 501 and external
-HTTP upstreams still get 501. No untrusted actor sandbox is claimed.
+The opt-in `src/serve_reverse.ores` has exactly TWO trusted local code
+images: `hello-v1` -> `HelloV1` and `stream-v1` -> `StreamV1`.
+`config/worker-example.yaml` declares symbolic service references for them.
+The supervisor registry, not YAML, authorizes these images without granting
+network capability. Local hello and streaming routes return 200, an unknown
+code image fails binding with 503, and external HTTP/pool upstreams return
+501. No untrusted actor sandbox or upstream forwarding is claimed.
 `tests/actor_ingress_tcp_smoke.ores` is a separate native Oreslang TCP
-integration candidate (200 local actor, 501 remote upstream, 403 denied).
-It has NOT been executed with a running listener.
+integration candidate (200 local/streaming actor, 501 upstream, 403 denied,
+503 unregistered image). It has NOT executed with a running listener.
 
 ## HAProxy and NGINX policy slices
 
@@ -50,12 +54,14 @@ exclusive supervisor-issued probe lease before network integration.
 Generation changes intentionally reset counters, and monotonic time is
 provided by a trusted caller, never derived from a request header.
 
+`src/network_admission.ores` composes the current request-slot lease, immutable configuration epoch, rate decision, breaker state, selected reverse origin, and a trusted resolver/network-policy classification before any future outbound transport. Its permit objects are proof descriptors only; the transport must not treat them as dial authority.
+
 ## Future parity matrix
 
 | Feature | Oreslang status / required gate |
 |---|---|
 | NGINX named routes and priorities | Pure longest-prefix routing implemented; host/raw framing normalization still requires wire proof |
-| HAProxy weighted/least-active backends | Native pure selection policy, NOT socket/load-balanced traffic |
+| HAProxy weighted/least-active backends | Native pure selection policy; pre-dial gate can bind an admitted origin to a pinned endpoint, but no socket/load-balanced traffic exists |
 | HAProxy stick tables and rate controls | Fixed-window actor-local reference only; key cardinality, bounded store/eviction and distributed sync missing |
 | Health checks and passive circuit breakers | Pure health/drain flags and breaker oracle; no probes or single-winner half-open leases |
 | Workerd service bindings | YAML + generation-pinned symbolic local actor service binding; no general service networking API |

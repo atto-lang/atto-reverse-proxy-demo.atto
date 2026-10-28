@@ -40,6 +40,8 @@ Do **not** silently skip missing executables or replace commands with grep-only/
 
 ## Gates after source compilation
 
+`tests/network_admission_contract.ores` is the first executable reverse pre-dial invariant: an upstream descriptor is produced only when the request-slot lease belongs to the same immutable generation, rate and breaker state permit, the selected route's exact HTTP(S) origin matches the resolved endpoint, and trusted resolver/network policy marks that endpoint pinned and allowed. The descriptor is not a network capability and cannot substitute for a real resolver/transport test.
+
 Real HTTP/1.1 wire tests, correct reverse proxy response status/header/trailer streaming, forward CONNECT, TLS and destination IP pinning, request-smuggling/SSRF adversarial inputs, generation-pinned in-flight requests, actor cancellation/drain and bounded mailbox backpressure must pass before any release. LLVM, Graal AOT and hybrid must independently report verified support or explicit unsupported behavior.
 
 ## Runtime dependency and policy limitations
