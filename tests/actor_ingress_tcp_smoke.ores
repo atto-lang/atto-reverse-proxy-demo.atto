@@ -117,7 +117,7 @@ pub async routine main(): int {
   // The serving actor must remain usable after rejecting the request.
   val invalid = await network.connect_async("127.0.0.1", 8080);
   await invalid.write_text_async(
-    "GET /%2e%2e/actor HTTP/1.1\\r\\nHost: worker.example.test\\r\\nConnection: close\\r\\n\\r\\n");
+    "GET /%2e%2e/actor HTTP/1.1\r\nHost: worker.example.test\r\nConnection: close\r\n\r\n");
   val bad_path = await invalid.read_line_async();
   await invalid.close_async();
   if bad_path.is_none() || !bad_path.unwrap().starts_with("HTTP/1.1 400"); then
@@ -128,7 +128,7 @@ pub async routine main(): int {
   // An unconfigured route is not a license to bind or execute another actor.
   val unmatched = await network.connect_async("127.0.0.1", 8080);
   await unmatched.write_text_async(
-    "GET /not-configured HTTP/1.1\\r\\nHost: worker.example.test\\r\\nConnection: close\\r\\n\\r\\n");
+    "GET /not-configured HTTP/1.1\r\nHost: worker.example.test\r\nConnection: close\r\n\r\n");
   val unknown_route = await unmatched.read_line_async();
   await unmatched.close_async();
   if unknown_route.is_none() ||
@@ -143,7 +143,7 @@ pub async routine main(): int {
   for (let i = 0; i < 4; i++) {
     val dropped = await network.connect_async("127.0.0.1", 8080);
     await dropped.write_text_async(
-      "GET /stream HTTP/1.1\\r\\nHost: worker.example.test\\r\\nConnection: close\\r\\n\\r\\n");
+      "GET /stream HTTP/1.1\r\nHost: worker.example.test\r\nConnection: close\r\n\r\n");
     await dropped.close_async();
   }
 
@@ -151,7 +151,7 @@ pub async routine main(): int {
   // behind abandoned streaming sessions or exhausting the bounded pool.
   val recovered = await network.connect_async("127.0.0.1", 8080);
   await recovered.write_text_async(
-    "GET /actor HTTP/1.1\\r\\nHost: worker.example.test\\r\\nConnection: close\\r\\n\\r\\n");
+    "GET /actor HTTP/1.1\r\nHost: worker.example.test\r\nConnection: close\r\n\r\n");
   val recovered_status = await recovered.read_line_async();
   await recovered.close_async();
   if recovered_status.is_none() ||
