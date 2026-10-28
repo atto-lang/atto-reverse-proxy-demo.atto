@@ -3,24 +3,27 @@
 # approved Oreslang Java/Graal executable on PATH. Missing runtime is a failure.
 name: Native Oreslang Proxy Contracts
 on:
-  pull_request:
+  pull_request_target:
+    branches:
+      - perf/proxy-nginx-haproxy-20261025
   workflow_dispatch:
 permissions:
   contents: read
 jobs:
   native-contracts:
     # Never execute untrusted fork code on the organization's self-hosted runner.
+    # pull_request_target uses this workflow from the trusted target branch.
+    # The job never checks out PR-controlled source or executes PR-authored files.
     if: >-
       (github.event_name == 'workflow_dispatch' &&
        github.event.repository.id == 1429954649 &&
-       github.ref == 'refs/heads/main') ||
-      (github.event_name == 'pull_request' &&
+       github.ref == 'refs/heads/perf/proxy-nginx-haproxy-20261025') ||
+      (github.event_name == 'pull_request_target' &&
        github.event.repository.id == 1429954649 &&
        github.event.pull_request.head.repo.id == 1429954649 &&
        github.event.pull_request.base.repo.id == 1429954649 &&
        github.event.pull_request.head.repo.full_name == github.repository &&
-       github.event.pull_request.base.ref == 'perf/proxy-nginx-haproxy-20261025' &&
-       github.event.pull_request.base.sha == '1a667fcd4481e3511e0cfa1008e855d96540c200')
+       github.event.pull_request.base.ref == 'perf/proxy-nginx-haproxy-20261025')
     runs-on: [self-hosted, linux, x64, oreslang-jdk25]
     timeout-minutes: 20
     steps:
@@ -28,7 +31,8 @@ jobs:
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           persist-credentials: false
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.sha }}
+          # Never substitute a PR head or mutable target-branch SHA here.
+          ref: 1a667fcd4481e3511e0cfa1008e855d96540c200
       - name: Set up JDK 25
         uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
         with:
@@ -37,10 +41,10 @@ jobs:
       - name: Verify exact frozen source HEAD, JDK25 and administrator-approved runtime
         shell: bash
         env:
-          EXPECTED_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.sha }}
+          EXPECTED_SHA: '1a667fcd4481e3511e0cfa1008e855d96540c200'
+          WORKFLOW_CONTROL_SHA: ${{ github.sha }}
           WORKFLOW_PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           EVENT_REPOSITORY_ID: ${{ github.event.repository.id }}
-          EVENT_BASE_HEAD_SHA: ${{ github.event.pull_request.base.sha }}
           EVENT_BASE_REF: ${{ github.event.pull_request.base.ref }}
           EXPECTED_FROZEN_BASE_SHA: '1a667fcd4481e3511e0cfa1008e855d96540c200'
           EXPECTED_FROZEN_TREE_SHA: '5937599df00b6122dccaf22bcdebdaf836f6d3ee'
@@ -49,16 +53,15 @@ jobs:
         run: |
           set -euo pipefail
           test "$EVENT_REPOSITORY_ID" = "$EXPECTED_REPOSITORY_ID"
-          if [[ "${GITHUB_EVENT_NAME:-}" == pull_request ]]; then
+          if [[ "${GITHUB_EVENT_NAME:-}" == pull_request_target ]]; then
             test "$EVENT_BASE_REF" = 'perf/proxy-nginx-haproxy-20261025' || { echo 'unexpected release base branch' >&2; exit 1; }
-            test "$EVENT_BASE_HEAD_SHA" = "$EXPECTED_FROZEN_BASE_SHA" || { echo 'frozen release base SHA changed' >&2; exit 1; }
-            test "$EXPECTED_SHA" = "$EXPECTED_FROZEN_BASE_SHA" || { echo 'checkout not pinned to frozen release SHA' >&2; exit 1; }
           fi
+          test "$EXPECTED_SHA" = "$EXPECTED_FROZEN_BASE_SHA" || { echo 'checkout not pinned to frozen release SHA' >&2; exit 1; }
           test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
           actual_tree="$(git rev-parse 'HEAD^{tree}')"
           test "$actual_tree" = "$EXPECTED_FROZEN_TREE_SHA" || { echo 'frozen source tree mismatch' >&2; exit 1; }
-          printf 'source_head=%s\nsource_tree=%s\nworkflow_pr_head=%s\nrun_id=%s\nrun_attempt=%s\n' \
-            "$EXPECTED_SHA" "$actual_tree" "${WORKFLOW_PR_HEAD_SHA:-}" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT"
+          printf 'source_head=%s\nsource_tree=%s\nworkflow_control_sha=%s\nworkflow_pr_head=%s\nrun_id=%s\nrun_attempt=%s\n' \
+            "$EXPECTED_SHA" "$actual_tree" "${WORKFLOW_CONTROL_SHA:-}" "${WORKFLOW_PR_HEAD_SHA:-}" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT"
           test "${RUNNER_OS:-}" = Linux
           test "${RUNNER_ARCH:-}" = X64
           test "$(uname -m)" = x86_64
