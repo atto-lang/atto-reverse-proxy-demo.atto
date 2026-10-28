@@ -63,6 +63,20 @@ def source_guards() -> None:
     check(all(token in controls for token in expected),
           "all 32 C0 controls and DEL rejected by shared predicate")
     yaml = read("src/proxy_yaml.ores")
+    # Hand-constructed negative fixtures must evolve with the nominal
+    # parser type; otherwise the native suite fails before policy evaluation.
+    config_schema = section(yaml, "  pub define class Config as", "  end")
+    fields = config_schema.count("pub val ")
+    lexical = read("tests/lexical_admission_contract.ores")
+    forged = section(lexical, "  val forged = new proxy_yaml.Config(",
+                     "  );\n  if middleware_policy.evaluate")
+    args = forged.split("Config(", 1)[1]
+    check(fields in (11, 12, 13) and args.count(",") + 1 == fields,
+          "forged policy fixture has nominal Config constructor arity")
+    check("new Array<proxy_yaml.Route>()" in args
+          and ("new Array<proxy_yaml.Service>()" in args) == (fields >= 12)
+          and ("new Array<proxy_yaml.Backend>()" in args) == (fields >= 13),
+          "forged fixture carries exactly the declared collections")
     check('import module admission_text from "./admission_text";' in yaml,
           "YAML imports raw lexical guard")
     check('import module header_policy from "./header_policy";' in yaml,
