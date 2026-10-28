@@ -131,6 +131,15 @@ def source_guards() -> None:
           "backend selection remains a validated per-generation plan")
     check("network.connect" not in pools and "http.request" not in pools,
           "backend selection cannot grant transport or socket authority")
+    check("pub val int epoch;" in pools
+          and "pub fnc current(borrow Plan plan" in pools
+          and "return plan.epoch == snapshot.epoch;" in pools,
+          "reverse pool plans carry explicit generation identity")
+    pool_contract = read("tests/backend_pools_contract.ores")
+    check("FAIL stale pool plan generation fence" in pool_contract
+          and "backend_pools.current(rt borrow direct_plan" in pool_contract
+          and "backend_pools.current(rt borrow newer_plan" in pool_contract,
+          "native pool contract rejects stale generation plans")
     check('if route.middleware != ""; then' in pools and
           'return Err("middleware receipt required before reverse pool planning");' in pools,
           "middleware-bearing reverse pools fail closed before planning")

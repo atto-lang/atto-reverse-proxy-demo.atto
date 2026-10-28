@@ -11,7 +11,7 @@ pub routine main(): int {
   fi
   val opened = generation.open(doc, "reverse");
   if opened.is_err(); then stdio.println("FAIL config generation"); return 1; fi
-  val control = opened.unwrap();
+  let control = opened.unwrap();
   val initial = control.snapshot();
   if initial.is_err(); then stdio.println("FAIL snapshot"); return 1; fi
   val snapshot = initial.unwrap();
@@ -43,8 +43,13 @@ pub routine main(): int {
   fi
   val direct = backend_pools.reverse_route(rt borrow snapshot,
       "api.example.test", "/other", "least-active", 0);
-  if direct.is_err() || direct.unwrap().name != "blue"; then
+  if direct.is_err(); then
     stdio.println("FAIL pool route binding"); return 1;
+  fi
+  val direct_plan = direct.unwrap();
+  if direct_plan.name != "blue" || direct_plan.epoch != snapshot.epoch ||
+    !backend_pools.current(rt borrow direct_plan, rt borrow snapshot); then
+    stdio.println("FAIL generation-pinned pool route binding"); return 1;
   fi
   // Route matching alone cannot bypass deny or require_header middleware.
   val String denied_doc = doc.replace_literal("routes:\n",
@@ -84,6 +89,27 @@ pub routine main(): int {
   if proxy_yaml.parse(doc.replace_literal("pool://core", "pool://missing"),
       "reverse").is_ok(); then
     stdio.println("FAIL dangling pool reference"); return 1;
+  fi
+
+  // Plans are generation-bound even when the same YAML is republished.
+  if control.prepare(doc).is_err(); then
+    stdio.println("FAIL prepare next pool generation"); return 1;
+  fi
+  val published = control.publish(snapshot.epoch);
+  if published.is_err(); then
+    stdio.println("FAIL publish next pool generation"); return 1;
+  fi
+  val newer_snapshot = published.unwrap();
+  val newer = backend_pools.reverse_route(rt borrow newer_snapshot,
+      "api.example.test", "/other", "least-active", 0);
+  if newer.is_err(); then
+    stdio.println("FAIL newer pool route plan"); return 1;
+  fi
+  val newer_plan = newer.unwrap();
+  if newer_plan.epoch != newer_snapshot.epoch ||
+    backend_pools.current(rt borrow direct_plan, rt borrow newer_snapshot) ||
+    !backend_pools.current(rt borrow newer_plan, rt borrow newer_snapshot); then
+    stdio.println("FAIL stale pool plan generation fence"); return 1;
   fi
   stdio.println("PASS native reverse YAML backend pool contracts (no sockets)");
   return 0;
