@@ -43,16 +43,62 @@ pub async routine main(): int {
     await streaming.close_async();
     stdio.println("FAIL native streaming actor status"); return 1;
   fi
-  let String streamed_lines = "";
+  // Do not count header text as body evidence. The guest streaming API
+  // must send HTTP/1.1 chunked framing without a conflicting Content-Length.
+  let bool headers_done = false;
+  let bool chunked = false;
+  let bool length_header = false;
+  for (let i = 0; i < 32; i++) {
+    val header = await streaming.read_line_async();
+    if header.is_none(); then break; fi
+    val String line = header.unwrap().trim();
+    if line == ""; then headers_done = true; break; fi
+    if line == "Transfer-Encoding: chunked" ||
+      line == "transfer-encoding: chunked"; then
+      chunked = true;
+    fi
+    if line.starts_with("Content-Length:") ||
+      line.starts_with("content-length:"); then
+      length_header = true;
+    fi
+  }
+  if !headers_done || !chunked || length_header; then
+    await streaming.close_async();
+    stdio.println("FAIL streaming actor HTTP chunked headers");
+    return 1;
+  fi
+
+  // read_line_async is sufficient for these explicitly textual fixture
+  // payloads, but not a general binary-safe HTTP chunk decoder.
+  let bool first_body = false;
+  let bool second_body = false;
+  let bool terminal_chunk = false;
   for (let i = 0; i < 48; i++) {
-    val line = await streaming.read_line_async();
-    if line.is_none(); then break; fi
-    streamed_lines = streamed_lines + line.unwrap() + "\n";
+    val body_line = await streaming.read_line_async();
+    if body_line.is_none(); then break; fi
+    val String line = body_line.unwrap().trim();
+    if line == "stage-one"; then
+      if first_body || second_body; then
+        await streaming.close_async();
+        stdio.println("FAIL duplicate or reordered first body stage");
+        return 1;
+      fi
+      first_body = true;
+    elif line == "stage-two"; then
+      if !first_body || second_body; then
+        await streaming.close_async();
+        stdio.println("FAIL missing or reordered second body stage");
+        return 1;
+      fi
+      second_body = true;
+    elif line == "0" && second_body; then
+      terminal_chunk = true;
+      break;
+    fi
   }
   await streaming.close_async();
-  if !streamed_lines.contains_literal("stage-one") ||
-    !streamed_lines.contains_literal("stage-two"); then
-    stdio.println("FAIL streaming actor body chunks not visible on wire");
+  if !first_body || !second_body || !terminal_chunk; then
+    stdio.println("FAIL streaming body order or terminating chunk");
     return 1;
   fi
   // A YAML service binding is not authority to dynamically load guest code.
