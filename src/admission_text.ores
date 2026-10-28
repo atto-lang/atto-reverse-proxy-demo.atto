@@ -1,0 +1,40 @@
+// Shared lexical rejection of every C0 control and DEL.
+// LF splitting is owned by the YAML caller; headers and paths allow no C0.
+// This predicate does not establish HTTP framing or filesystem authority.
+define module admission_text as
+  pub fnc control_free(String value): bool {
+    return !value.contains_literal("\u0000") &&
+      !value.contains_literal("\u0001") &&
+      !value.contains_literal("\u0002") &&
+      !value.contains_literal("\u0003") &&
+      !value.contains_literal("\u0004") &&
+      !value.contains_literal("\u0005") &&
+      !value.contains_literal("\u0006") &&
+      !value.contains_literal("\u0007") &&
+      !value.contains_literal("\u0008") &&
+      !value.contains_literal("\u0009") &&
+      !value.contains_literal("\u000a") &&
+      !value.contains_literal("\u000b") &&
+      !value.contains_literal("\u000c") &&
+      !value.contains_literal("\u000d") &&
+      !value.contains_literal("\u000e") &&
+      !value.contains_literal("\u000f") &&
+      !value.contains_literal("\u0010") &&
+      !value.contains_literal("\u0011") &&
+      !value.contains_literal("\u0012") &&
+      !value.contains_literal("\u0013") &&
+      !value.contains_literal("\u0014") &&
+      !value.contains_literal("\u0015") &&
+      !value.contains_literal("\u0016") &&
+      !value.contains_literal("\u0017") &&
+      !value.contains_literal("\u0018") &&
+      !value.contains_literal("\u0019") &&
+      !value.contains_literal("\u001a") &&
+      !value.contains_literal("\u001b") &&
+      !value.contains_literal("\u001c") &&
+      !value.contains_literal("\u001d") &&
+      !value.contains_literal("\u001e") &&
+      !value.contains_literal("\u001f") &&
+      !value.contains_literal("\u007f");
+  }
+end
