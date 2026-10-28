@@ -25,7 +25,7 @@ pub routine main(): int {
     stdio.println("FAIL time rollback"); return 1;
   fi
 
-  val start = new traffic_controls.Breaker(1, 0, 0);
+  val start = new traffic_controls.Breaker(1, 0, 0, 2);
   val fail1 = traffic_controls.record(rt borrow start, 1, 1000,
     false, 2, 100);
   if fail1.is_err() || fail1.unwrap().failures != 1; then
@@ -55,6 +55,58 @@ pub routine main(): int {
     changed_epoch.unwrap().failures != 0 ||
     !traffic_controls.permits(rt borrow changed_epoch.unwrap(), 2, 1102); then
     stdio.println("FAIL supervisor policy-epoch fence"); return 1;
+  fi
+  // Corrupt persisted state must not mint a fresh credit merely because the
+  // caller requests a newer generation. Zero is a valid bootstrap epoch.
+  val invalid_window = new traffic_controls.Window(-1, 1000, 0);
+  val invalid_breaker_epoch = new traffic_controls.Breaker(-1, 0, 0, 2);
+  val invalid_breaker_cooldown = new traffic_controls.Breaker(1, 0, -1, 2);
+  val oversized_breaker_cooldown = new traffic_controls.Breaker(1, 0, 2000000001, 2);
+  if traffic_controls.allow_window(rt borrow invalid_window,
+      2, 1102, 1000, 2).is_ok() ||
+    traffic_controls.record(rt borrow invalid_breaker_epoch,
+      2, 1102, true, 2, 100).is_ok() ||
+    traffic_controls.record(rt borrow invalid_breaker_cooldown,
+      2, 1102, true, 2, 100).is_ok() ||
+    traffic_controls.record(rt borrow oversized_breaker_cooldown,
+      2, 1102, true, 2, 100).is_ok(); then
+    stdio.println("FAIL corrupted traffic-control state minted new epoch credit");
+    return 1;
+  fi
+  // An invalid clock or corrupt persisted breaker must not grant admission,
+  // schedule a half-open probe, or reset into a fresh epoch.
+  val corrupt_closed = new traffic_controls.Breaker(1, 10000, 0, 2);
+  val corrupt_open = new traffic_controls.Breaker(1, 0, 1050, 2);
+  val oversized_open = new traffic_controls.Breaker(1, 1, 2000000001, 2);
+  if traffic_controls.permits(rt borrow start, 1, 2000000001) ||
+    traffic_controls.permits(rt borrow corrupt_closed, 1, 1102) ||
+    traffic_controls.probe_due(rt borrow corrupt_open, 1, 1102) ||
+    traffic_controls.probe_due(rt borrow oversized_open, 1, 2000000001) ||
+    traffic_controls.probe_due(rt borrow fail2.unwrap(), 1, 2000000001) ||
+    traffic_controls.record(rt borrow corrupt_open, 2, 1102,
+      true, 2, 100).is_ok(); then
+    stdio.println("FAIL corrupt breaker or clock bypassed admission fence");
+    return 1;
+  fi
+  // A same-generation breaker at threshold with no cooldown is impossible.
+  // In particular, a success receipt must not erase this corrupt state.
+  val missing_open = new traffic_controls.Breaker(1, 2, 0, 2);
+  val invalid_threshold = new traffic_controls.Breaker(1, 0, 0, 0);
+  if traffic_controls.permits(rt borrow missing_open, 1, 1102) ||
+    !traffic_controls.permits(rt borrow fail1.unwrap(), 1, 1102) ||
+    traffic_controls.permits(rt borrow invalid_threshold, 1, 1102) ||
+    traffic_controls.record(rt borrow invalid_threshold, 2, 1102,
+      true, 2, 100).is_ok() ||
+    traffic_controls.record(rt borrow fail1.unwrap(), 1, 1102,
+      true, 3, 100).is_ok() ||
+    traffic_controls.record(rt borrow missing_open, 2, 1102,
+      true, 2, 100).is_ok() ||
+    traffic_controls.record(rt borrow missing_open, 1, 1102,
+      true, 2, 100).is_ok() ||
+    traffic_controls.record(rt borrow missing_open, 1, 1102,
+      false, 2, 100).is_ok(); then
+    stdio.println("FAIL threshold breaker without open fence was accepted");
+    return 1;
   fi
   stdio.println("PASS native traffic control reference contract");
   return 0;
