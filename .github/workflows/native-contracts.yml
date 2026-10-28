@@ -168,6 +168,12 @@ jobs:
           "$RUNNER_TEMP/oreslang-verified-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/oreslang" tests/service_bindings_contract.ores
           "$RUNNER_TEMP/oreslang-verified-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/oreslang" tests/load_balancer_contract.ores
           "$RUNNER_TEMP/oreslang-verified-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/oreslang" tests/traffic_controls_contract.ores
+      - name: Compiler-check pre-dial network admission oracle
+        run: |
+          "$RUNNER_TEMP/oreslang-verified-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/oreslang" --check src/network_admission.ores
+          "$RUNNER_TEMP/oreslang-verified-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/oreslang" --check tests/network_admission_contract.ores
+      - name: Execute pre-dial network admission contract
+        run: "$RUNNER_TEMP/oreslang-verified-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/oreslang" tests/network_admission_contract.ores
       - name: Compiler-check opt-in local actor-service real TCP client
         run: "$RUNNER_TEMP/oreslang-verified-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/oreslang" --check tests/actor_ingress_tcp_smoke.ores
 
