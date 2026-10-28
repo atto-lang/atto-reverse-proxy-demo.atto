@@ -92,7 +92,9 @@ define module network_admission as
       request.ticket.epoch != snapshot.epoch; then
       return Err("request lease is stale or belongs to another generation");
     fi
-    if !rate.permitted || rate.next.epoch != snapshot.epoch; then
+    if !rate.permitted || rate.next.epoch != snapshot.epoch ||
+      rate.next.started_ms < 0 || rate.next.started_ms > now_ms ||
+      rate.next.used <= 0 || rate.next.used > 1000000; then
       return Err("rate budget does not admit this generation");
     fi
     if !traffic_controls.permits(rt borrow breaker, snapshot.epoch, now_ms); then
