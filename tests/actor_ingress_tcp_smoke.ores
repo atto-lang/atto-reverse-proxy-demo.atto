@@ -63,7 +63,7 @@ pub async routine main(): int {
   val forbidden_status = await forbidden.read_line_async();
   await forbidden.close_async();
   if forbidden_status.is_none() ||
-    !forbidden_status.unwrap().starts_with("HTTP/1.1 501"); then
+    !forbidden_status.unwrap().starts_with("HTTP/1.1 503"); then
     stdio.println("FAIL unregistered actor code image must not execute");
     return 1;
   fi
