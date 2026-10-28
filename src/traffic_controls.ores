@@ -41,11 +41,14 @@ define module traffic_controls as
     pub val int epoch;
     pub val int failures;
     pub val int open_until_ms;
+    // Immutable generation-scoped policy threshold; trusted actor owns state.
+    pub val int threshold;
   end
 
   pub fnc permits(borrow Breaker state, int epoch, int now_ms): bool {
     return epoch > 0 && state.epoch == epoch &&
-      state.failures >= 0 && state.failures < 10000 &&
+      state.threshold > 0 && state.threshold <= 10000 &&
+      state.failures >= 0 && state.failures < state.threshold &&
       now_ms >= 0 && now_ms <= 2000000000 &&
       state.open_until_ms == 0;
   }
@@ -54,7 +57,8 @@ define module traffic_controls as
   // A trusted supervisor must mint a single-winner half-open probe lease.
   pub fnc probe_due(borrow Breaker state, int epoch, int now_ms): bool {
     return epoch > 0 && state.epoch == epoch &&
-      state.failures > 0 && state.failures <= 10000 &&
+      state.threshold > 0 && state.threshold <= 10000 &&
+      state.failures == state.threshold &&
       state.open_until_ms > 0 && state.open_until_ms <= 2000000000 &&
       now_ms >= 0 && now_ms <= 2000000000 &&
       now_ms >= state.open_until_ms;
@@ -72,28 +76,30 @@ define module traffic_controls as
       threshold <= 0 || threshold > 10000 ||
       cooldown_ms <= 0 || cooldown_ms > 86400000 ||
       now_ms > 2000000000 - cooldown_ms ||
-      previous.failures < 0 || previous.failures > threshold ||
+      previous.threshold <= 0 || previous.threshold > 10000 ||
+      previous.failures < 0 || previous.failures > previous.threshold ||
+      (previous.epoch == epoch && previous.threshold != threshold) ||
       previous.epoch < 0 || previous.epoch > epoch ||
       previous.open_until_ms < 0 || previous.open_until_ms > 2000000000 ||
-      (previous.open_until_ms > 0 && previous.failures == 0) ||
+      (previous.open_until_ms > 0 && previous.failures != previous.threshold) ||
       // A closed breaker at its failure threshold is corrupt: the transition
       // must have opened the circuit, never admitted a success reset.
       (previous.epoch == epoch && previous.open_until_ms == 0 &&
-        previous.failures >= threshold); then
+        previous.failures >= previous.threshold); then
       return Err("invalid breaker event");
     fi
     if previous.epoch != epoch; then
       return Ok(new Breaker(epoch, success ? 0 : 1,
-        (!success && threshold == 1) ? now_ms + cooldown_ms : 0));
+        (!success && threshold == 1) ? now_ms + cooldown_ms : 0, threshold));
     fi
     if previous.open_until_ms != 0; then
       return Err("breaker open: supervisor half-open probe lease required");
     fi
-    if success; then return Ok(new Breaker(epoch, 0, 0)); fi
+    if success; then return Ok(new Breaker(epoch, 0, 0, threshold)); fi
     let int count = previous.failures + 1;
     if count >= threshold; then
-      return Ok(new Breaker(epoch, threshold, now_ms + cooldown_ms));
+      return Ok(new Breaker(epoch, threshold, now_ms + cooldown_ms, threshold));
     fi
-    return Ok(new Breaker(epoch, count, 0));
+    return Ok(new Breaker(epoch, count, 0, threshold));
   }
 end
