@@ -61,61 +61,78 @@ jobs:
           printf 'oreslang_path=%s\noreslang_sha256=%s\n' "$launcher" "$actual"
           test "$actual" = "${APPROVED_ORESLANG_SHA256,,}" || { echo 'Unapproved Oreslang launcher digest' >&2; exit 1; }
           echo 'oreslang_launcher_digest_verified=true'
-          timeout 15s "$launcher" --version || timeout 15s "$launcher" --build-info || timeout 15s "$launcher" --help
+          # A private per-run wrapper checks the approved executable on every
+          # invocation. No later step may resolve oreslang from PATH again.
+          test -n "${RUNNER_TEMP:-}" && test -n "${GITHUB_RUN_ID:-}" && test -n "${GITHUB_RUN_ATTEMPT:-}" && test -n "${GITHUB_ENV:-}"
+          umask 077
+          wrapper_dir="$RUNNER_TEMP/oreslang-release-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          mkdir -m 700 -- "$wrapper_dir"
+          wrapper="$wrapper_dir/oreslang"
+          printf '%s\n' '#!/bin/bash' 'set -euo pipefail' > "$wrapper"
+          printf 'launcher=%q\n' "$launcher" >> "$wrapper"
+          printf 'expected_sha=%q\n' "${APPROVED_ORESLANG_SHA256,,}" >> "$wrapper"
+          printf '%s\n' \
+            'test -f "$launcher" && test -x "$launcher" || exit 1' \
+            'actual_sha="$(/usr/bin/sha256sum -- "$launcher" | /usr/bin/cut -d " " -f 1)"' \
+            'test "$actual_sha" = "$expected_sha" || { echo "approved Oreslang launcher changed" >&2; exit 1; }' \
+            'exec "$launcher" "$@"' >> "$wrapper"
+          chmod 700 "$wrapper"
+          timeout 15s "$wrapper" --version || timeout 15s "$wrapper" --build-info || timeout 15s "$wrapper" --help
+          printf 'ORESLANG_VERIFIED_WRAPPER=%s\n' "$wrapper" >> "$GITHUB_ENV"
           # This attests the launcher file, not any transitive JAR/runtime.
           # Administrators must independently attest wrapper dependencies.
       - name: Compiler-check entrypoint
-        run: oreslang --check src/main.ores
+        run: '"$ORESLANG_VERIFIED_WRAPPER" --check src/main.ores'
       - name: Compiler-check configuration path admission
-        run: oreslang --check src/config_path.ores
+        run: '"$ORESLANG_VERIFIED_WRAPPER" --check src/config_path.ores'
       - name: Compiler-check YAML parser
-        run: oreslang --check src/proxy_yaml.ores
+        run: '"$ORESLANG_VERIFIED_WRAPPER" --check src/proxy_yaml.ores'
       - name: Compiler-check routing policy
-        run: oreslang --check src/route_policy.ores
+        run: '"$ORESLANG_VERIFIED_WRAPPER" --check src/route_policy.ores'
       - name: Compiler-check middleware policy
-        run: oreslang --check src/middleware_policy.ores
+        run: '"$ORESLANG_VERIFIED_WRAPPER" --check src/middleware_policy.ores'
       - name: Compiler-check generation coordinator
-        run: oreslang --check src/generation.ores
+        run: '"$ORESLANG_VERIFIED_WRAPPER" --check src/generation.ores'
       - name: Compiler-check native YAML contract
-        run: oreslang --check tests/yaml_policy_contract.ores
+        run: '"$ORESLANG_VERIFIED_WRAPPER" --check tests/yaml_policy_contract.ores'
       - name: Compiler-check native generation contract
-        run: oreslang --check tests/generation_contract.ores
+        run: '"$ORESLANG_VERIFIED_WRAPPER" --check tests/generation_contract.ores'
       - name: Compiler-check native middleware contract
-        run: oreslang --check tests/middleware_generation_contract.ores
+        run: '"$ORESLANG_VERIFIED_WRAPPER" --check tests/middleware_generation_contract.ores'
       - name: Compiler-check canonical path contract
-        run: oreslang --check tests/path_admission_contract.ores
+        run: '"$ORESLANG_VERIFIED_WRAPPER" --check tests/path_admission_contract.ores'
       - name: Execute canonical configuration path contract
-        run: oreslang tests/path_admission_contract.ores
+        run: '"$ORESLANG_VERIFIED_WRAPPER" tests/path_admission_contract.ores'
       - name: Execute YAML / routing / policy contract
-        run: oreslang tests/yaml_policy_contract.ores
+        run: '"$ORESLANG_VERIFIED_WRAPPER" tests/yaml_policy_contract.ores'
       - name: Execute generation epoch / rollback contract
-        run: oreslang tests/generation_contract.ores
+        run: '"$ORESLANG_VERIFIED_WRAPPER" tests/generation_contract.ores'
       - name: Execute independent middleware snapshot contract
-        run: oreslang tests/middleware_generation_contract.ores
+        run: '"$ORESLANG_VERIFIED_WRAPPER" tests/middleware_generation_contract.ores'
 
       - name: Compiler-check HTTP metadata admission and header filtering
         run: |
-          oreslang --check src/proxy_wire.ores
-          oreslang --check src/header_policy.ores
+          "$ORESLANG_VERIFIED_WRAPPER" --check src/proxy_wire.ores
+          "$ORESLANG_VERIFIED_WRAPPER" --check src/header_policy.ores
       - name: Compiler-check native slot lifecycle, middleware manifest and data layouts
         run: |
-          oreslang --check src/slot_lifecycle.ores
-          oreslang --check src/slot_pool.ores
-          oreslang --check src/middleware_manifest.ores
-          oreslang --check src/data_layout.ores
+          "$ORESLANG_VERIFIED_WRAPPER" --check src/slot_lifecycle.ores
+          "$ORESLANG_VERIFIED_WRAPPER" --check src/slot_pool.ores
+          "$ORESLANG_VERIFIED_WRAPPER" --check src/middleware_manifest.ores
+          "$ORESLANG_VERIFIED_WRAPPER" --check src/data_layout.ores
       - name: Compiler-check all security and slot regression vectors
         run: |
-          oreslang --check tests/security_admission_contract.ores
-          oreslang --check tests/wire_contract.ores
-          oreslang --check tests/header_policy_contract.ores
-          oreslang --check tests/middleware_manifest_contract.ores
-          oreslang --check tests/data_layout_contract.ores
-          oreslang --check tests/slot_lifecycle_contract.ores
-          oreslang --check tests/slot_pool_contract.ores
+          "$ORESLANG_VERIFIED_WRAPPER" --check tests/security_admission_contract.ores
+          "$ORESLANG_VERIFIED_WRAPPER" --check tests/wire_contract.ores
+          "$ORESLANG_VERIFIED_WRAPPER" --check tests/header_policy_contract.ores
+          "$ORESLANG_VERIFIED_WRAPPER" --check tests/middleware_manifest_contract.ores
+          "$ORESLANG_VERIFIED_WRAPPER" --check tests/data_layout_contract.ores
+          "$ORESLANG_VERIFIED_WRAPPER" --check tests/slot_lifecycle_contract.ores
+          "$ORESLANG_VERIFIED_WRAPPER" --check tests/slot_pool_contract.ores
       - name: Compiler-check opt-in reverse ingress and TCP smoke
         run: |
-          oreslang --check src/serve_reverse.ores
-          oreslang --check tests/ingress_tcp_smoke.ores
+          "$ORESLANG_VERIFIED_WRAPPER" --check src/serve_reverse.ores
+          "$ORESLANG_VERIFIED_WRAPPER" --check tests/ingress_tcp_smoke.ores
       - name: Execute loopback ingress status and framing smoke
         shell: bash
         run: |
@@ -132,7 +149,7 @@ jobs:
           }
           trap cleanup EXIT
 
-          ores_proxy_conf_yaml="$cfg" timeout 45s oreslang --no-prompt \
+          ores_proxy_conf_yaml="$cfg" timeout 45s "$ORESLANG_VERIFIED_WRAPPER" --no-prompt \
             --allow-read="$cfg" \
             --allow-env=ores_proxy_conf_yaml \
             --allow-net=127.0.0.1:8080 \
@@ -146,7 +163,7 @@ jobs:
               echo "reverse ingress exited before readiness" >&2
               exit 1
             fi
-            if oreslang --no-prompt \
+            if "$ORESLANG_VERIFIED_WRAPPER" --no-prompt \
                 --allow-net=127.0.0.1:8080 \
                 tests/ingress_tcp_smoke.ores >"$smoke_log" 2>&1; then
               passed=1
@@ -169,7 +186,7 @@ jobs:
           missing="$RUNNER_TEMP/ores-proxy-missing-config.yaml"
           rm -f "$missing"
           set +e
-          ores_proxy_conf_yaml="$missing" oreslang --no-prompt \
+          ores_proxy_conf_yaml="$missing" "$ORESLANG_VERIFIED_WRAPPER" --no-prompt \
             --allow-read="$missing" \
             --allow-env=ores_proxy_conf_yaml \
             src/serve_reverse.ores >"$RUNNER_TEMP/missing-config.log" 2>&1
@@ -179,22 +196,22 @@ jobs:
           grep -Fq 'ERROR: configuration admission failed' "$RUNNER_TEMP/missing-config.log"
       - name: Execute complete Oreslang safety contracts
         run: |
-          oreslang tests/security_admission_contract.ores
-          oreslang tests/wire_contract.ores
-          oreslang tests/header_policy_contract.ores
-          oreslang tests/middleware_manifest_contract.ores
-          oreslang tests/data_layout_contract.ores
-          oreslang tests/slot_lifecycle_contract.ores
-          oreslang tests/slot_pool_contract.ores
+          "$ORESLANG_VERIFIED_WRAPPER" tests/security_admission_contract.ores
+          "$ORESLANG_VERIFIED_WRAPPER" tests/wire_contract.ores
+          "$ORESLANG_VERIFIED_WRAPPER" tests/header_policy_contract.ores
+          "$ORESLANG_VERIFIED_WRAPPER" tests/middleware_manifest_contract.ores
+          "$ORESLANG_VERIFIED_WRAPPER" tests/data_layout_contract.ores
+          "$ORESLANG_VERIFIED_WRAPPER" tests/slot_lifecycle_contract.ores
+          "$ORESLANG_VERIFIED_WRAPPER" tests/slot_pool_contract.ores
 
       - name: Compiler-check lexical admission regression
         run: |
-          oreslang --check src/admission_text.ores
-          oreslang --check tests/lexical_admission_contract.ores
+          "$ORESLANG_VERIFIED_WRAPPER" --check src/admission_text.ores
+          "$ORESLANG_VERIFIED_WRAPPER" --check tests/lexical_admission_contract.ores
       - name: Execute lexical admission regression
-        run: oreslang tests/lexical_admission_contract.ores
+        run: '"$ORESLANG_VERIFIED_WRAPPER" tests/lexical_admission_contract.ores'
 
       - name: Compiler-check and execute native policy performance workload
         run: |
-          oreslang --check tests/perf_policy_contract.ores
-          oreslang tests/perf_policy_contract.ores
+          "$ORESLANG_VERIFIED_WRAPPER" --check tests/perf_policy_contract.ores
+          "$ORESLANG_VERIFIED_WRAPPER" tests/perf_policy_contract.ores
