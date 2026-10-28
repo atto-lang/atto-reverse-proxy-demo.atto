@@ -136,6 +136,31 @@ pub routine main(): int {
     return 1;
   fi
 
+  // Middleware-bearing routes must not mint a pre-dial descriptor merely
+  // because route matching, DNS and a rate credit passed. This source-only
+  // oracle lacks an opaque, generation-pinned middleware admission receipt.
+  val String with_middleware =
+    "version: ores.proxy/v1\nmode: reverse\nlisten:\n  host: 127.0.0.1\n  port: 8080\nruntime:\n  carriers: 20\n  actors: 100\n  max_inflight: 1024\n" +
+    "middleware:\n  - name: denied\n    kind: deny\n  - name: token\n    kind: require_header\n    header: x-demo-token\n" +
+    "routes:\n  - name: blocked\n    host: proxy.example.test\n    path_prefix: /deny\n    upstream: https://upstream.example.test:443\n    middleware: denied\n" +
+    "  - name: gated\n    host: proxy.example.test\n    path_prefix: /required\n    upstream: https://upstream.example.test:443\n    middleware: token\n";
+  val policy_config = proxy_yaml.parse(with_middleware, "reverse");
+  if policy_config.is_err(); then
+    stdio.println("FAIL middleware policy fixture"); return 1;
+  fi
+  val policy_snapshot = new generation.Snapshot(11, policy_config.unwrap());
+  if network_admission.authorize_reverse(rt borrow policy_snapshot,
+      rt borrow live, rt borrow request, rt borrow rate,
+      rt borrow closed_breaker, rt borrow endpoint,
+      "proxy.example.test", "/deny/request", 1001).is_ok() ||
+    network_admission.authorize_reverse(rt borrow policy_snapshot,
+      rt borrow live, rt borrow request, rt borrow rate,
+      rt borrow closed_breaker, rt borrow endpoint,
+      "proxy.example.test", "/required/request", 1001).is_ok(); then
+    stdio.println("FAIL route middleware was bypassed at pre-dial gate");
+    return 1;
+  fi
+
   stdio.println("PASS reverse pre-dial authority boundary: route+lease+epoch+controls+DNS");
   return 0;
 }
