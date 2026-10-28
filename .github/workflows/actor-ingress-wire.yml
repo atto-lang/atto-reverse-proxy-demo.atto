@@ -18,30 +18,77 @@ concurrency:
   cancel-in-progress: false
 jobs:
   actor-ingress:
-    if: (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)
+    # Do not schedule unapproved repository or fork source on the trusted runner.
+    if: >-
+      (github.event_name == 'pull_request' &&
+       github.event.repository.id == 1429954649 &&
+       github.event.pull_request.head.repo.id == 1429954649 &&
+       github.event.pull_request.base.repo.id == 1429954649 &&
+       github.event.pull_request.head.repo.full_name == github.repository) ||
+      (github.event_name == 'workflow_dispatch' &&
+       github.event.repository.id == 1429954649 &&
+       github.ref == 'refs/heads/main')
     runs-on: [self-hosted, linux, x64, oreslang-jdk25]
     timeout-minutes: 10
     steps:
       - name: Checkout exact PR head
-        uses: actions/checkout@v4
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           persist-credentials: false
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
       - name: JDK 25
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
         with:
           distribution: temurin
           java-version: '25'
-      - name: Assert exact source and real compiler
+      - name: Verify trusted exact source and approved native runtime
+        shell: bash
         env:
+          APPROVED_REPOSITORY_ID: '1429954649'
+          EVENT_REPOSITORY_ID: ${{ github.event.repository.id }}
+          EVENT_PR_HEAD_REPO_ID: ${{ github.event.pull_request.head.repo.id }}
+          EVENT_PR_BASE_REPO_ID: ${{ github.event.pull_request.base.repo.id }}
+          EVENT_NAME: ${{ github.event_name }}
           EXPECTED_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          APPROVED_ORESLANG_SHA256: ${{ vars.ORESLANG_APPROVED_SHA256 }}
         run: |
-          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
-          command -v oreslang
-          sha256sum "$(command -v oreslang)"
+          set -euo pipefail
+          test "$EVENT_REPOSITORY_ID" = "$APPROVED_REPOSITORY_ID" || { echo 'unapproved repository ID' >&2; exit 1; }
+          if [[ "$EVENT_NAME" == pull_request ]]; then
+            test "$EVENT_PR_HEAD_REPO_ID" = "$APPROVED_REPOSITORY_ID" || { echo 'unapproved PR head repository ID' >&2; exit 1; }
+            test "$EVENT_PR_BASE_REPO_ID" = "$APPROVED_REPOSITORY_ID" || { echo 'unapproved PR base repository ID' >&2; exit 1; }
+          fi
+          test "${RUNNER_OS:-}" = Linux && test "${RUNNER_ARCH:-}" = X64 && test "$(uname -m)" = x86_64
+          test -n "${RUNNER_NAME:-}" || { echo 'runner not assigned' >&2; exit 1; }
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA" || { echo 'exact source HEAD mismatch' >&2; exit 1; }
+          printf 'runner_name=%s\nsource_head=%s\nsource_tree=%s\n' "$RUNNER_NAME" "$EXPECTED_SHA" "$(git rev-parse HEAD^{tree})"
           java -version
-          oreslang --check src/serve_reverse.ores
-          oreslang --check tests/actor_ingress_tcp_smoke.ores
+          jdk_spec="$(java -XshowSettings:properties -version 2>&1 | sed -nE 's/^[[:space:]]*java\.specification\.version[[:space:]]*=[[:space:]]*([^[:space:]]+).*$/\1/p' | head -n 1)"
+          test "$jdk_spec" = 25 || { echo 'JDK 25 required' >&2; exit 1; }
+          launcher="$(type -P oreslang || true)"
+          test -n "$launcher" || { echo 'missing Oreslang launcher' >&2; exit 1; }
+          launcher="$(readlink -f -- "$launcher")"
+          test -f "$launcher" && test -x "$launcher"
+          if [[ ! "${APPROVED_ORESLANG_SHA256:-}" =~ ^[0-9a-fA-F]{64}$ ]]; then
+            echo 'missing administrator-approved Oreslang SHA-256' >&2
+            exit 1
+          fi
+          actual_sha="$(sha256sum -- "$launcher" | cut -d ' ' -f 1)"
+          printf 'oreslang_path=%s\noreslang_sha256=%s\n' "$launcher" "$actual_sha"
+          test "$actual_sha" = "${APPROVED_ORESLANG_SHA256,,}" || { echo 'unapproved Oreslang launcher' >&2; exit 1; }
+          echo 'oreslang_approved_digest=true'
+          if timeout 15s "$launcher" --build-info; then
+            echo 'oreslang_probe=--build-info'
+          elif timeout 15s "$launcher" --version; then
+            echo 'oreslang_probe=--version'
+          elif timeout 15s "$launcher" --help; then
+            echo 'oreslang_probe=--help'
+          else
+            echo 'bounded Oreslang launcher probes failed' >&2
+            exit 1
+          fi
+          "$launcher" --check src/serve_reverse.ores
+          "$launcher" --check tests/actor_ingress_tcp_smoke.ores
       - name: Real native Oreslang actor HTTP exchange over loopback
         shell: bash
         run: |
@@ -54,7 +101,21 @@ jobs:
             --allow-env=ores_proxy_conf_yaml \
             src/serve_reverse.ores >"$log" 2>&1 &
           server_pid=$!
-          trap 'kill "$server_pid" 2>/dev/null || true; wait "$server_pid" 2>/dev/null || true' EXIT
+          # Termination is bounded even when a damaged actor ignores SIGTERM.
+          cleanup() {
+            if [[ -n "${server_pid:-}" ]]; then
+              kill -TERM "$server_pid" 2>/dev/null || true
+              for _ in {1..50}; do
+                kill -0 "$server_pid" 2>/dev/null || break
+                sleep 0.1
+              done
+              if kill -0 "$server_pid" 2>/dev/null; then
+                kill -KILL "$server_pid" 2>/dev/null || true
+              fi
+              wait "$server_pid" 2>/dev/null || true
+            fi
+          }
+          trap cleanup EXIT
           ready=0
           for attempt in $(seq 1 30); do
             if ! kill -0 "$server_pid" 2>/dev/null; then
@@ -72,6 +133,7 @@ jobs:
             echo "Oreslang server did not bind within bounded readiness window" >&2
             exit 1
           fi
-          oreslang --no-prompt --allow-net=127.0.0.1:8080 \
+          timeout --signal=TERM --kill-after=5s 30s \
+            oreslang --no-prompt --allow-net=127.0.0.1:8080 \
             tests/actor_ingress_tcp_smoke.ores
           cat "$log"
