@@ -99,6 +99,8 @@ pub routine main(): int {
       true, 2, 100).is_ok() ||
     traffic_controls.record(rt borrow fail1.unwrap(), 1, 1102,
       true, 3, 100).is_ok() ||
+    traffic_controls.record(rt borrow missing_open, 2, 1102,
+      true, 2, 100).is_ok() ||
     traffic_controls.record(rt borrow missing_open, 1, 1102,
       true, 2, 100).is_ok() ||
     traffic_controls.record(rt borrow missing_open, 1, 1102,
