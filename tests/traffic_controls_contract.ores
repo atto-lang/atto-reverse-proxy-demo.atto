@@ -56,6 +56,23 @@ pub routine main(): int {
     !traffic_controls.permits(rt borrow changed_epoch.unwrap(), 2, 1102); then
     stdio.println("FAIL supervisor policy-epoch fence"); return 1;
   fi
+  // Corrupt persisted state must not mint a fresh credit merely because the
+  // caller requests a newer generation. Zero is a valid bootstrap epoch.
+  val invalid_window = new traffic_controls.Window(-1, 1000, 0);
+  val invalid_breaker_epoch = new traffic_controls.Breaker(-1, 0, 0);
+  val invalid_breaker_cooldown = new traffic_controls.Breaker(1, 0, -1);
+  val oversized_breaker_cooldown = new traffic_controls.Breaker(1, 0, 2000000001);
+  if traffic_controls.allow_window(rt borrow invalid_window,
+      2, 1102, 1000, 2).is_ok() ||
+    traffic_controls.record(rt borrow invalid_breaker_epoch,
+      2, 1102, true, 2, 100).is_ok() ||
+    traffic_controls.record(rt borrow invalid_breaker_cooldown,
+      2, 1102, true, 2, 100).is_ok() ||
+    traffic_controls.record(rt borrow oversized_breaker_cooldown,
+      2, 1102, true, 2, 100).is_ok(); then
+    stdio.println("FAIL corrupted traffic-control state minted new epoch credit");
+    return 1;
+  fi
   stdio.println("PASS native traffic control reference contract");
   return 0;
 }
