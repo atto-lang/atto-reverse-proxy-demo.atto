@@ -76,6 +76,32 @@ pub routine main(): int {
     stdio.println("FAIL reverse traffic-control denial bypass"); return 1;
   fi
 
+  // A caller-supplied decision is only a reference-model value, never an
+  // unforgeable rate credit. Reject structurally impossible "allowed" states.
+  val future_rate = new traffic_controls.WindowDecision(true,
+    new traffic_controls.Window(11, 2000, 1));
+  val empty_rate = new traffic_controls.WindowDecision(true,
+    new traffic_controls.Window(11, 1000, 0));
+  val negative_rate = new traffic_controls.WindowDecision(true,
+    new traffic_controls.Window(11, 1000, -1));
+  val oversized_rate = new traffic_controls.WindowDecision(true,
+    new traffic_controls.Window(11, 1000, 1000001));
+  if network_admission.authorize_reverse(rt borrow snapshot, rt borrow live,
+      rt borrow request, rt borrow future_rate, rt borrow closed_breaker,
+      rt borrow endpoint, "proxy.example.test", "/api/v1", 1001).is_ok() ||
+    network_admission.authorize_reverse(rt borrow snapshot, rt borrow live,
+      rt borrow request, rt borrow empty_rate, rt borrow closed_breaker,
+      rt borrow endpoint, "proxy.example.test", "/api/v1", 1001).is_ok() ||
+    network_admission.authorize_reverse(rt borrow snapshot, rt borrow live,
+      rt borrow request, rt borrow negative_rate, rt borrow closed_breaker,
+      rt borrow endpoint, "proxy.example.test", "/api/v1", 1001).is_ok() ||
+    network_admission.authorize_reverse(rt borrow snapshot, rt borrow live,
+      rt borrow request, rt borrow oversized_rate, rt borrow closed_breaker,
+      rt borrow endpoint, "proxy.example.test", "/api/v1", 1001).is_ok(); then
+    stdio.println("FAIL malformed rate decision granted upstream");
+    return 1;
+  fi
+
   val closed = live.close(rt borrow request).unwrap();
   val recycled = closed.admit(12).unwrap();
   if network_admission.authorize_reverse(rt borrow snapshot,
