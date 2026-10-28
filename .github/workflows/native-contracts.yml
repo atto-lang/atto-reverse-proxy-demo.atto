@@ -19,7 +19,8 @@ jobs:
        github.event.pull_request.head.repo.id == 1429954649 &&
        github.event.pull_request.base.repo.id == 1429954649 &&
        github.event.pull_request.head.repo.full_name == github.repository &&
-       github.event.pull_request.base.ref == 'main')
+       github.event.pull_request.base.ref == 'perf/proxy-nginx-haproxy-20261025' &&
+       github.event.pull_request.base.sha == '1a667fcd4481e3511e0cfa1008e855d96540c200')
     runs-on: [self-hosted, linux, x64, oreslang-jdk25]
     timeout-minutes: 20
     steps:
@@ -38,11 +39,18 @@ jobs:
         env:
           EXPECTED_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           EVENT_REPOSITORY_ID: ${{ github.event.repository.id }}
+          EVENT_BASE_HEAD_SHA: ${{ github.event.pull_request.base.sha }}
+          EVENT_BASE_REF: ${{ github.event.pull_request.base.ref }}
+          EXPECTED_FROZEN_BASE_SHA: '1a667fcd4481e3511e0cfa1008e855d96540c200'
           EXPECTED_REPOSITORY_ID: '1429954649'
           APPROVED_ORESLANG_SHA256: ${{ vars.ORESLANG_APPROVED_SHA256 }}
         run: |
           set -euo pipefail
           test "$EVENT_REPOSITORY_ID" = "$EXPECTED_REPOSITORY_ID"
+          if [[ "${GITHUB_EVENT_NAME:-}" == pull_request ]]; then
+            test "$EVENT_BASE_REF" = 'perf/proxy-nginx-haproxy-20261025' || { echo 'unexpected release base branch' >&2; exit 1; }
+            test "$EVENT_BASE_HEAD_SHA" = "$EXPECTED_FROZEN_BASE_SHA" || { echo 'frozen release base SHA changed' >&2; exit 1; }
+          fi
           test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
           printf 'source_head=%s\nsource_tree=%s\nrun_id=%s\nrun_attempt=%s\n' \
             "$EXPECTED_SHA" "$(git rev-parse 'HEAD^{tree}')" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT"
