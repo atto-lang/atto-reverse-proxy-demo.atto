@@ -25,7 +25,7 @@ pub routine main(): int {
     11, 1000, 1000, 2);
   if rate_result.is_err(); then stdio.println("FAIL rate fixture"); return 1; fi
   val rate = rate_result.unwrap();
-  val closed_breaker = new traffic_controls.Breaker(11, 0, 0);
+  val closed_breaker = new traffic_controls.Breaker(11, 0, 0, 2);
   val endpoint = new network_admission.ReverseEndpoint(
     "https://upstream.example.test:443", "93.184.216.34", true, true);
 
@@ -66,7 +66,7 @@ pub routine main(): int {
   val exhausted = new traffic_controls.Window(11, 1000, 1);
   val denied_rate = traffic_controls.allow_window(rt borrow exhausted,
     11, 1001, 1000, 1).unwrap();
-  val open_breaker = new traffic_controls.Breaker(11, 2, 2000);
+  val open_breaker = new traffic_controls.Breaker(11, 2, 2000, 2);
   if network_admission.authorize_reverse(rt borrow snapshot, rt borrow live,
       rt borrow request, rt borrow denied_rate, rt borrow closed_breaker,
       rt borrow endpoint, "proxy.example.test", "/api/v1", 1001).is_ok() ||
@@ -74,6 +74,20 @@ pub routine main(): int {
       rt borrow request, rt borrow rate, rt borrow open_breaker,
       rt borrow endpoint, "proxy.example.test", "/api/v1", 1001).is_ok(); then
     stdio.println("FAIL reverse traffic-control denial bypass"); return 1;
+  fi
+
+  // The pre-dial gate must reject a closed breaker that has already reached
+  // its pinned threshold, while allowing a legitimate partial failure count.
+  val missing_open = new traffic_controls.Breaker(11, 2, 0, 2);
+  val partial_failure = new traffic_controls.Breaker(11, 1, 0, 2);
+  if network_admission.authorize_reverse(rt borrow snapshot, rt borrow live,
+      rt borrow request, rt borrow rate, rt borrow missing_open,
+      rt borrow endpoint, "proxy.example.test", "/api/v1", 1001).is_ok() ||
+    network_admission.authorize_reverse(rt borrow snapshot, rt borrow live,
+      rt borrow request, rt borrow rate, rt borrow partial_failure,
+      rt borrow endpoint, "proxy.example.test", "/api/v1", 1001).is_err(); then
+    stdio.println("FAIL breaker threshold pre-dial admission fence");
+    return 1;
   fi
 
   // A caller-supplied decision is only a reference-model value, never an
