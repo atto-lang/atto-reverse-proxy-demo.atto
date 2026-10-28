@@ -10,7 +10,16 @@ permissions:
 jobs:
   native-contracts:
     # Never execute untrusted fork code on the organization's self-hosted runner.
-    if: (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)
+    if: >-
+      (github.event_name == 'workflow_dispatch' &&
+       github.event.repository.id == 1429954649 &&
+       github.ref == 'refs/heads/main') ||
+      (github.event_name == 'pull_request' &&
+       github.event.repository.id == 1429954649 &&
+       github.event.pull_request.head.repo.id == 1429954649 &&
+       github.event.pull_request.base.repo.id == 1429954649 &&
+       github.event.pull_request.head.repo.full_name == github.repository &&
+       github.event.pull_request.base.ref == 'main')
     runs-on: [self-hosted, linux, x64, oreslang-jdk25]
     timeout-minutes: 20
     steps:
@@ -24,14 +33,37 @@ jobs:
         with:
           distribution: temurin
           java-version: '25'
-      - name: Verify exact PR HEAD and runtime provenance
+      - name: Verify exact PR HEAD, JDK25 and administrator-approved runtime
+        shell: bash
         env:
           EXPECTED_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          EVENT_REPOSITORY_ID: ${{ github.event.repository.id }}
+          EXPECTED_REPOSITORY_ID: '1429954649'
+          APPROVED_ORESLANG_SHA256: ${{ vars.ORESLANG_APPROVED_SHA256 }}
         run: |
+          set -euo pipefail
+          test "$EVENT_REPOSITORY_ID" = "$EXPECTED_REPOSITORY_ID"
           test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
-          command -v oreslang
-          sha256sum "$(command -v oreslang)"
+          printf 'source_head=%s\nsource_tree=%s\nrun_id=%s\nrun_attempt=%s\n' \
+            "$EXPECTED_SHA" "$(git rev-parse 'HEAD^{tree}')" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT"
+          test "${RUNNER_OS:-}" = Linux
+          test "${RUNNER_ARCH:-}" = X64
+          test "$(uname -m)" = x86_64
           java -version
+          spec="$(java -XshowSettings:properties -version 2>&1 | sed -nE 's/^[[:space:]]*java\.specification\.version[[:space:]]*=[[:space:]]*([^[:space:]]+).*$/\1/p' | head -n 1)"
+          test "$spec" = 25 || { echo "JDK 25 required, found ${spec:-missing}" >&2; exit 1; }
+          launcher="$(type -P oreslang || true)"
+          test -n "$launcher" || { echo 'Oreslang launcher missing' >&2; exit 1; }
+          launcher="$(readlink -f -- "$launcher")"
+          test -f "$launcher" && test -x "$launcher"
+          [[ "${APPROVED_ORESLANG_SHA256:-}" =~ ^[0-9a-fA-F]{64}$ ]] || { echo 'Missing/invalid administrator-approved Oreslang SHA-256' >&2; exit 1; }
+          actual="$(sha256sum -- "$launcher" | cut -d ' ' -f 1)"
+          printf 'oreslang_path=%s\noreslang_sha256=%s\n' "$launcher" "$actual"
+          test "$actual" = "${APPROVED_ORESLANG_SHA256,,}" || { echo 'Unapproved Oreslang launcher digest' >&2; exit 1; }
+          echo 'oreslang_launcher_digest_verified=true'
+          timeout 15s "$launcher" --version || timeout 15s "$launcher" --build-info || timeout 15s "$launcher" --help
+          # This attests the launcher file, not any transitive JAR/runtime.
+          # Administrators must independently attest wrapper dependencies.
       - name: Compiler-check entrypoint
         run: oreslang --check src/main.ores
       - name: Compiler-check configuration path admission
