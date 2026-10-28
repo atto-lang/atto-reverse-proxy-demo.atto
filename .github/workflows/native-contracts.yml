@@ -159,7 +159,7 @@ jobs:
           }
           trap cleanup EXIT
 
-          ores_proxy_conf_yaml="$cfg" timeout 45s "$ORESLANG_VERIFIED_WRAPPER" --no-prompt \
+          ores_proxy_conf_yaml="$cfg" timeout --signal=TERM --kill-after=2s 45s "$ORESLANG_VERIFIED_WRAPPER" --no-prompt \
             --allow-read="$cfg" \
             --allow-env=ores_proxy_conf_yaml \
             --allow-net=127.0.0.1:8080 \
@@ -173,7 +173,7 @@ jobs:
               echo "reverse ingress exited before readiness" >&2
               exit 1
             fi
-            if "$ORESLANG_VERIFIED_WRAPPER" --no-prompt \
+            if timeout --signal=TERM --kill-after=2s 5s "$ORESLANG_VERIFIED_WRAPPER" --no-prompt \
                 --allow-net=127.0.0.1:8080 \
                 tests/ingress_tcp_smoke.ores >"$smoke_log" 2>&1; then
               passed=1
@@ -196,7 +196,7 @@ jobs:
           missing="$RUNNER_TEMP/ores-proxy-missing-config.yaml"
           rm -f "$missing"
           set +e
-          ores_proxy_conf_yaml="$missing" "$ORESLANG_VERIFIED_WRAPPER" --no-prompt \
+          ores_proxy_conf_yaml="$missing" timeout --signal=TERM --kill-after=2s 15s "$ORESLANG_VERIFIED_WRAPPER" --no-prompt \
             --allow-read="$missing" \
             --allow-env=ores_proxy_conf_yaml \
             src/serve_reverse.ores >"$RUNNER_TEMP/missing-config.log" 2>&1
