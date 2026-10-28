@@ -46,6 +46,41 @@ pub routine main(): int {
   if direct.is_err() || direct.unwrap().name != "blue"; then
     stdio.println("FAIL pool route binding"); return 1;
   fi
+  // Route matching alone cannot bypass deny or require_header middleware.
+  val String denied_doc = doc.replace_literal("routes:\n",
+      "middleware:\n  - name: gate\n    kind: deny\nroutes:\n")
+    .replace_literal("    upstream: pool://core\n",
+      "    upstream: pool://core\n    middleware: gate\n");
+  val denied_open = generation.open(denied_doc, "reverse");
+  if denied_open.is_err(); then
+    stdio.println("FAIL deny-middleware pool fixture"); return 1;
+  fi
+  val denied_control = denied_open.unwrap();
+  val denied_snapshot_result = denied_control.snapshot();
+  if denied_snapshot_result.is_err(); then
+    stdio.println("FAIL deny-middleware snapshot"); return 1;
+  fi
+  val denied_snapshot = denied_snapshot_result.unwrap();
+  if backend_pools.reverse_route(rt borrow denied_snapshot,
+      "api.example.test", "/other", "least-active", 0).is_ok(); then
+    stdio.println("FAIL pool plan bypassed deny middleware"); return 1;
+  fi
+  val String header_doc = denied_doc.replace_literal("kind: deny\n",
+      "kind: require_header\n    header: x-demo-token\n");
+  val header_open = generation.open(header_doc, "reverse");
+  if header_open.is_err(); then
+    stdio.println("FAIL required-header pool fixture"); return 1;
+  fi
+  val header_control = header_open.unwrap();
+  val header_snapshot_result = header_control.snapshot();
+  if header_snapshot_result.is_err(); then
+    stdio.println("FAIL required-header snapshot"); return 1;
+  fi
+  val header_snapshot = header_snapshot_result.unwrap();
+  if backend_pools.reverse_route(rt borrow header_snapshot,
+      "api.example.test", "/other", "least-active", 0).is_ok(); then
+    stdio.println("FAIL pool plan bypassed required header"); return 1;
+  fi
   if proxy_yaml.parse(doc.replace_literal("pool://core", "pool://missing"),
       "reverse").is_ok(); then
     stdio.println("FAIL dangling pool reference"); return 1;
