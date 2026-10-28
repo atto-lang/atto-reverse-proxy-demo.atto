@@ -5,12 +5,16 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
+
+# Hosted-only harness: it may execute PR benchmark code, but it has no native
+# Oreslang runtime, no write token and no release authority. Native execution
+# is owned by the trusted-target native-contracts workflow.
 jobs:
   harness-smoke:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           persist-credentials: false
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
@@ -30,9 +34,16 @@ jobs:
           bash test-summary.sh
       - name: Bind benchmark provenance to checked-out Git objects
         shell: bash
+        env:
+          EXPECTED_PR_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
         run: |
-          echo "BENCH_SOURCE_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
-          echo "BENCH_SOURCE_TREE_SHA=$(git rev-parse 'HEAD^{tree}')" >> "$GITHUB_ENV"
+          set -euo pipefail
+          actual_head="$(git rev-parse HEAD)"
+          actual_tree="$(git rev-parse 'HEAD^{tree}')"
+          test "$actual_head" = "$EXPECTED_PR_SHA" || { echo 'benchmark checkout SHA mismatch' >&2; exit 1; }
+          printf 'benchmark_source_head=%s\nbenchmark_source_tree=%s\n' "$actual_head" "$actual_tree"
+          echo "BENCH_SOURCE_SHA=$actual_head" >> "$GITHUB_ENV"
+          echo "BENCH_SOURCE_TREE_SHA=$actual_tree" >> "$GITHUB_ENV"
       - name: Run baseline correctness smoke (no performance release gate)
         env:
           TMPDIR: ${{ runner.temp }}
