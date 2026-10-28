@@ -84,7 +84,7 @@ define module traffic_controls as
       (previous.open_until_ms > 0 && previous.failures != previous.threshold) ||
       // A closed breaker at its failure threshold is corrupt: the transition
       // must have opened the circuit, never admitted a success reset.
-      (previous.epoch == epoch && previous.open_until_ms == 0 &&
+      (previous.open_until_ms == 0 &&
         previous.failures >= previous.threshold); then
       return Err("invalid breaker event");
     fi
