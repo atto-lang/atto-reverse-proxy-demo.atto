@@ -10,28 +10,75 @@ permissions:
 jobs:
   native-contracts:
     # Never execute untrusted fork code on the organization's self-hosted runner.
-    if: (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)
+    # Reserve the trusted runner only for the immutable approved repository.
+    if: >-
+      (github.event_name == 'pull_request' &&
+       github.event.repository.id == 1429954649 &&
+       github.event.pull_request.head.repo.id == 1429954649 &&
+       github.event.pull_request.base.repo.id == 1429954649 &&
+       github.event.pull_request.head.repo.full_name == github.repository) ||
+      (github.event_name == 'workflow_dispatch' &&
+       github.event.repository.id == 1429954649 &&
+       github.ref == 'refs/heads/main')
     runs-on: [self-hosted, linux, x64, oreslang-jdk25]
     timeout-minutes: 20
     steps:
       - name: Checkout exact PR tree
-        uses: actions/checkout@v4
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           persist-credentials: false
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
       - name: Set up JDK 25
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
         with:
           distribution: temurin
           java-version: '25'
-      - name: Verify exact PR HEAD and runtime provenance
+      - name: Fail closed on exact source and approved native runner provenance
+        shell: bash
         env:
+          APPROVED_REPOSITORY_ID: '1429954649'
+          EVENT_REPOSITORY_ID: ${{ github.event.repository.id }}
+          EVENT_PR_HEAD_REPO_ID: ${{ github.event.pull_request.head.repo.id }}
+          EVENT_PR_BASE_REPO_ID: ${{ github.event.pull_request.base.repo.id }}
+          EVENT_NAME: ${{ github.event_name }}
           EXPECTED_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          APPROVED_ORESLANG_SHA256: ${{ vars.ORESLANG_APPROVED_SHA256 }}
         run: |
-          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
-          command -v oreslang
-          sha256sum "$(command -v oreslang)"
+          set -euo pipefail
+          test "$EVENT_REPOSITORY_ID" = "$APPROVED_REPOSITORY_ID" || { echo 'unapproved event repository ID' >&2; exit 1; }
+          if [[ "$EVENT_NAME" == pull_request ]]; then
+            test "$EVENT_PR_HEAD_REPO_ID" = "$APPROVED_REPOSITORY_ID" || { echo 'unapproved PR head repository ID' >&2; exit 1; }
+            test "$EVENT_PR_BASE_REPO_ID" = "$APPROVED_REPOSITORY_ID" || { echo 'unapproved PR base repository ID' >&2; exit 1; }
+          fi
+          test "${RUNNER_OS:-}" = Linux && test "${RUNNER_ARCH:-}" = X64 && test "$(uname -m)" = x86_64
+          test -n "${RUNNER_NAME:-}" || { echo 'missing assigned runner name' >&2; exit 1; }
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA" || { echo 'exact-head checkout mismatch' >&2; exit 1; }
+          printf 'runner_name=%s\nrepository_id=%s\nsource_head=%s\nsource_tree=%s\n' "$RUNNER_NAME" "$EVENT_REPOSITORY_ID" "$EXPECTED_SHA" "$(git rev-parse HEAD^{tree})"
           java -version
+          jdk_spec="$(java -XshowSettings:properties -version 2>&1 | sed -nE 's/^[[:space:]]*java\.specification\.version[[:space:]]*=[[:space:]]*([^[:space:]]+).*$/\1/p' | head -n 1)"
+          test "$jdk_spec" = 25 || { echo 'JDK 25 required' >&2; exit 1; }
+          launcher="$(type -P oreslang || true)"
+          test -n "$launcher" || { echo 'Oreslang launcher missing' >&2; exit 1; }
+          launcher="$(readlink -f -- "$launcher")"
+          test -f "$launcher" && test -x "$launcher" || { echo 'invalid Oreslang launcher path' >&2; exit 1; }
+          if [[ ! "${APPROVED_ORESLANG_SHA256:-}" =~ ^[0-9a-fA-F]{64}$ ]]; then
+            echo 'missing administrator-approved Oreslang launcher SHA-256' >&2
+            exit 1
+          fi
+          actual_sha="$(sha256sum -- "$launcher" | cut -d ' ' -f 1)"
+          printf 'oreslang_path=%s\noreslang_sha256=%s\n' "$launcher" "$actual_sha"
+          test "$actual_sha" = "${APPROVED_ORESLANG_SHA256,,}" || { echo 'unapproved Oreslang launcher' >&2; exit 1; }
+          echo 'oreslang_approved_digest=true'
+          if timeout 15s "$launcher" --build-info; then
+            echo 'oreslang_probe=--build-info'
+          elif timeout 15s "$launcher" --version; then
+            echo 'oreslang_probe=--version'
+          elif timeout 15s "$launcher" --help; then
+            echo 'oreslang_probe=--help'
+          else
+            echo 'bounded Oreslang launcher probes failed' >&2
+            exit 1
+          fi
       - name: Compiler-check entrypoint
         run: oreslang --check src/main.ores
       - name: Compiler-check configuration path admission
