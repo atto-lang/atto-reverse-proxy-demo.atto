@@ -8,6 +8,20 @@ import module route_policy from "./route_policy";
 import module load_balancer from "./load_balancer";
 
 define module backend_pools as
+  // Generation-pinned routing plan. This is deliberately not a network
+  // capability; a transport must still obtain fresh admission for this epoch.
+  pub define class Plan as
+    pub val int epoch;
+    pub val String name;
+    pub val String origin;
+    pub val int index;
+    pub val int next_cursor;
+  end
+
+  pub fnc current(borrow Plan plan, borrow generation.Snapshot snapshot): bool {
+    return plan.epoch == snapshot.epoch;
+  }
+
   fnc weight(String text): int {
     if text == "1"; then return 1; fi
     if text == "2"; then return 2; fi
@@ -41,7 +55,7 @@ define module backend_pools as
 
   pub fnc reverse_route(borrow generation.Snapshot snapshot,
                         String host, String path, String algorithm, int cursor):
-      Result<load_balancer.Choice, String> {
+      Result<Plan, String> {
     if snapshot.configuration.mode != "reverse"; then
       return Err("pool route only valid for reverse proxy");
     fi
@@ -58,6 +72,10 @@ define module backend_pools as
     fi
     val names = route.upstream.split_literal("pool://");
     if names.size != 2; then return Err("malformed pool reference"); fi
-    return choose(snapshot, names.get(1), algorithm, cursor);
+    val selected = choose(snapshot, names.get(1), algorithm, cursor);
+    if selected.is_err(); then return Err("backend pool selection failed"); fi
+    val choice = selected.unwrap();
+    return Ok(new Plan(snapshot.epoch, choice.name, choice.origin,
+      choice.index, choice.next_cursor));
   }
 end
