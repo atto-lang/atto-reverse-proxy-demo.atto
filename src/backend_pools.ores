@@ -72,9 +72,9 @@ define module backend_pools as
     fi
     val names = route.upstream.split_literal("pool://");
     if names.size != 2; then return Err("malformed pool reference"); fi
-    val selected = choose(snapshot, names.get(1), algorithm, cursor);
-    if selected.is_err(); then return Err("backend pool selection failed"); fi
-    val choice = selected.unwrap();
+    val backend_selection = choose(snapshot, names.get(1), algorithm, cursor);
+    if backend_selection.is_err(); then return Err("backend pool selection failed"); fi
+    val choice = backend_selection.unwrap();
     return Ok(new Plan(snapshot.epoch, choice.name, choice.origin,
       choice.index, choice.next_cursor));
   }
