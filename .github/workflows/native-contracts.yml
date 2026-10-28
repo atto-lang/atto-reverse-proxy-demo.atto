@@ -43,6 +43,7 @@ jobs:
           EVENT_BASE_HEAD_SHA: ${{ github.event.pull_request.base.sha }}
           EVENT_BASE_REF: ${{ github.event.pull_request.base.ref }}
           EXPECTED_FROZEN_BASE_SHA: '1a667fcd4481e3511e0cfa1008e855d96540c200'
+          EXPECTED_FROZEN_TREE_SHA: '5937599df00b6122dccaf22bcdebdaf836f6d3ee'
           EXPECTED_REPOSITORY_ID: '1429954649'
           APPROVED_ORESLANG_SHA256: ${{ vars.ORESLANG_APPROVED_SHA256 }}
         run: |
@@ -54,8 +55,10 @@ jobs:
             test "$EXPECTED_SHA" = "$EXPECTED_FROZEN_BASE_SHA" || { echo 'checkout not pinned to frozen release SHA' >&2; exit 1; }
           fi
           test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          actual_tree="$(git rev-parse 'HEAD^{tree}')"
+          test "$actual_tree" = "$EXPECTED_FROZEN_TREE_SHA" || { echo 'frozen source tree mismatch' >&2; exit 1; }
           printf 'source_head=%s\nsource_tree=%s\nworkflow_pr_head=%s\nrun_id=%s\nrun_attempt=%s\n' \
-            "$EXPECTED_SHA" "$(git rev-parse 'HEAD^{tree}')" "${WORKFLOW_PR_HEAD_SHA:-}" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT"
+            "$EXPECTED_SHA" "$actual_tree" "${WORKFLOW_PR_HEAD_SHA:-}" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT"
           test "${RUNNER_OS:-}" = Linux
           test "${RUNNER_ARCH:-}" = X64
           test "$(uname -m)" = x86_64
@@ -91,6 +94,37 @@ jobs:
           printf 'ORESLANG_VERIFIED_WRAPPER=%s\n' "$wrapper" >> "$GITHUB_ENV"
           # This attests the launcher file, not any transitive JAR/runtime.
           # Administrators must independently attest wrapper dependencies.
+      - name: Compile complete frozen Oreslang source inventory
+        shell: bash
+        run: |
+          set -euo pipefail
+          wrapper="$ORESLANG_VERIFIED_WRAPPER"
+          test -x "$wrapper"
+          test "$(git rev-parse 'HEAD^{tree}')" = '5937599df00b6122dccaf22bcdebdaf836f6d3ee'
+          test -z "$(find src tests -type l -name '*.ores' -print -quit)"
+          find src tests -type f -name '*.ores' -print | LC_ALL=C sort > "$RUNNER_TEMP/oreslang-files.txt"
+          source_count="$(wc -l < "$RUNNER_TEMP/oreslang-files.txt" | tr -d '[:space:]')"
+          test "$source_count" = 28 || { echo "expected 28 reviewed Oreslang files, found $source_count" >&2; exit 1; }
+          sha256sum "$RUNNER_TEMP/oreslang-files.txt"
+          while IFS= read -r file; do
+            test -n "$file" || continue
+            "$wrapper" --check "$file"
+          done < "$RUNNER_TEMP/oreslang-files.txt"
+
+      - name: Execute every standalone contract in frozen tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          wrapper="$ORESLANG_VERIFIED_WRAPPER"
+          find tests -maxdepth 1 -type f -name '*_contract.ores' -print | LC_ALL=C sort > "$RUNNER_TEMP/pure-contracts.txt"
+          contract_count="$(wc -l < "$RUNNER_TEMP/pure-contracts.txt" | tr -d '[:space:]')"
+          test "$contract_count" = 13 || { echo "expected 13 standalone contracts, found $contract_count" >&2; exit 1; }
+          sha256sum "$RUNNER_TEMP/pure-contracts.txt"
+          while IFS= read -r file; do
+            test -n "$file" || continue
+            "$wrapper" "$file"
+          done < "$RUNNER_TEMP/pure-contracts.txt"
+
       - name: Compiler-check entrypoint
         run: '"$ORESLANG_VERIFIED_WRAPPER" --check src/main.ores'
       - name: Compiler-check configuration path admission
