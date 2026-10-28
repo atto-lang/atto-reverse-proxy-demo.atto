@@ -138,6 +138,13 @@ def source_guards() -> None:
     check(smoke.count('network.connect_async("127.0.0.1", 8080)') >= 5
           and "FAIL unregistered actor code image must not execute" in smoke,
           "real-wire smoke is loopback-only and denies unregistered actor images")
+    check('if !headers_done || !chunked || length_header; then' in smoke
+          and 'FAIL streaming actor HTTP chunked headers' in smoke,
+          "native streaming fixture rejects invalid framing headers")
+    check('if !first_body || !second_body || !terminal_chunk; then' in smoke
+          and 'line == "0" && second_body' in smoke
+          and 'FAIL streaming body order or terminating chunk' in smoke,
+          "native streaming fixture checks stage order and zero-chunk terminator")
     wire = read(".github/workflows/actor-ingress-wire.yml")
     check("actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09" in wire
           and "actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961" in wire,
