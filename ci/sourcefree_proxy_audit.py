@@ -158,6 +158,20 @@ def source_guards() -> None:
           and 'line == "0" && second_body' in smoke
           and 'FAIL streaming body order or terminating chunk' in smoke,
           "native streaming fixture checks stage order and zero-chunk terminator")
+    check('FAIL encoded noncanonical path not refused' in smoke
+          and 'FAIL unknown route should not dispatch' in smoke
+          and '"/%2e%2e/actor HTTP/1.1' in smoke,
+          "malformed encoded target and unknown route require negative wire verdicts")
+    check('for (let i = 0; i < 4; i++)' in smoke
+          and 'await dropped.close_async();' in smoke
+          and 'FAIL actor service did not recover after disconnected streams' in smoke,
+          "bounded abandoned-stream survivability and recovery cases retained")
+    check('GET /stream HTTP/1.1' in smoke
+          and 'GET /actor HTTP/1.1' in smoke
+          and "network.connect_async(\"127.0.0.1\", 8080)" in smoke,
+          "disconnect recovery remains local loopback only")
+    check('\\\\r\\\\n' not in smoke and '\\r\\n' in smoke,
+          "wire fixture contains encoded CRLF delimiters without double escaping")
     wire = read(".github/workflows/actor-ingress-wire.yml")
     check("actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09" in wire
           and "actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961" in wire,
