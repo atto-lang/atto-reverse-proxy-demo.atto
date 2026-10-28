@@ -132,6 +132,12 @@ def source_guards() -> None:
           "backend selection remains a validated per-generation plan")
     check("network.connect" not in pools and "http.request" not in pools,
           "backend selection cannot grant transport or socket authority")
+    check('if route.middleware != ""; then' in pools and
+          'return Err("middleware receipt required before reverse pool planning");' in pools,
+          "middleware-bearing reverse pools fail closed before planning")
+    check("FAIL pool plan bypassed deny middleware" in read("tests/backend_pools_contract.ores")
+          and "FAIL pool plan bypassed required header" in read("tests/backend_pools_contract.ores"),
+          "deny and required-header pool negative fixtures retained")
     pool_tests = read("tests/backend_pools_contract.ores")
     check("weighted-round-robin" in pool_tests and
           "FAIL deterministic backend rotation" in pool_tests and

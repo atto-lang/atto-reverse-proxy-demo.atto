@@ -48,6 +48,11 @@ define module backend_pools as
     val selected = route_policy.select(rt borrow snapshot.configuration, host, path);
     if selected.is_err(); then return Err("unknown reverse route"); fi
     val route = selected.unwrap();
+    // A pool choice is a plan, never a middleware authorization receipt.
+    // Until an opaque generation-pinned receipt exists, fail closed here too.
+    if route.middleware != ""; then
+      return Err("middleware receipt required before reverse pool planning");
+    fi
     if !proxy_yaml.valid_pool_ref(route.upstream); then
       return Err("reverse route has no pool binding");
     fi
