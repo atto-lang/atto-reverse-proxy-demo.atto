@@ -77,18 +77,32 @@ jobs:
           printf 'oreslang_path=%s\noreslang_sha256=%s\n' "$launcher" "$actual_sha"
           test "$actual_sha" = "${APPROVED_ORESLANG_SHA256,,}" || { echo 'unapproved Oreslang launcher' >&2; exit 1; }
           echo 'oreslang_approved_digest=true'
-          if timeout 15s "$launcher" --build-info; then
+          # A private wrapper rechecks the administrator-approved digest on each exec.
+          test -n "${RUNNER_TEMP:-}" && test -n "${GITHUB_RUN_ID:-}" && test -n "${GITHUB_RUN_ATTEMPT:-}"
+          wrapper_dir="${RUNNER_TEMP}/oreslang-wire-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          mkdir -m 700 -- "$wrapper_dir"
+          wrapper="$wrapper_dir/oreslang"
+          printf '%s\n' '#!/bin/bash' 'set -euo pipefail' > "$wrapper"
+          printf 'launcher=%q\n' "$launcher" >> "$wrapper"
+          printf 'expected_sha=%q\n' "${APPROVED_ORESLANG_SHA256,,}" >> "$wrapper"
+          printf '%s\n' \
+            'test -f "$launcher" && test -x "$launcher" || exit 1' \
+            'actual_sha="$(/usr/bin/sha256sum -- "$launcher" | /usr/bin/cut -d " " -f 1)"' \
+            'test "$actual_sha" = "$expected_sha" || { echo "approved Oreslang launcher changed" >&2; exit 1; }' \
+            'exec "$launcher" "$@"' >> "$wrapper"
+          chmod 700 "$wrapper"
+          if timeout 15s "$wrapper" --build-info; then
             echo 'oreslang_probe=--build-info'
-          elif timeout 15s "$launcher" --version; then
+          elif timeout 15s "$wrapper" --version; then
             echo 'oreslang_probe=--version'
-          elif timeout 15s "$launcher" --help; then
+          elif timeout 15s "$wrapper" --help; then
             echo 'oreslang_probe=--help'
           else
             echo 'bounded Oreslang launcher probes failed' >&2
             exit 1
           fi
-          "$launcher" --check src/serve_reverse.ores
-          "$launcher" --check tests/actor_ingress_tcp_smoke.ores
+          "$wrapper" --check src/serve_reverse.ores
+          "$wrapper" --check tests/actor_ingress_tcp_smoke.ores
       - name: Real native Oreslang actor HTTP exchange over loopback
         shell: bash
         env:
@@ -108,10 +122,13 @@ jobs:
           actual_sha="$(sha256sum -- "$launcher" | cut -d ' ' -f 1)"
           test "$actual_sha" = "${APPROVED_ORESLANG_SHA256,,}" || { echo 'unapproved real-wire launcher' >&2; exit 1; }
           printf 'real_wire_oreslang_path=%s\nreal_wire_oreslang_sha256=%s\n' "$launcher" "$actual_sha"
+          # Reuse the digest-checking wrapper, not PATH, for both server and client.
+          wrapper="$RUNNER_TEMP/oreslang-wire-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/oreslang"
+          test -f "$wrapper" && test -x "$wrapper" || { echo 'verified Oreslang wrapper missing' >&2; exit 1; }
           export ores_proxy_conf_yaml="$GITHUB_WORKSPACE/config/worker-example.yaml"
           log="$RUNNER_TEMP/reverse-actor-ingress.log"
           # Only predeclared loopback is reachable. Do not grant --allow-all.
-          "$launcher" --no-prompt --allow-net=127.0.0.1:8080 \
+          "$wrapper" --no-prompt --allow-net=127.0.0.1:8080 \
             --allow-read="$ores_proxy_conf_yaml" \
             --allow-env=ores_proxy_conf_yaml \
             src/serve_reverse.ores >"$log" 2>&1 &
@@ -149,6 +166,6 @@ jobs:
             exit 1
           fi
           timeout --signal=TERM --kill-after=5s 30s \
-            "$launcher" --no-prompt --allow-net=127.0.0.1:8080 \
+            "$wrapper" --no-prompt --allow-net=127.0.0.1:8080 \
             tests/actor_ingress_tcp_smoke.ores
           cat "$log"
