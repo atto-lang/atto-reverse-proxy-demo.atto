@@ -142,8 +142,13 @@ def source_guards() -> None:
     check("actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09" in wire
           and "actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961" in wire,
           "real-wire workflow dependencies pinned to reviewed v5 commits")
-    check("--allow-net=127.0.0.1:8080" in wire and "--allow-all" not in wire
-          and "APPROVED_ORESLANG_SHA256" in wire,
+    wire_exec = "\n".join(
+        line for line in wire.splitlines()
+        if not line.lstrip().startswith("#")
+    )
+    check("--allow-net=127.0.0.1:8080" in wire_exec
+          and "--allow-all" not in wire_exec
+          and "APPROVED_ORESLANG_SHA256" in wire_exec,
           "real-wire workflow grants only loopback network and approved runtime")
 
 def workflow_guards() -> None:
