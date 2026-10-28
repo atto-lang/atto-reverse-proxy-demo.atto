@@ -58,7 +58,7 @@ runtime test failure.
 
 In **Settings → Branches / Rulesets**, establish an enforced rule for
 `main` that requires pull requests, independent approval after the latest
-push, conversation resolution, the genuine native check and the applicable
+push (dismiss stale approvals), conversation resolution, the genuine native check and the applicable
 actor-wire check, blocks force-push/deletion and has no administrator bypass.
 Require the expected final status-check names from the actually executed
 workflows, not placeholder or historically green checks.
