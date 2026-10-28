@@ -1,0 +1,17 @@
+tests/backend_pools_contract.ores
+tests/data_layout_contract.ores
+tests/generation_contract.ores
+tests/header_policy_contract.ores
+tests/lexical_admission_contract.ores
+tests/load_balancer_contract.ores
+tests/middleware_generation_contract.ores
+tests/middleware_manifest_contract.ores
+tests/network_admission_contract.ores
+tests/path_admission_contract.ores
+tests/security_admission_contract.ores
+tests/service_bindings_contract.ores
+tests/slot_lifecycle_contract.ores
+tests/slot_pool_contract.ores
+tests/traffic_controls_contract.ores
+tests/wire_contract.ores
+tests/yaml_policy_contract.ores

@@ -2,6 +2,7 @@
 // Caller MUST perform raw byte parser/framing, duplicate header handling,
 // comma-token parsing and canonical lowercase conversion before invoking this.
 // These helpers NEVER write bytes, authenticate clients or grant network access.
+import module admission_text from "./admission_text";
 define module header_policy as
   fnc token(String key): bool {
     if key == "" || key.starts_with("-") || key.ends_with("-") ||
@@ -28,10 +29,7 @@ define module header_policy as
   pub fnc canonical_name(String key): bool { return token(key); }
 
   pub fnc value_safe(String value): bool {
-    return !value.contains_literal("\r") &&
-      !value.contains_literal("\n") &&
-      !value.contains_literal("\u0000") &&
-      !value.contains_literal("\t");
+    return admission_text.control_free(value);
   }
 
   // Dynamic Connection hop-by-hop nominations must be normalized and removed
@@ -42,12 +40,17 @@ define module header_policy as
     if connection_tokens == ""; then return true; fi
     if connection_tokens.starts_with(",") || connection_tokens.ends_with(",") ||
       connection_tokens.contains_literal(",,"); then return false; fi
+    let bool matched = false;
     for (const original of connection_tokens.split_literal(",")) {
+      // Only ASCII SP may surround a canonical token. Validate BEFORE trim;
+      // Unicode whitespace and control bytes must never disappear into a name.
+      if !token(original.replace_literal(" ", "")); then return false; fi
       val String nominated = original.trim();
       if !token(nominated); then return false; fi
-      if key == nominated; then return false; fi
+      if key == nominated; then matched = true; fi
     }
-    return true;
+    // Validate the entire list even after finding the field to suppress.
+    return !matched;
   }
 
   fnc hop_by_hop(String key): bool {
@@ -112,3 +115,4 @@ define module header_policy as
     return true;
   }
 end
+

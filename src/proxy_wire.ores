@@ -3,6 +3,7 @@
 // header multiplicity, limits, transfer coding and normalized authority BEFORE
 // passing these extracted request-line and Host values to this module.
 // No network authority or outbound capability is granted by these helpers.
+import module admission_text from "./admission_text";
 import module proxy_yaml from "./proxy_yaml";
 import module route_policy from "./route_policy";
 
@@ -15,7 +16,8 @@ define module proxy_wire as
   end
 
   fnc strict_path(String path): bool {
-    if !path.starts_with("/") || path.starts_with("//") ||
+    if !admission_text.control_free(path) ||
+      !path.starts_with("/") || path.starts_with("//") ||
       path.contains_literal("//") || path.contains_literal("..") ||
       path.contains_literal("%") || path.contains_literal("\\") ||
       path.contains_literal("?") || path.contains_literal("#") ||
@@ -111,3 +113,4 @@ define module proxy_wire as
     return Ok(authority);
   }
 end
+

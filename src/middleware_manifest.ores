@@ -2,6 +2,7 @@
 // The coordinator/supervisor builds one plan per admitted route or actor scope.
 // This class owns a private copy of each referenced immutable rule definition.
 import module proxy_yaml from "./proxy_yaml";
+import module header_policy from "./header_policy";
 import module generation from "./generation";
 import module route_policy from "./route_policy";
 
@@ -28,6 +29,10 @@ define module middleware_manifest as
     // Pure admission decision for one header. The eventual HTTP adapter must
     // supply canonical, complete headers and enforce the result before dispatch.
     pub permitted(String header, String value): bool {
+      if (header != "" && !header_policy.canonical_name(header)) ||
+        (header == "" && value != "") || !header_policy.value_safe(value); then
+        return false;
+      fi
       for (const rule of self.steps) {
         if rule.kind == "trace"; then continue; fi
         if rule.kind == "deny"; then return false; fi
@@ -89,3 +94,4 @@ define module middleware_manifest as
     return bind(snapshot, route.name, route.middleware);
   }
 end
+

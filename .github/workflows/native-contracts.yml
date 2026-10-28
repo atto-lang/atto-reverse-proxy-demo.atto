@@ -93,6 +93,38 @@ jobs:
             'test "$actual_sha" = "$expected_sha" || { echo "approved Oreslang launcher changed" >&2; exit 1; }' \
             'exec "$launcher" "$@"' >> "$wrapper"
           chmod 700 "$wrapper"
+      - name: Fail closed on missing or unreviewed Oreslang files
+        shell: bash
+        run: |
+          set -euo pipefail
+          find src tests -type f -name '*.ores' -print | LC_ALL=C sort > "$RUNNER_TEMP/oreslang-files.txt"
+          diff -u ci/oreslang-files.txt "$RUNNER_TEMP/oreslang-files.txt"
+          find tests -maxdepth 1 -type f -name '*_contract.ores' -print | LC_ALL=C sort > "$RUNNER_TEMP/pure-contracts.txt"
+          diff -u ci/pure-contracts.txt "$RUNNER_TEMP/pure-contracts.txt"
+          test -z "$(find src tests -type l -name '*.ores' -print -quit)"
+      - name: Compiler-check all reviewed Oreslang files
+        shell: bash
+        run: |
+          set -euo pipefail
+          wrapper="$RUNNER_TEMP/oreslang-verified-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/oreslang"
+          test -x "$wrapper"
+          while IFS= read -r file; do
+            test -n "$file" || continue
+            "$wrapper" --check "$file"
+          done < ci/oreslang-files.txt
+      - name: Run every reviewed standalone pure contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          wrapper="$RUNNER_TEMP/oreslang-verified-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/oreslang"
+          test -x "$wrapper"
+          count=0
+          while IFS= read -r file; do
+            test -n "$file" || continue
+            "$wrapper" "$file"
+            count=$((count + 1))
+          done < ci/pure-contracts.txt
+          test "$count" -gt 0
       - name: Compiler-check entrypoint
         run: '"$RUNNER_TEMP/oreslang-verified-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/oreslang" --check src/main.ores'
       - name: Compiler-check configuration path admission
@@ -160,20 +192,17 @@ jobs:
           "$RUNNER_TEMP/oreslang-verified-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/oreslang" --check src/service_bindings.ores
           "$RUNNER_TEMP/oreslang-verified-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/oreslang" --check src/load_balancer.ores
           "$RUNNER_TEMP/oreslang-verified-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/oreslang" --check src/traffic_controls.ores
+          "$RUNNER_TEMP/oreslang-verified-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/oreslang" --check src/network_admission.ores
           "$RUNNER_TEMP/oreslang-verified-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/oreslang" --check tests/service_bindings_contract.ores
           "$RUNNER_TEMP/oreslang-verified-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/oreslang" --check tests/load_balancer_contract.ores
           "$RUNNER_TEMP/oreslang-verified-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/oreslang" --check tests/traffic_controls_contract.ores
+          "$RUNNER_TEMP/oreslang-verified-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/oreslang" --check tests/network_admission_contract.ores
       - name: Execute actor service, LB, rate and circuit contracts
         run: |
           "$RUNNER_TEMP/oreslang-verified-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/oreslang" tests/service_bindings_contract.ores
           "$RUNNER_TEMP/oreslang-verified-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/oreslang" tests/load_balancer_contract.ores
           "$RUNNER_TEMP/oreslang-verified-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/oreslang" tests/traffic_controls_contract.ores
-      - name: Compiler-check pre-dial network admission oracle
-        run: |
-          "$RUNNER_TEMP/oreslang-verified-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/oreslang" --check src/network_admission.ores
-          "$RUNNER_TEMP/oreslang-verified-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/oreslang" --check tests/network_admission_contract.ores
-      - name: Execute pre-dial network admission contract
-        run: '"$RUNNER_TEMP/oreslang-verified-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/oreslang" tests/network_admission_contract.ores'
+          "$RUNNER_TEMP/oreslang-verified-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/oreslang" tests/network_admission_contract.ores
       - name: Compiler-check opt-in local actor-service real TCP client
         run: '"$RUNNER_TEMP/oreslang-verified-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/oreslang" --check tests/actor_ingress_tcp_smoke.ores'
 
