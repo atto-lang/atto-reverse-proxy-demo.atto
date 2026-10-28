@@ -10,7 +10,7 @@ records the Oreslang compiler binary digest and JDK25, checks both Oreslang
 programs, launches `src/serve_reverse.ores` in a subprocess on
 `127.0.0.1:8080`, and calls `tests/actor_ingress_tcp_smoke.ores` as a
 separate native Oreslang client. The client checks:
-- HTTP 200 for the allowlisted statically compiled local Oreslang actor service and a separate streaming actor response with two actual HTTP body chunks
+- HTTP 200 for the allowlisted statically compiled local Oreslang actor service, plus a separate streaming actor response with chunked HTTP/1.1 transfer framing, no conflicting Content-Length, both text body stages in order, and a terminal zero-length chunk
 - HTTP 501 for an admitted but unimplemented outbound HTTP upstream
 - HTTP 403 when the configured presence-check middleware fails
 
@@ -25,6 +25,8 @@ Source uses the documented `handler.dispatch(rt borrow mut exchange)`
 single-owner exchange handoff. The bounded readiness loop and EXIT cleanup
 ensure the test fails explicitly instead of silently passing when the server
 never starts. If runner admission is queued, **no program has executed**.
+
+The wire client explicitly separates HTTP headers from the body before accepting the two text stage markers. It fails on absent/incorrect chunked transfer headers, conflicting Content-Length, duplicate/reordered stages, or a missing terminal chunk. Its line-oriented fixture check is **not** a general binary-safe RFC 9112 chunk parser and does not validate trailers or malicious chunk extensions.
 
 The streaming proof exercises the existing server-side `exchange.start/write/finish` guest API and a separate native Oreslang TCP client. It does not turn the Java host-only outbound HTTP proof into a guest API. The test **does not** validate remote upstream HTTP streaming, authenticating
 CONNECT, content framing under malicious inputs, true GraalVM AOT, or LLVM.
