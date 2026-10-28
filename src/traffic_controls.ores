@@ -45,15 +45,19 @@ define module traffic_controls as
 
   pub fnc permits(borrow Breaker state, int epoch, int now_ms): bool {
     return epoch > 0 && state.epoch == epoch &&
-      state.failures >= 0 && state.open_until_ms >= 0 &&
-      now_ms >= 0 && state.open_until_ms == 0;
+      state.failures >= 0 && state.failures < 10000 &&
+      now_ms >= 0 && now_ms <= 2000000000 &&
+      state.open_until_ms == 0;
   }
 
   // This only reports an expired cooldown: it NEVER grants a request credit.
   // A trusted supervisor must mint a single-winner half-open probe lease.
   pub fnc probe_due(borrow Breaker state, int epoch, int now_ms): bool {
     return epoch > 0 && state.epoch == epoch &&
-      state.open_until_ms > 0 && now_ms >= state.open_until_ms;
+      state.failures > 0 && state.failures <= 10000 &&
+      state.open_until_ms > 0 && state.open_until_ms <= 2000000000 &&
+      now_ms >= 0 && now_ms <= 2000000000 &&
+      now_ms >= state.open_until_ms;
   
   }
 
@@ -70,7 +74,8 @@ define module traffic_controls as
       now_ms > 2000000000 - cooldown_ms ||
       previous.failures < 0 || previous.failures > threshold ||
       previous.epoch < 0 || previous.epoch > epoch ||
-      previous.open_until_ms < 0 || previous.open_until_ms > 2000000000; then
+      previous.open_until_ms < 0 || previous.open_until_ms > 2000000000 ||
+      (previous.open_until_ms > 0 && previous.failures == 0); then
       return Err("invalid breaker event");
     fi
     if previous.epoch != epoch; then

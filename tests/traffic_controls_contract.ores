@@ -73,6 +73,21 @@ pub routine main(): int {
     stdio.println("FAIL corrupted traffic-control state minted new epoch credit");
     return 1;
   fi
+  // An invalid clock or corrupt persisted breaker must not grant admission,
+  // schedule a half-open probe, or reset into a fresh epoch.
+  val corrupt_closed = new traffic_controls.Breaker(1, 10000, 0);
+  val corrupt_open = new traffic_controls.Breaker(1, 0, 1050);
+  val oversized_open = new traffic_controls.Breaker(1, 1, 2000000001);
+  if traffic_controls.permits(rt borrow start, 1, 2000000001) ||
+    traffic_controls.permits(rt borrow corrupt_closed, 1, 1102) ||
+    traffic_controls.probe_due(rt borrow corrupt_open, 1, 1102) ||
+    traffic_controls.probe_due(rt borrow oversized_open, 1, 2000000001) ||
+    traffic_controls.probe_due(rt borrow fail2.unwrap(), 1, 2000000001) ||
+    traffic_controls.record(rt borrow corrupt_open, 2, 1102,
+      true, 2, 100).is_ok(); then
+    stdio.println("FAIL corrupt breaker or clock bypassed admission fence");
+    return 1;
+  fi
   stdio.println("PASS native traffic control reference contract");
   return 0;
 }
