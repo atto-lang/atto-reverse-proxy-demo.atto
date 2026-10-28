@@ -1,0 +1,141 @@
+import module proxy_yaml from "../src/proxy_yaml";
+import module generation from "../src/generation";
+import module slot_pool from "../src/slot_pool";
+import module traffic_controls from "../src/traffic_controls";
+import module network_admission from "../src/network_admission";
+
+pub routine main(): int {
+  val String source = "version: ores.proxy/v1\nmode: reverse\nlisten:\n  host: 127.0.0.1\n  port: 8080\nruntime:\n  carriers: 20\n  actors: 100\n  max_inflight: 1024\n" +
+    "routes:\n  - name: api\n    host: proxy.example.test\n    path_prefix: /api\n    upstream: https://upstream.example.test:443\n";
+  val parsed = proxy_yaml.parse(source, "reverse");
+  if parsed.is_err(); then stdio.println("FAIL reverse fixture"); return 1; fi
+  val snapshot = new generation.Snapshot(11, parsed.unwrap());
+
+  val created = slot_pool.create(1);
+  if created.is_err(); then stdio.println("FAIL request pool"); return 1; fi
+  val initial_pool = created.unwrap();
+  val admitted_result = initial_pool.admit(11);
+  if admitted_result.is_err(); then stdio.println("FAIL request lease"); return 1; fi
+  val admitted = admitted_result.unwrap();
+  val live = admitted.state;
+  val request = admitted.handle;
+
+  val zero = new traffic_controls.Window(11, 1000, 0);
+  val rate_result = traffic_controls.allow_window(rt borrow zero,
+    11, 1000, 1000, 2);
+  if rate_result.is_err(); then stdio.println("FAIL rate fixture"); return 1; fi
+  val rate = rate_result.unwrap();
+  val closed_breaker = new traffic_controls.Breaker(11, 0, 0, 2);
+  val endpoint = new network_admission.ReverseEndpoint(
+    "https://upstream.example.test:443", "93.184.216.34", true, true);
+
+  val granted = network_admission.authorize_reverse(rt borrow snapshot,
+    rt borrow live, rt borrow request, rt borrow rate,
+    rt borrow closed_breaker, rt borrow endpoint,
+    "proxy.example.test", "/api/v1", 1000);
+  if granted.is_err(); then
+    stdio.println("FAIL fully admitted upstream should produce descriptor");
+    return 1;
+  fi
+  val permit = granted.unwrap();
+  if permit.epoch != 11 || permit.slot != request.slot ||
+    permit.nonce != request.nonce ||
+    permit.origin != "https://upstream.example.test:443" ||
+    permit.resolved_ip != "93.184.216.34"; then
+    stdio.println("FAIL reverse permit identity/pinning"); return 1;
+  fi
+
+  val unpinned = new network_admission.ReverseEndpoint(
+    "https://upstream.example.test:443", "93.184.216.34", false, true);
+  val forbidden = new network_admission.ReverseEndpoint(
+    "https://upstream.example.test:443", "10.0.0.7", true, false);
+  val wrong_origin = new network_admission.ReverseEndpoint(
+    "https://other.example.test:443", "93.184.216.34", true, true);
+  if network_admission.authorize_reverse(rt borrow snapshot, rt borrow live,
+      rt borrow request, rt borrow rate, rt borrow closed_breaker,
+      rt borrow unpinned, "proxy.example.test", "/api/v1", 1001).is_ok() ||
+    network_admission.authorize_reverse(rt borrow snapshot, rt borrow live,
+      rt borrow request, rt borrow rate, rt borrow closed_breaker,
+      rt borrow forbidden, "proxy.example.test", "/api/v1", 1001).is_ok() ||
+    network_admission.authorize_reverse(rt borrow snapshot, rt borrow live,
+      rt borrow request, rt borrow rate, rt borrow closed_breaker,
+      rt borrow wrong_origin, "proxy.example.test", "/api/v1", 1001).is_ok(); then
+    stdio.println("FAIL reverse resolver/origin boundary widened"); return 1;
+  fi
+
+  val exhausted = new traffic_controls.Window(11, 1000, 1);
+  val denied_rate = traffic_controls.allow_window(rt borrow exhausted,
+    11, 1001, 1000, 1).unwrap();
+  val open_breaker = new traffic_controls.Breaker(11, 2, 2000, 2);
+  if network_admission.authorize_reverse(rt borrow snapshot, rt borrow live,
+      rt borrow request, rt borrow denied_rate, rt borrow closed_breaker,
+      rt borrow endpoint, "proxy.example.test", "/api/v1", 1001).is_ok() ||
+    network_admission.authorize_reverse(rt borrow snapshot, rt borrow live,
+      rt borrow request, rt borrow rate, rt borrow open_breaker,
+      rt borrow endpoint, "proxy.example.test", "/api/v1", 1001).is_ok(); then
+    stdio.println("FAIL reverse traffic-control denial bypass"); return 1;
+  fi
+
+  // The pre-dial gate must reject a closed breaker that has already reached
+  // its pinned threshold, while allowing a legitimate partial failure count.
+  val missing_open = new traffic_controls.Breaker(11, 2, 0, 2);
+  val partial_failure = new traffic_controls.Breaker(11, 1, 0, 2);
+  if network_admission.authorize_reverse(rt borrow snapshot, rt borrow live,
+      rt borrow request, rt borrow rate, rt borrow missing_open,
+      rt borrow endpoint, "proxy.example.test", "/api/v1", 1001).is_ok() ||
+    network_admission.authorize_reverse(rt borrow snapshot, rt borrow live,
+      rt borrow request, rt borrow rate, rt borrow partial_failure,
+      rt borrow endpoint, "proxy.example.test", "/api/v1", 1001).is_err(); then
+    stdio.println("FAIL breaker threshold pre-dial admission fence");
+    return 1;
+  fi
+
+  // A caller-supplied decision is only a reference-model value, never an
+  // unforgeable rate credit. Reject structurally impossible "allowed" states.
+  val future_rate = new traffic_controls.WindowDecision(true,
+    new traffic_controls.Window(11, 2000, 1));
+  val empty_rate = new traffic_controls.WindowDecision(true,
+    new traffic_controls.Window(11, 1000, 0));
+  val negative_rate = new traffic_controls.WindowDecision(true,
+    new traffic_controls.Window(11, 1000, -1));
+  val oversized_rate = new traffic_controls.WindowDecision(true,
+    new traffic_controls.Window(11, 1000, 1000001));
+  if network_admission.authorize_reverse(rt borrow snapshot, rt borrow live,
+      rt borrow request, rt borrow future_rate, rt borrow closed_breaker,
+      rt borrow endpoint, "proxy.example.test", "/api/v1", 1001).is_ok() ||
+    network_admission.authorize_reverse(rt borrow snapshot, rt borrow live,
+      rt borrow request, rt borrow empty_rate, rt borrow closed_breaker,
+      rt borrow endpoint, "proxy.example.test", "/api/v1", 1001).is_ok() ||
+    network_admission.authorize_reverse(rt borrow snapshot, rt borrow live,
+      rt borrow request, rt borrow negative_rate, rt borrow closed_breaker,
+      rt borrow endpoint, "proxy.example.test", "/api/v1", 1001).is_ok() ||
+    network_admission.authorize_reverse(rt borrow snapshot, rt borrow live,
+      rt borrow request, rt borrow oversized_rate, rt borrow closed_breaker,
+      rt borrow endpoint, "proxy.example.test", "/api/v1", 1001).is_ok(); then
+    stdio.println("FAIL malformed rate decision granted upstream");
+    return 1;
+  fi
+
+  val closed = live.close(rt borrow request).unwrap();
+  val recycled = closed.admit(12).unwrap();
+  if network_admission.authorize_reverse(rt borrow snapshot,
+      rt borrow recycled.state, rt borrow request, rt borrow rate,
+      rt borrow closed_breaker, rt borrow endpoint,
+      "proxy.example.test", "/api/v1", 1001).is_ok(); then
+    stdio.println("FAIL stale/recycled request authorized upstream");
+    return 1;
+  fi
+
+  val next_config = proxy_yaml.parse(source, "reverse");
+  if next_config.is_err(); then stdio.println("FAIL next config fixture"); return 1; fi
+  val next_snapshot = new generation.Snapshot(12, next_config.unwrap());
+  if network_admission.authorize_reverse(rt borrow next_snapshot, rt borrow live,
+      rt borrow request, rt borrow rate, rt borrow closed_breaker,
+      rt borrow endpoint, "proxy.example.test", "/api/v1", 1001).is_ok(); then
+    stdio.println("FAIL cross-generation request authorized upstream");
+    return 1;
+  fi
+
+  stdio.println("PASS reverse pre-dial authority boundary: route+lease+epoch+controls+DNS");
+  return 0;
+}
