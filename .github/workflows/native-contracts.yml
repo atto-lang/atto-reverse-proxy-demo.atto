@@ -94,33 +94,33 @@ jobs:
             'exec "$launcher" "$@"' >> "$wrapper"
           chmod 700 "$wrapper"
       - name: Compiler-check entrypoint
-        run: "$RUNNER_TEMP/oreslang-verified-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/oreslang" --check src/main.ores
+        run: '"$RUNNER_TEMP/oreslang-verified-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/oreslang" --check src/main.ores'
       - name: Compiler-check configuration path admission
-        run: "$RUNNER_TEMP/oreslang-verified-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/oreslang" --check src/config_path.ores
+        run: '"$RUNNER_TEMP/oreslang-verified-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/oreslang" --check src/config_path.ores'
       - name: Compiler-check YAML parser
-        run: "$RUNNER_TEMP/oreslang-verified-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/oreslang" --check src/proxy_yaml.ores
+        run: '"$RUNNER_TEMP/oreslang-verified-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/oreslang" --check src/proxy_yaml.ores'
       - name: Compiler-check routing policy
-        run: "$RUNNER_TEMP/oreslang-verified-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/oreslang" --check src/route_policy.ores
+        run: '"$RUNNER_TEMP/oreslang-verified-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/oreslang" --check src/route_policy.ores'
       - name: Compiler-check middleware policy
-        run: "$RUNNER_TEMP/oreslang-verified-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/oreslang" --check src/middleware_policy.ores
+        run: '"$RUNNER_TEMP/oreslang-verified-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/oreslang" --check src/middleware_policy.ores'
       - name: Compiler-check generation coordinator
-        run: "$RUNNER_TEMP/oreslang-verified-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/oreslang" --check src/generation.ores
+        run: '"$RUNNER_TEMP/oreslang-verified-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/oreslang" --check src/generation.ores'
       - name: Compiler-check native YAML contract
-        run: "$RUNNER_TEMP/oreslang-verified-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/oreslang" --check tests/yaml_policy_contract.ores
+        run: '"$RUNNER_TEMP/oreslang-verified-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/oreslang" --check tests/yaml_policy_contract.ores'
       - name: Compiler-check native generation contract
-        run: "$RUNNER_TEMP/oreslang-verified-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/oreslang" --check tests/generation_contract.ores
+        run: '"$RUNNER_TEMP/oreslang-verified-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/oreslang" --check tests/generation_contract.ores'
       - name: Compiler-check native middleware contract
-        run: "$RUNNER_TEMP/oreslang-verified-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/oreslang" --check tests/middleware_generation_contract.ores
+        run: '"$RUNNER_TEMP/oreslang-verified-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/oreslang" --check tests/middleware_generation_contract.ores'
       - name: Compiler-check canonical path contract
-        run: "$RUNNER_TEMP/oreslang-verified-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/oreslang" --check tests/path_admission_contract.ores
+        run: '"$RUNNER_TEMP/oreslang-verified-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/oreslang" --check tests/path_admission_contract.ores'
       - name: Execute canonical configuration path contract
-        run: "$RUNNER_TEMP/oreslang-verified-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/oreslang" tests/path_admission_contract.ores
+        run: '"$RUNNER_TEMP/oreslang-verified-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/oreslang" tests/path_admission_contract.ores'
       - name: Execute YAML / routing / policy contract
-        run: "$RUNNER_TEMP/oreslang-verified-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/oreslang" tests/yaml_policy_contract.ores
+        run: '"$RUNNER_TEMP/oreslang-verified-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/oreslang" tests/yaml_policy_contract.ores'
       - name: Execute generation epoch / rollback contract
-        run: "$RUNNER_TEMP/oreslang-verified-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/oreslang" tests/generation_contract.ores
+        run: '"$RUNNER_TEMP/oreslang-verified-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/oreslang" tests/generation_contract.ores'
       - name: Execute independent middleware snapshot contract
-        run: "$RUNNER_TEMP/oreslang-verified-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/oreslang" tests/middleware_generation_contract.ores
+        run: '"$RUNNER_TEMP/oreslang-verified-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/oreslang" tests/middleware_generation_contract.ores'
 
       - name: Compiler-check HTTP metadata admission and header filtering
         run: |
@@ -172,4 +172,4 @@ jobs:
           "$RUNNER_TEMP/oreslang-verified-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/oreslang" tests/traffic_controls_contract.ores
           "$RUNNER_TEMP/oreslang-verified-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/oreslang" tests/network_admission_contract.ores
       - name: Compiler-check opt-in local actor-service real TCP client
-        run: "$RUNNER_TEMP/oreslang-verified-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/oreslang" --check tests/actor_ingress_tcp_smoke.ores
+        run: '"$RUNNER_TEMP/oreslang-verified-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/oreslang" --check tests/actor_ingress_tcp_smoke.ores'
