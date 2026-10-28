@@ -13,6 +13,11 @@ separate native Oreslang client. The client checks:
 - HTTP 200 for the allowlisted statically compiled local Oreslang actor service, plus a separate streaming actor response with chunked HTTP/1.1 transfer framing, no conflicting Content-Length, both text body stages in order, and a terminal zero-length chunk
 - HTTP 501 for an admitted but unimplemented outbound HTTP upstream
 - HTTP 403 when the configured presence-check middleware fails
+- HTTP 400 for a percent-encoded noncanonical traversal target and HTTP 404 for an unconfigured route, each tested through a separate loopback TCP connection
+- Four clients that send a complete streaming request and immediately close their TCP connections, followed by a fresh local actor-service request that must still return HTTP 200
+
+The disconnect sequence is **listener survivability evidence only** if it executes: it cannot prove that the abandoned stream's task was cancelled at a specific linearization point or that a receiver/state loan was physically retired. Those claims require actor-local continuation accounting, an observable quiescence barrier, scheduler/task-retirement instrumentation, and explicit bounded-retirement tests; none is present in this fixture.
+
 
 The server receives `ores_proxy_conf_yaml` containing the canonical
 absolute `config/worker-example.yaml` path; the runner only grants its
