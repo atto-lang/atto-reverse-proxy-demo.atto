@@ -38,11 +38,13 @@ pub routine main(): int {
   if old_bind.target != "api-v1" || old_bind.epoch != 1 ||
     old_bind.abi != "abi-v1" || old_bind.network_capable ||
     !service_bindings.local_dispatch_allowed(rt borrow old_bind,
-      rt borrow old, "api-service", "api-v1") ||
+      rt borrow old, "api-service", "api-v1", "abi-v1") ||
     service_bindings.local_dispatch_allowed(rt borrow old_bind,
-      rt borrow old, "api-service", "api-v2") ||
+      rt borrow old, "api-service", "api-v2", "abi-v1") ||
     service_bindings.local_dispatch_allowed(rt borrow old_bind,
-      rt borrow old, "other-service", "api-v1") ||
+      rt borrow old, "other-service", "api-v1", "abi-v1") ||
+    service_bindings.local_dispatch_allowed(rt borrow old_bind,
+      rt borrow old, "api-service", "api-v1", "abi-v2") ||
     service_bindings.bind(rt borrow old, rt borrow trusted,
       "ambient-fetch").is_ok(); then
     stdio.println("FAIL service capability binding or dispatch fence"); return 1;
@@ -80,7 +82,7 @@ pub routine main(): int {
   fi
   val alias_actor = alias_binding.unwrap();
   if service_bindings.local_dispatch_allowed(rt borrow alias_actor,
-      rt borrow alias_snapshot, "api-service", "api-v1"); then
+      rt borrow alias_snapshot, "api-service", "api-v1", "abi-v1"); then
     stdio.println("FAIL same-image service alias escaped identity fence");
     return 1;
   fi
@@ -144,9 +146,9 @@ pub routine main(): int {
   if new_actor.target != "api-v2" || new_actor.epoch != 2 ||
     old_bind.target != "api-v1" || old_bind.epoch != 1 ||
     service_bindings.local_dispatch_allowed(rt borrow old_bind,
-      rt borrow updated, "api-service", "api-v1") ||
+      rt borrow updated, "api-service", "api-v1", "abi-v1") ||
     !service_bindings.local_dispatch_allowed(rt borrow new_actor,
-      rt borrow updated, "api-service", "api-v2"); then
+      rt borrow updated, "api-service", "api-v2", "abi-v1"); then
     stdio.println("FAIL stale actor binding escaped generation fence"); return 1;
   fi
 
