@@ -153,10 +153,20 @@ pub async routine main(): int {
           "Service binding unavailable");
         continue;
       fi
-      if bound.unwrap().target == "hello-v1"; then
+      val actor_binding = bound.unwrap();
+      // Final caller-side dispatch fence: the actor image must be local-only,
+      // exact-target and from this immutable generation. The remaining runtime
+      // gap is the matching actor-owned receipt check after http.claim().
+      if service_bindings.local_dispatch_allowed(rt borrow actor_binding,
+          rt borrow snapshot, "hello-v1"); then
         hello.dispatch(rt borrow mut exchange);
-      elif bound.unwrap().target == "stream-v1"; then
+      elif service_bindings.local_dispatch_allowed(rt borrow actor_binding,
+          rt borrow snapshot, "stream-v1"); then
         stream.dispatch(rt borrow mut exchange);
+      elif actor_binding.target == "hello-v1" ||
+        actor_binding.target == "stream-v1"; then
+        await exchange.respond(503, "text/plain; charset=utf-8",
+          "Stale or overprivileged actor binding");
       else
         await exchange.respond(501, "text/plain; charset=utf-8",
           "Actor image not registered in this demonstration");
