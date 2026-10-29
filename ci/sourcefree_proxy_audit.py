@@ -100,6 +100,19 @@ def source_guards() -> None:
     check('elif section == "services"; then' in yaml
           and 'valid_service_ref(route.upstream)' in yaml,
           "actor-service configuration support preserved")
+    bindings = read("src/service_bindings.ores")
+    check('if binding.network_capable; then' in bindings
+          and 'network-capable actor image forbidden on public ingress route' in bindings,
+          "public actor ingress rejects trusted-but-network-capable code images")
+    check("pub fnc local_dispatch_allowed" in bindings
+          and "binding.epoch == snapshot.epoch" in bindings
+          and 'binding.target == expected_target' in bindings,
+          "actor dispatch binding is generation and exact-target fenced")
+    serving = read("src/serve_reverse.ores")
+    check("service_bindings.local_dispatch_allowed" in serving
+          and 'if request.method != "GET"; then' in serving
+          and "Stale or overprivileged actor binding" in serving,
+          "canonical GET-only HttpExchange handoff rechecks actor dispatch fence")
     headers = read("src/header_policy.ores")
     check('!admission_text.control_free' not in headers
           and "return admission_text.control_free(value)" in headers,
