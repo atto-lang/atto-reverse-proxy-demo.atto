@@ -227,13 +227,16 @@ jobs:
               echo 'runtime staging path must not be group/world writable' >&2; exit 1;
             }
           done
-          test -z "$(find "$runtime_root" -xdev -type l -print -quit)" || {
+          bad_symlink="$(find "$runtime_root" -xdev -type l -print -quit)" || { echo 'runtime symlink scan failed' >&2; exit 1; }
+          test -z "$bad_symlink" || {
             echo 'approved runtime tree must not contain symlinks' >&2; exit 1;
           }
-          test -z "$(find "$runtime_root" -xdev ! -type d ! -type f -print -quit)" || {
+          bad_special="$(find "$runtime_root" -xdev ! -type d ! -type f -print -quit)" || { echo 'runtime object-type scan failed' >&2; exit 1; }
+          test -z "$bad_special" || {
             echo 'approved runtime tree contains special files' >&2; exit 1;
           }
-          test -z "$(find "$runtime_root" -xdev \( ! -uid 0 -o -perm /022 \) -print -quit)" || {
+          bad_owner="$(find "$runtime_root" -xdev \( ! -uid 0 -o -perm /022 \) -print -quit)" || { echo 'runtime ownership scan failed' >&2; exit 1; }
+          test -z "$bad_owner" || {
             echo 'approved runtime tree must be entirely root-owned and non-writable by group/other' >&2; exit 1;
           }
           file_count="$(find "$runtime_root" -xdev -type f -print | wc -l | tr -d '[:space:]')"
@@ -274,9 +277,12 @@ jobs:
             'test -r /proc/self/mountinfo && test -x /usr/bin/awk || exit 1' \
             'mount_report="$(/usr/bin/awk -v root="$runtime_root" -v prefix="$runtime_root/" "\$5==root || index(\$5,prefix)==1 {print \$5; exit}" /proc/self/mountinfo)" || { echo "failed to read approved runtime mount table" >&2; exit 1; }' \
             'test -z "$mount_report" || { echo "approved Oreslang runtime is a mount or contains nested mount" >&2; exit 1; }' \
-            'test -z "$(/usr/bin/find "$runtime_root" -xdev -type l -print -quit)" || exit 1' \
-            'test -z "$(/usr/bin/find "$runtime_root" -xdev ! -type d ! -type f -print -quit)" || exit 1' \
-            'test -z "$(/usr/bin/find "$runtime_root" -xdev \( ! -uid 0 -o -perm /022 \) -print -quit)" || exit 1' \
+            'bad_symlink="$(/usr/bin/find "$runtime_root" -xdev -type l -print -quit)" || exit 1' \
+            'test -z "$bad_symlink" || exit 1' \
+            'bad_special="$(/usr/bin/find "$runtime_root" -xdev ! -type d ! -type f -print -quit)" || exit 1' \
+            'test -z "$bad_special" || exit 1' \
+            'bad_owner="$(/usr/bin/find "$runtime_root" -xdev \( ! -uid 0 -o -perm /022 \) -print -quit)" || exit 1' \
+            'test -z "$bad_owner" || exit 1' \
             'actual_manifest_sha="$(cd "$runtime_root" && /usr/bin/find . -xdev -type f -print0 | LC_ALL=C /usr/bin/sort -z | /usr/bin/xargs -0 -r /usr/bin/sha256sum | /usr/bin/sha256sum | /usr/bin/cut -d " " -f 1)"' \
             'test "$actual_manifest_sha" = "$expected_manifest_sha" || { echo "approved Oreslang runtime file set changed" >&2; exit 1; }' \
             'exec /usr/bin/timeout --signal=TERM --kill-after=2s 120s "$launcher" "$@"' >> "$wrapper"
