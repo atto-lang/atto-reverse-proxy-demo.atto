@@ -107,7 +107,9 @@ pub async routine main(): int {
       await exchange.respond(400, "text/plain; charset=utf-8", "Noncanonical request");
       continue;
     fi
-    val matched = route_policy.select(rt borrow config, host, exchange.target);
+    val request = admitted.unwrap();
+    val matched = route_policy.select(rt borrow config,
+      request.authority, request.path);
     if matched.is_err(); then
       await exchange.respond(404, "text/plain; charset=utf-8", "No route");
       continue;
@@ -146,8 +148,16 @@ pub async routine main(): int {
       continue;
     fi
     if proxy_yaml.valid_service_ref(target.upstream); then
+      // HEAD response framing is not yet proven through the guest actor adapter.
+      // Keep public actor services GET-only until actor-owned request metadata
+      // can enforce bodyless HEAD semantics after http.claim().
+      if request.method != "GET"; then
+        await exchange.respond(405, "text/plain; charset=utf-8",
+          "Actor service currently requires GET");
+        continue;
+      fi
       val bound = service_bindings.reverse_route(rt borrow snapshot,
-        rt borrow trusted_services, host, exchange.target);
+        rt borrow trusted_services, request.authority, request.path);
       if bound.is_err(); then
         await exchange.respond(503, "text/plain; charset=utf-8",
           "Service binding unavailable");
