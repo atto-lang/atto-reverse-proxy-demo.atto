@@ -56,6 +56,32 @@ pub routine main(): int {
   if selected.is_err() || selected.unwrap().target != "api-v1"; then
     stdio.println("FAIL reverse actor service route"); return 1;
   fi
+  // A route matcher and approved image cannot substitute for middleware
+  // admission, including trace-only middleware.
+  val String gated_deny = source
+    .replace_literal("routes:\n",
+      "middleware:\n  - name: gate\n    kind: deny\nroutes:\n")
+    .replace_literal("    upstream: service://api-service\n",
+      "    upstream: service://api-service\n    middleware: gate\n");
+  let Array<String> gated_documents = new Array<String>();
+  gated_documents.add(gated_deny);
+  gated_documents.add(gated_deny.replace_literal("kind: deny\n",
+    "kind: require_header\n    header: x-token\n"));
+  gated_documents.add(gated_deny.replace_literal("kind: deny\n",
+    "kind: trace\n"));
+  for (const gated of gated_documents) {
+    val parsed_gated = proxy_yaml.parse(gated, "reverse");
+    if parsed_gated.is_err(); then
+      stdio.println("FAIL valid middleware-gated service fixture"); return 1;
+    fi
+    val gated_snapshot = new generation.Snapshot(1, parsed_gated.unwrap());
+    if service_bindings.reverse_route(rt borrow gated_snapshot,
+        rt borrow trusted, "api.example.test", "/ok").is_ok(); then
+      stdio.println("FAIL middleware-gated service route escaped admission");
+      return 1;
+    fi
+  }
+
   if proxy_yaml.parse(source.replace_literal("service://api-service",
       "service://missing"), "reverse").is_ok(); then
     stdio.println("FAIL route with unbound actor service"); return 1;
