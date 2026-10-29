@@ -398,11 +398,28 @@ jobs:
             echo 'frozen Oreslang working files differ from committed source' >&2
             exit 1
           }
-          untracked_bytes="$("${source_git[@]}" ls-files --others --exclude-standard -z -- src tests | /usr/bin/wc -c | /usr/bin/tr -d '[:space:]')"
+          # --exclude-standard would hide ignored injected .ores files. Reject
+          # EVERY untracked path, including ignored files and files outside src.
+          untracked_bytes="$("${source_git[@]}" ls-files --others -z -- | /usr/bin/wc -c | /usr/bin/tr -d '[:space:]')"
           test "$untracked_bytes" = 0 || {
-            echo 'untracked source files in frozen release checkout' >&2
+            echo 'untracked or ignored files in frozen release checkout' >&2
             exit 1
           }
+          # Git diff can trust skip-worktree/assume-unchanged index flags.
+          # Compare every checked-out tracked byte directly with HEAD blobs.
+          # NUL-delimit paths; fail closed on missing files and symlinks.
+          tracked_manifest="$RUNNER_TEMP/frozen-tracked-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT.z"
+          "${source_git[@]}" ls-files -z -- > "$tracked_manifest"
+          while IFS= read -r -d '' tracked_file; do
+            test -f "$tracked_file" && test ! -L "$tracked_file" || {
+              echo 'frozen checkout has missing or linked tracked file' >&2
+              exit 1
+            }
+            "${source_git[@]}" show "HEAD:$tracked_file" | /usr/bin/cmp -s -- "$tracked_file" - || {
+              echo 'tracked working bytes differ from frozen HEAD blob' >&2
+              exit 1
+            }
+          done < "$tracked_manifest"
           echo 'frozen_source_worktree_clean=true'
           source_symlink="$(/usr/bin/find src tests -type l -name '*.ores' -print -quit)" || {
             echo 'frozen source symlink scan failed' >&2
