@@ -28,17 +28,14 @@ routes:
     host: worker.example.test
     path_prefix: /actor
     upstream: service://greeting
-    middleware: trace
   - name: streaming-route
     host: worker.example.test
     path_prefix: /stream
     upstream: service://streaming
-    middleware: trace
   - name: unregistered-route
     host: worker.example.test
     path_prefix: /unregistered
     upstream: service://unavailable
-    middleware: trace
   - name: origin
     host: worker.example.test
     path_prefix: /api
