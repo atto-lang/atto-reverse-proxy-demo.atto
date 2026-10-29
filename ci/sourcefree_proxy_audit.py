@@ -131,6 +131,18 @@ def source_guards() -> None:
           "middleware pre-dial denial precedes endpoint permit")
     check("network.connect" not in admission and "http.request" not in admission,
           "pure network admission module does not mint sockets")
+    services = read("src/service_bindings.ores")
+    service_route = section(services, "  pub fnc reverse_route(", "\n  }\nend")
+    check('if route.middleware != ""; then' in service_route and
+          "middleware receipt required before reverse service planning" in service_route and
+          service_route.index('if route.middleware != ""; then') <
+          service_route.index("valid_service_ref(route.upstream)"),
+          "middleware-gated actor service planning fails closed")
+    actor_tests = read("tests/service_bindings_contract.ores")
+    check(all(token in actor_tests for token in
+          ("gated_documents.add(gated_deny)", "kind: require_header",
+           "kind: trace", "FAIL middleware-gated service route escaped admission")),
+          "deny, required-header and trace actor-routing denial vectors retained")
     tests = read("tests/network_admission_contract.ores")
     check(all(token in tests for token in
               ("middleware: denied", "kind: require_header",
