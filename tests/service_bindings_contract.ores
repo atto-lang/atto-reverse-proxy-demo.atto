@@ -75,8 +75,11 @@ pub routine main(): int {
   val alias_snapshot = alias_opened.unwrap().snapshot().unwrap();
   val alias_binding = service_bindings.reverse_route(rt borrow alias_snapshot,
     rt borrow trusted, "api.example.test", "/ok");
-  if alias_binding.is_err() ||
-    service_bindings.local_dispatch_allowed(rt borrow alias_binding.unwrap(),
+  if alias_binding.is_err(); then
+    stdio.println("FAIL resolve same-image service alias fixture"); return 1;
+  fi
+  val alias_actor = alias_binding.unwrap();
+  if service_bindings.local_dispatch_allowed(rt borrow alias_actor,
       rt borrow alias_snapshot, "api-service", "api-v1"); then
     stdio.println("FAIL same-image service alias escaped identity fence");
     return 1;
