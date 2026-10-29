@@ -4,6 +4,11 @@
 name: Trusted Frozen Reverse Native Admission
 on:
   workflow_dispatch:
+# Privileged-mode Bash ignores inherited BASH_FUNC_* and BASH_ENV.
+# Apply to every run step, including future implicit steps on trusted runners.
+defaults:
+  run:
+    shell: /bin/bash --noprofile --norc -p -e -o pipefail {0}
 permissions:
   contents: read
 jobs:
@@ -19,7 +24,7 @@ jobs:
     timeout-minutes: 3
     steps:
       - name: Verify live protected default branch and control-plane SHA
-        shell: bash
+        shell: /bin/bash --noprofile --norc -p -e -o pipefail {0}
         env:
           GH_READ_TOKEN: ${{ github.token }}
         run: |
@@ -113,7 +118,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Recheck protected private main before frozen checkout
-        shell: bash
+        shell: /bin/bash --noprofile --norc -p -e -o pipefail {0}
         env:
           GH_READ_TOKEN: ${{ github.token }}
         run: |
@@ -167,7 +172,7 @@ jobs:
           # Never substitute a PR head or mutable target-branch SHA here.
           ref: 1a667fcd4481e3511e0cfa1008e855d96540c200
       - name: Verify exact frozen source HEAD, JDK25 and administrator-approved runtime
-        shell: bash
+        shell: /bin/bash --noprofile --norc -p -e -o pipefail {0}
         env:
           EXPECTED_SHA: '1a667fcd4481e3511e0cfa1008e855d96540c200'
           WORKFLOW_CONTROL_SHA: ${{ github.sha }}
@@ -289,7 +294,7 @@ jobs:
           wrapper_dir="$RUNNER_TEMP/oreslang-release-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
           /usr/bin/mkdir -m 700 -- "$wrapper_dir"
           wrapper="$wrapper_dir/oreslang"
-          printf '%s\n' '#!/bin/bash' 'set -euo pipefail' 'export PATH=/usr/bin:/bin:/usr/sbin:/sbin' 'hash -r' > "$wrapper"
+          printf '%s\n' '#!/bin/bash -p' 'set -euo pipefail' 'export PATH=/usr/bin:/bin:/usr/sbin:/sbin' 'hash -r' > "$wrapper"
           printf 'runtime_root=%q\n' "$runtime_root" >> "$wrapper"
           printf 'java_root=%q\n' "$java_root" >> "$wrapper"
           printf 'java_exe=%q\n' "$java_exe" >> "$wrapper"
@@ -325,7 +330,7 @@ jobs:
           printf 'ORESLANG_VERIFIED_WRAPPER=%s\n' "$wrapper" >> "$GITHUB_ENV"
           echo 'oreslang_complete_runtime_manifest_verified=true'
       - name: Compile complete frozen Oreslang source inventory
-        shell: bash
+        shell: /bin/bash --noprofile --norc -p -e -o pipefail {0}
         run: |
           set -euo pipefail
           export PATH='/usr/bin:/bin:/usr/sbin:/sbin'
@@ -348,7 +353,7 @@ jobs:
           done < "$RUNNER_TEMP/oreslang-files.txt"
 
       - name: Execute every standalone contract in frozen tree
-        shell: bash
+        shell: /bin/bash --noprofile --norc -p -e -o pipefail {0}
         run: |
           set -euo pipefail
           export PATH='/usr/bin:/bin:/usr/sbin:/sbin'
@@ -416,7 +421,7 @@ jobs:
           "$ORESLANG_VERIFIED_WRAPPER" --check src/serve_reverse.ores
           "$ORESLANG_VERIFIED_WRAPPER" --check tests/ingress_tcp_smoke.ores
       - name: Execute loopback ingress status and framing smoke
-        shell: bash
+        shell: /bin/bash --noprofile --norc -p -e -o pipefail {0}
         run: |
           set -euo pipefail
           export PATH='/usr/bin:/bin:/usr/sbin:/sbin'
@@ -464,7 +469,7 @@ jobs:
           fi
           /usr/bin/grep -Fxq 'PASS native Oreslang loopback ingress status/framing contract' "$smoke_log"
       - name: Fail closed if reverse ingress configuration vanishes
-        shell: bash
+        shell: /bin/bash --noprofile --norc -p -e -o pipefail {0}
         run: |
           set -euo pipefail
           export PATH='/usr/bin:/bin:/usr/sbin:/sbin'
