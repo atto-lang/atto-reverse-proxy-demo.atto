@@ -150,6 +150,11 @@ define module service_bindings as
     val selected = route_policy.select(rt borrow snapshot.configuration, host, path);
     if selected.is_err(); then return Err("route not found"); fi
     val route = selected.unwrap();
+    // Matching a route does not prove middleware completion. Until the
+    // supervisor provides an opaque generation-pinned receipt, fail closed.
+    if route.middleware != ""; then
+      return Err("middleware receipt required before reverse service planning");
+    fi
     if !proxy_yaml.valid_service_ref(route.upstream); then
       return Err("route is not a service binding");
     fi
