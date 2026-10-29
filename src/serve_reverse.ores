@@ -200,10 +200,10 @@ pub async routine main(): int {
       // image, service binding, authority class and snapshot generation after
       // http.claim() and before executing response logic.
       if service_bindings.local_dispatch_allowed(rt borrow actor_binding,
-          rt borrow snapshot, "hello-v1"); then
+          rt borrow snapshot, "greeting", "hello-v1"); then
         hello.dispatch(rt borrow mut exchange);
       elif service_bindings.local_dispatch_allowed(rt borrow actor_binding,
-          rt borrow snapshot, "stream-v1"); then
+          rt borrow snapshot, "streaming", "stream-v1"); then
         stream.dispatch(rt borrow mut exchange);
       elif actor_binding.target == "hello-v1" ||
         actor_binding.target == "stream-v1"; then
