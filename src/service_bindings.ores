@@ -89,6 +89,29 @@ define module service_bindings as
     }
   end
 
+  // Caller-side half of the actor dispatch fence. Binding constructors are
+  // private, so only this module can mint the descriptor. A binding is usable
+  // only in the generation that minted it and only for the exact local code
+  // image selected by the caller. The pooled actor should eventually perform
+  // the second check from a typed, actor-owned mail receipt once http.handler
+  // can carry metadata in addition to the single-use HttpExchange claim.
+  pub fnc current(borrow Binding binding,
+                  borrow generation.Snapshot snapshot): bool {
+    return binding.epoch == snapshot.epoch;
+  }
+
+  pub fnc local_dispatch_allowed(borrow Binding binding,
+                                 borrow generation.Snapshot snapshot,
+                                 String expected_target): bool {
+    return current(binding, snapshot) &&
+      binding.kind == "actor" &&
+      binding.target == expected_target &&
+      !binding.network_capable &&
+      proxy_yaml.valid_identifier(binding.name) &&
+      proxy_yaml.valid_identifier(binding.target) &&
+      proxy_yaml.valid_identifier(binding.abi);
+  }
+
   pub fnc bind(borrow generation.Snapshot snapshot, borrow Registry trusted,
                String service_name): Result<Binding, String> {
     // Snapshot epochs are minted and range-checked by generation.Coordinator.
@@ -132,6 +155,15 @@ define module service_bindings as
     fi
     val parts = route.upstream.split_literal("service://");
     if parts.size != 2; then return Err("malformed local binding"); fi
-    return bind(snapshot, trusted, parts.get(1));
+    val resolved = bind(snapshot, trusted, parts.get(1));
+    if resolved.is_err(); then return Err("local service binding unavailable"); fi
+    val binding = resolved.unwrap();
+    // Public HTTP ingress does not imply NET authority. Even a code image that
+    // is trusted for some other internal purpose must not be reachable through
+    // this route if its registry metadata grants network capability.
+    if binding.network_capable; then
+      return Err("network-capable actor image forbidden on public ingress route");
+    fi
+    return Ok(binding);
   }
 end
