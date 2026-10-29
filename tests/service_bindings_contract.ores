@@ -15,6 +15,7 @@ pub routine main(): int {
     new Array<service_bindings.CodeImage>();
   trusted_images.add(new service_bindings.CodeImage("api-v1", "abi-v1", false));
   trusted_images.add(new service_bindings.CodeImage("api-v2", "abi-v1", false));
+  trusted_images.add(new service_bindings.CodeImage("api-net", "abi-v1", true));
   val trusted_result = service_bindings.registry(trusted_images);
   if trusted_result.is_err(); then stdio.println("FAIL trusted image registry"); return 1; fi
   val trusted = trusted_result.unwrap();
@@ -36,9 +37,13 @@ pub routine main(): int {
   val old_bind = allowed.unwrap();
   if old_bind.target != "api-v1" || old_bind.epoch != 1 ||
     old_bind.abi != "abi-v1" || old_bind.network_capable ||
+    !service_bindings.local_dispatch_allowed(rt borrow old_bind,
+      rt borrow old, "api-v1") ||
+    service_bindings.local_dispatch_allowed(rt borrow old_bind,
+      rt borrow old, "api-v2") ||
     service_bindings.bind(rt borrow old, rt borrow trusted,
       "ambient-fetch").is_ok(); then
-    stdio.println("FAIL service capability binding"); return 1;
+    stdio.println("FAIL service capability binding or dispatch fence"); return 1;
   fi
   if proxy_yaml.parse(source.replace_literal("target: api-v1",
       "target: ../arbitrary-source"), "reverse").is_ok() ||
@@ -55,6 +60,20 @@ pub routine main(): int {
       "service://missing"), "reverse").is_ok(); then
     stdio.println("FAIL route with unbound actor service"); return 1;
   fi
+  // A trusted registry may contain an actor with internal NET authority, but
+  // public reverse ingress must not be able to route an HttpExchange to it.
+  val String net_source = source.replace_literal("target: api-v1",
+    "target: api-net");
+  val net_opened = generation.open(net_source, "reverse");
+  if net_opened.is_err(); then
+    stdio.println("FAIL open network-capable actor fixture"); return 1;
+  fi
+  val net_snapshot = net_opened.unwrap().snapshot().unwrap();
+  if service_bindings.reverse_route(rt borrow net_snapshot,
+      rt borrow trusted, "api.example.test", "/ok").is_ok(); then
+    stdio.println("FAIL public ingress reached network-capable actor image");
+    return 1;
+  fi
   if supervisor.prepare(source.replace_literal("target: api-v1",
       "target: api-v2")).is_err(); then
     stdio.println("FAIL stage actor version"); return 1;
@@ -64,10 +83,17 @@ pub routine main(): int {
   val updated = next.unwrap();
   val new_bind = service_bindings.bind(rt borrow updated, rt borrow trusted,
     "api-service");
-  if new_bind.is_err() || new_bind.unwrap().target != "api-v2" ||
-    new_bind.unwrap().epoch != 2 || old_bind.target != "api-v1" ||
-    old_bind.epoch != 1; then
+  if new_bind.is_err(); then
     stdio.println("FAIL generation-local service isolation"); return 1;
+  fi
+  val new_actor = new_bind.unwrap();
+  if new_actor.target != "api-v2" || new_actor.epoch != 2 ||
+    old_bind.target != "api-v1" || old_bind.epoch != 1 ||
+    service_bindings.local_dispatch_allowed(rt borrow old_bind,
+      rt borrow updated, "api-v1") ||
+    !service_bindings.local_dispatch_allowed(rt borrow new_actor,
+      rt borrow updated, "api-v2"); then
+    stdio.println("FAIL stale actor binding escaped generation fence"); return 1;
   fi
 
   let Array<service_bindings.CodeImage> duplicates =
