@@ -137,8 +137,17 @@ pub async routine main(): int {
           "Service binding unavailable");
         continue;
       fi
-      if bound.unwrap().target == "hello-v1"; then
+      val actor_binding = bound.unwrap();
+      // Re-check generation, exact code image and no-NET authority at the
+      // final supervisor-to-actor handoff. This is the caller half of the
+      // double-entry fence; the runtime still needs typed actor-owned receipt
+      // metadata so the pooled actor can independently verify the same facts.
+      if service_bindings.local_dispatch_allowed(rt borrow actor_binding,
+          rt borrow snapshot, "hello-v1"); then
         hello.dispatch(exchange);
+      elif actor_binding.target == "hello-v1"; then
+        await exchange.respond(503, "text/plain; charset=utf-8",
+          "Stale or overprivileged actor binding");
       else
         await exchange.respond(501, "text/plain; charset=utf-8",
           "Actor image not registered in this demonstration");
