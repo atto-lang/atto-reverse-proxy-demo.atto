@@ -2,12 +2,9 @@ name: Native actor ingress real-wire gate
 on:
   pull_request:
     paths:
-      - 'src/serve_reverse.ores'
-      - 'src/proxy_yaml.ores'
-      - 'src/route_policy.ores'
-      - 'src/service_bindings.ores'
-      - 'src/proxy_wire.ores'
-      - 'config/worker-example.yaml'
+      # Any transitive admission/policy change can alter actor wire behavior.
+      - 'src/**'
+      - 'config/**'
       - 'tests/actor_ingress_tcp_smoke.ores'
       - '.github/workflows/actor-ingress-wire.yml'
   workflow_dispatch:

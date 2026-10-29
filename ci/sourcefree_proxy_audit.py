@@ -221,6 +221,8 @@ def source_guards() -> None:
     check("actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09" in wire
           and "actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961" in wire,
           "real-wire workflow dependencies pinned to reviewed v5 commits")
+    check("- 'src/**'" in wire and "- 'config/**'" in wire,
+          "wire workflow covers all transitive source and configuration changes")
     wire_exec = "\n".join(
         line for line in wire.splitlines()
         if not line.lstrip().startswith("#")
@@ -238,6 +240,11 @@ def workflow_guards() -> None:
     check("APPROVED_ORESLANG_SHA256" in wf
           and "sha256sum" in wf and "EXPECTED_SHA" in wf,
           "native workflow requires exact source and approved runtime digest")
+    check('timeout 15s "$wrapper" --build-info' in wf
+          and 'timeout 15s "$wrapper" --version' in wf
+          and 'timeout 15s "$wrapper" --help' in wf
+          and 'timeout 15s "$launcher"' not in wf,
+          "each native provenance probe revalidates approved launcher digest")
     check("diff -u ci/oreslang-files.txt" in wf
           and "diff -u ci/pure-contracts.txt" in wf,
           "native workflow enforces reviewed inventories")
