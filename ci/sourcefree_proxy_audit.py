@@ -105,8 +105,9 @@ def source_guards() -> None:
           "public actor ingress rejects trusted-but-network-capable code images")
     check("pub fnc local_dispatch_allowed" in bindings
           and "binding.epoch == snapshot.epoch" in bindings
+          and 'binding.name == expected_name' in bindings
           and 'binding.target == expected_target' in bindings,
-          "actor dispatch binding is generation and exact-target fenced")
+          "actor dispatch binding is generation, service and exact-target fenced")
     serving = read("src/serve_reverse.ores")
     check("service_bindings.local_dispatch_allowed" in serving
           and 'if request.method != "GET"; then' in serving
@@ -163,6 +164,10 @@ def source_guards() -> None:
           ("gated_documents.add(gated_deny)", "kind: require_header",
            "kind: trace", "FAIL middleware-gated service route escaped admission")),
           "deny, required-header and trace actor-routing denial vectors retained")
+    check("api-alias" in actor_tests
+          and "same-image service alias escaped identity fence" in actor_tests
+          and '"api-service", "api-v1"' in actor_tests,
+          "same-image actor aliases cannot satisfy another service identity")
     tests = read("tests/network_admission_contract.ores")
     check(all(token in tests for token in
               ("middleware: denied", "kind: require_header",
@@ -212,9 +217,9 @@ def source_guards() -> None:
     check(smoke.count('network.connect_async("127.0.0.1", 8080)') >= 5
           and "FAIL unregistered actor code image must not execute" in smoke,
           "real-wire smoke is loopback-only and denies unregistered actor images")
-    check('if !headers_done || !chunked || length_header; then' in smoke
+    check('if !headers_done || !chunked || length_header || !stream_receipt; then' in smoke
           and 'FAIL streaming actor HTTP chunked headers' in smoke,
-          "native streaming fixture rejects invalid framing headers")
+          "native streaming fixture rejects invalid framing or missing receipt headers")
     check('if !first_body || !second_body || !terminal_chunk; then' in smoke
           and 'line == "0" && second_body' in smoke
           and 'FAIL streaming body order or terminating chunk' in smoke,
