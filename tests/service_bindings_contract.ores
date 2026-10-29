@@ -38,9 +38,11 @@ pub routine main(): int {
   if old_bind.target != "api-v1" || old_bind.epoch != 1 ||
     old_bind.abi != "abi-v1" || old_bind.network_capable ||
     !service_bindings.local_dispatch_allowed(rt borrow old_bind,
-      rt borrow old, "api-v1") ||
+      rt borrow old, "api-service", "api-v1") ||
     service_bindings.local_dispatch_allowed(rt borrow old_bind,
-      rt borrow old, "api-v2") ||
+      rt borrow old, "api-service", "api-v2") ||
+    service_bindings.local_dispatch_allowed(rt borrow old_bind,
+      rt borrow old, "other-service", "api-v1") ||
     service_bindings.bind(rt borrow old, rt borrow trusted,
       "ambient-fetch").is_ok(); then
     stdio.println("FAIL service capability binding or dispatch fence"); return 1;
@@ -55,6 +57,29 @@ pub routine main(): int {
       rt borrow trusted, "api.example.test", "/ok");
   if selected.is_err() || selected.unwrap().target != "api-v1"; then
     stdio.println("FAIL reverse actor service route"); return 1;
+  fi
+
+  // Two service names may intentionally point at the same code image, but
+  // service identity is part of the dispatch authority. A route to an alias
+  // must not satisfy a caller expecting api-service merely because the target
+  // image is also api-v1.
+  val String alias_source = source
+    .replace_literal("    target: api-v1\n",
+      "    target: api-v1\n  - name: api-alias\n    kind: actor\n    target: api-v1\n")
+    .replace_literal("upstream: service://api-service",
+      "upstream: service://api-alias");
+  val alias_opened = generation.open(alias_source, "reverse");
+  if alias_opened.is_err(); then
+    stdio.println("FAIL open same-image service alias fixture"); return 1;
+  fi
+  val alias_snapshot = alias_opened.unwrap().snapshot().unwrap();
+  val alias_binding = service_bindings.reverse_route(rt borrow alias_snapshot,
+    rt borrow trusted, "api.example.test", "/ok");
+  if alias_binding.is_err() ||
+    service_bindings.local_dispatch_allowed(rt borrow alias_binding.unwrap(),
+      rt borrow alias_snapshot, "api-service", "api-v1"); then
+    stdio.println("FAIL same-image service alias escaped identity fence");
+    return 1;
   fi
   // A route matcher and approved image cannot substitute for middleware
   // admission, including trace-only middleware.
@@ -116,9 +141,9 @@ pub routine main(): int {
   if new_actor.target != "api-v2" || new_actor.epoch != 2 ||
     old_bind.target != "api-v1" || old_bind.epoch != 1 ||
     service_bindings.local_dispatch_allowed(rt borrow old_bind,
-      rt borrow updated, "api-v1") ||
+      rt borrow updated, "api-service", "api-v1") ||
     !service_bindings.local_dispatch_allowed(rt borrow new_actor,
-      rt borrow updated, "api-v2"); then
+      rt borrow updated, "api-service", "api-v2"); then
     stdio.println("FAIL stale actor binding escaped generation fence"); return 1;
   fi
 
