@@ -63,7 +63,7 @@ jobs:
           # A plan/access workaround must NEVER turn private source public.
           # Verify live repository identity and privacy independent of event
           # fields, before trusting any branch-protection response.
-          repository_json="$(/usr/bin/curl --fail --silent --show-error --retry 0 \
+          repository_json="$(/usr/bin/curl -q --fail --silent --show-error --retry 0 \
             --connect-timeout 5 --max-time 15 \
             -H "Authorization: Bearer $GH_READ_TOKEN" \
             -H 'Accept: application/vnd.github+json' \
@@ -76,7 +76,7 @@ jobs:
             }
           echo 'repository_identity_private=true'
           # Read-only GET: a stale or unprotected main must fail closed.
-          branch_json="$(/usr/bin/curl --fail --silent --show-error --retry 0 \
+          branch_json="$(/usr/bin/curl -q --fail --silent --show-error --retry 0 \
             --connect-timeout 5 --max-time 15 \
             -H "Authorization: Bearer $GH_READ_TOKEN" \
             -H 'Accept: application/vnd.github+json' \
@@ -97,7 +97,7 @@ jobs:
           # must verify no repository/org ruleset grants bypass before merge and
           # before enabling the trusted runner group. Do not infer no-bypass
           # from this workflow's active-rule checks.
-          rules_json="$(/usr/bin/curl --fail --silent --show-error --retry 0 \
+          rules_json="$(/usr/bin/curl -q --fail --silent --show-error --retry 0 \
             --connect-timeout 5 --max-time 15 \
             -H "Authorization: Bearer $GH_READ_TOKEN" \
             -H 'Accept: application/vnd.github+json' \
@@ -160,7 +160,7 @@ jobs:
               repository) url='https://api.github.com/repos/ores-truffle-oreslang/oreslang-reverse-proxy-demo.ores' ;;
               branch) url='https://api.github.com/repos/ores-truffle-oreslang/oreslang-reverse-proxy-demo.ores/branches/main' ;;
             esac
-            response="$(/usr/bin/curl --fail --silent --show-error --retry 0 \
+            response="$(/usr/bin/curl -q --fail --silent --show-error --retry 0 \
               --connect-timeout 5 --max-time 15 \
               -H "Authorization: Bearer $GH_READ_TOKEN" \
               -H 'Accept: application/vnd.github+json' "$url")"
@@ -170,7 +170,7 @@ jobs:
               /usr/bin/jq -e --arg head "$GITHUB_SHA" '(.protected == true) and (.commit.sha == $head)' <<<"$response" >/dev/null
             fi
           done
-          rules_json="$(/usr/bin/curl --fail --silent --show-error --retry 0 \
+          rules_json="$(/usr/bin/curl -q --fail --silent --show-error --retry 0 \
             --connect-timeout 5 --max-time 15 \
             -H "Authorization: Bearer $GH_READ_TOKEN" \
             -H 'Accept: application/vnd.github+json' \
