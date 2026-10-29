@@ -102,9 +102,11 @@ define module service_bindings as
 
   pub fnc local_dispatch_allowed(borrow Binding binding,
                                  borrow generation.Snapshot snapshot,
+                                 String expected_name,
                                  String expected_target): bool {
     return current(binding, snapshot) &&
       binding.kind == "actor" &&
+      binding.name == expected_name &&
       binding.target == expected_target &&
       !binding.network_capable &&
       proxy_yaml.valid_identifier(binding.name) &&
