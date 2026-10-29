@@ -15,6 +15,14 @@ import module service_bindings from "./service_bindings";
 define isoactor UpstreamUnavailable as
   receive(ActorMail<String> mail): void {
     val exchange = http.claim(mail.value);
+    if !exchange.dispatch_receipt_valid(
+      "UpstreamUnavailable", "upstream-unavailable",
+      "proxy-local-no-net", 1); then
+      await exchange.respond(503, "text/plain; charset=utf-8",
+        "Invalid actor dispatch receipt");
+      return;
+    fi
+    exchange.set_header("X-Oreslang-Dispatch-Receipt", "verified");
     await exchange.respond(501, "text/plain; charset=utf-8",
       "Upstream forwarding unavailable in this runtime");
     return;
@@ -26,6 +34,13 @@ end
 define isoactor HelloV1 as
   receive(ActorMail<String> mail): void {
     val exchange = http.claim(mail.value);
+    if !exchange.dispatch_receipt_valid(
+      "HelloV1", "greeting", "proxy-local-no-net", 1); then
+      await exchange.respond(503, "text/plain; charset=utf-8",
+        "Invalid actor dispatch receipt");
+      return;
+    fi
+    exchange.set_header("X-Oreslang-Dispatch-Receipt", "verified");
     await exchange.respond(200, "text/plain; charset=utf-8",
       "hello from native Oreslang actor service");
     return;
@@ -37,6 +52,13 @@ end
 define isoactor StreamV1 as
   receive(ActorMail<String> mail): void {
     val exchange = http.claim(mail.value);
+    if !exchange.dispatch_receipt_valid(
+      "StreamV1", "streaming", "proxy-local-no-net", 1); then
+      await exchange.respond(503, "text/plain; charset=utf-8",
+        "Invalid actor dispatch receipt");
+      return;
+    fi
+    exchange.set_header("X-Oreslang-Dispatch-Receipt", "verified");
     await exchange.start(200, "text/plain; charset=utf-8");
     await exchange.write("stage-one\n");
     await exchange.write("stage-two\n");
@@ -93,9 +115,18 @@ pub async routine main(): int {
 
   // Exactly 100 maximum lazily created reusable actors across three pools.
   // This is separate from transport admission and the carrier-thread budget.
-  val unavailable = http.handler("UpstreamUnavailable").pooled(25);
-  val hello = http.handler("HelloV1").pooled(50);
-  val stream = http.handler("StreamV1").pooled(25);
+  val unavailable_handler = http.handler("UpstreamUnavailable");
+  val unavailable_scoped = unavailable_handler.scoped(
+    "upstream-unavailable", "proxy-local-no-net", snapshot.epoch);
+  val unavailable = unavailable_scoped.pooled(25);
+  val hello_handler = http.handler("HelloV1");
+  val hello_scoped = hello_handler.scoped(
+    "greeting", "proxy-local-no-net", snapshot.epoch);
+  val hello = hello_scoped.pooled(50);
+  val stream_handler = http.handler("StreamV1");
+  val stream_scoped = stream_handler.scoped(
+    "streaming", "proxy-local-no-net", snapshot.epoch);
+  val stream = stream_scoped.pooled(25);
   val server = http.listen("127.0.0.1", 8080, 1024, 65536, 30000);
   stdio.println("EXPERIMENTAL loopback actor ingress; HTTP upstream forwarding returns 501");
   loop {
@@ -164,9 +195,10 @@ pub async routine main(): int {
         continue;
       fi
       val actor_binding = bound.unwrap();
-      // Final caller-side dispatch fence: the actor image must be local-only,
-      // exact-target and from this immutable generation. The remaining runtime
-      // gap is the matching actor-owned receipt check after http.claim().
+      // Caller-side half of the double-entry fence. The scoped handler mints
+      // the matching actor-owned receipt; HelloV1/StreamV1 revalidate exact
+      // image, service binding, authority class and snapshot generation after
+      // http.claim() and before executing response logic.
       if service_bindings.local_dispatch_allowed(rt borrow actor_binding,
           rt borrow snapshot, "hello-v1"); then
         hello.dispatch(rt borrow mut exchange);
