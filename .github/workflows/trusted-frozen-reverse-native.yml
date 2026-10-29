@@ -26,6 +26,12 @@ env:
   JDK_JAVA_OPTIONS: ''
   _JAVA_OPTIONS: ''
   CLASSPATH: ''
+  # Node-based checkout/actions must not inherit arbitrary --require hooks,
+  # module paths, extra trust anchors or disabled TLS verification from runner.
+  NODE_OPTIONS: ''
+  NODE_PATH: ''
+  NODE_EXTRA_CA_CERTS: ''
+  NODE_TLS_REJECT_UNAUTHORIZED: '1'
   GIT_CONFIG_COUNT: '0'
   GIT_CONFIG_PARAMETERS: ''
   GIT_CONFIG_GLOBAL: /dev/null
