@@ -6,9 +6,21 @@ pub async routine main(): int {
   await actor.write_text_async(
     "GET /actor HTTP/1.1\r\nHost: worker.example.test\r\nConnection: close\r\n\r\n");
   val response = await actor.read_line_async();
+  let bool actor_receipt = false;
+  for (let i = 0; i < 32; i++) {
+    val header = await actor.read_line_async();
+    if header.is_none(); then break; fi
+    val String line = header.unwrap().trim();
+    if line == ""; then break; fi
+    if line == "X-Oreslang-Dispatch-Receipt: verified" ||
+      line == "x-oreslang-dispatch-receipt: verified"; then
+      actor_receipt = true;
+    fi
+  }
   await actor.close_async();
-  if response.is_none() || !response.unwrap().starts_with("HTTP/1.1 200"); then
-    stdio.println("FAIL local actor service should return 200");
+  if response.is_none() || !response.unwrap().starts_with("HTTP/1.1 200") ||
+    !actor_receipt; then
+    stdio.println("FAIL local actor service should return verified 200");
     return 1;
   fi
 
@@ -72,6 +84,7 @@ pub async routine main(): int {
   let bool headers_done = false;
   let bool chunked = false;
   let bool length_header = false;
+  let bool stream_receipt = false;
   for (let i = 0; i < 32; i++) {
     val header = await streaming.read_line_async();
     if header.is_none(); then break; fi
@@ -85,8 +98,12 @@ pub async routine main(): int {
       line.starts_with("content-length:"); then
       length_header = true;
     fi
+    if line == "X-Oreslang-Dispatch-Receipt: verified" ||
+      line == "x-oreslang-dispatch-receipt: verified"; then
+      stream_receipt = true;
+    fi
   }
-  if !headers_done || !chunked || length_header; then
+  if !headers_done || !chunked || length_header || !stream_receipt; then
     await streaming.close_async();
     stdio.println("FAIL streaming actor HTTP chunked headers");
     return 1;
