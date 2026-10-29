@@ -1,3 +1,5 @@
+# Explicit direct-HTTPS transport and root-managed system CA trust on every
+# privileged GitHub API read: never inherit proxy/CA overrides from the runner.
 # Native compiler and contract gate. No runtime source checkout or cross-org mirror.
 # A trusted, isolated runner carrying the 'oreslang-jdk25' label must have an
 # administrator-approved root-owned Oreslang runtime tree. Missing or mutable runtime is a failure.
@@ -64,6 +66,8 @@ jobs:
           # Verify live repository identity and privacy independent of event
           # fields, before trusting any branch-protection response.
           repository_json="$(/usr/bin/curl -q --fail --silent --show-error --retry 0 \
+            --proto '=https' --noproxy '*' --proxy '' \
+            --cacert /etc/ssl/certs/ca-certificates.crt --capath /etc/ssl/certs \
             --connect-timeout 5 --max-time 15 \
             -H "Authorization: Bearer $GH_READ_TOKEN" \
             -H 'Accept: application/vnd.github+json' \
@@ -77,6 +81,8 @@ jobs:
           echo 'repository_identity_private=true'
           # Read-only GET: a stale or unprotected main must fail closed.
           branch_json="$(/usr/bin/curl -q --fail --silent --show-error --retry 0 \
+            --proto '=https' --noproxy '*' --proxy '' \
+            --cacert /etc/ssl/certs/ca-certificates.crt --capath /etc/ssl/certs \
             --connect-timeout 5 --max-time 15 \
             -H "Authorization: Bearer $GH_READ_TOKEN" \
             -H 'Accept: application/vnd.github+json' \
@@ -98,6 +104,8 @@ jobs:
           # before enabling the trusted runner group. Do not infer no-bypass
           # from this workflow's active-rule checks.
           rules_json="$(/usr/bin/curl -q --fail --silent --show-error --retry 0 \
+            --proto '=https' --noproxy '*' --proxy '' \
+            --cacert /etc/ssl/certs/ca-certificates.crt --capath /etc/ssl/certs \
             --connect-timeout 5 --max-time 15 \
             -H "Authorization: Bearer $GH_READ_TOKEN" \
             -H 'Accept: application/vnd.github+json' \
@@ -161,6 +169,8 @@ jobs:
               branch) url='https://api.github.com/repos/ores-truffle-oreslang/oreslang-reverse-proxy-demo.ores/branches/main' ;;
             esac
             response="$(/usr/bin/curl -q --fail --silent --show-error --retry 0 \
+              --proto '=https' --noproxy '*' --proxy '' \
+              --cacert /etc/ssl/certs/ca-certificates.crt --capath /etc/ssl/certs \
               --connect-timeout 5 --max-time 15 \
               -H "Authorization: Bearer $GH_READ_TOKEN" \
               -H 'Accept: application/vnd.github+json' "$url")"
@@ -171,6 +181,8 @@ jobs:
             fi
           done
           rules_json="$(/usr/bin/curl -q --fail --silent --show-error --retry 0 \
+            --proto '=https' --noproxy '*' --proxy '' \
+            --cacert /etc/ssl/certs/ca-certificates.crt --capath /etc/ssl/certs \
             --connect-timeout 5 --max-time 15 \
             -H "Authorization: Bearer $GH_READ_TOKEN" \
             -H 'Accept: application/vnd.github+json' \
