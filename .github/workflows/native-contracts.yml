@@ -69,16 +69,6 @@ jobs:
           printf 'oreslang_path=%s\noreslang_sha256=%s\n' "$launcher" "$actual_sha"
           test "$actual_sha" = "${APPROVED_ORESLANG_SHA256,,}" || { echo 'unapproved Oreslang launcher' >&2; exit 1; }
           echo 'oreslang_approved_digest=true'
-          if timeout 15s "$launcher" --build-info; then
-            echo 'oreslang_probe=--build-info'
-          elif timeout 15s "$launcher" --version; then
-            echo 'oreslang_probe=--version'
-          elif timeout 15s "$launcher" --help; then
-            echo 'oreslang_probe=--help'
-          else
-            echo 'bounded Oreslang launcher probes failed' >&2
-            exit 1
-          fi
           # Every later invocation rechecks the approved binary; PATH is not authority.
           test -n "${RUNNER_TEMP:-}" && test -n "${GITHUB_RUN_ID:-}" && test -n "${GITHUB_RUN_ATTEMPT:-}"
           wrapper_dir="${RUNNER_TEMP}/oreslang-verified-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
@@ -93,6 +83,16 @@ jobs:
             'test "$actual_sha" = "$expected_sha" || { echo "approved Oreslang launcher changed" >&2; exit 1; }' \
             'exec "$launcher" "$@"' >> "$wrapper"
           chmod 700 "$wrapper"
+          if timeout 15s "$wrapper" --build-info; then
+            echo 'oreslang_probe=--build-info'
+          elif timeout 15s "$wrapper" --version; then
+            echo 'oreslang_probe=--version'
+          elif timeout 15s "$wrapper" --help; then
+            echo 'oreslang_probe=--help'
+          else
+            echo 'bounded Oreslang launcher probes failed' >&2
+            exit 1
+          fi
       - name: Fail closed on missing or unreviewed Oreslang files
         shell: bash
         run: |
