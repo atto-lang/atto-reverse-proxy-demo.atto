@@ -162,11 +162,6 @@ jobs:
           persist-credentials: false
           # Never substitute a PR head or mutable target-branch SHA here.
           ref: 1a667fcd4481e3511e0cfa1008e855d96540c200
-      - name: Set up JDK 25
-        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
-        with:
-          distribution: temurin
-          java-version: '25'
       - name: Verify exact frozen source HEAD, JDK25 and administrator-approved runtime
         shell: bash
         env:
@@ -192,17 +187,20 @@ jobs:
           test "${RUNNER_OS:-}" = Linux
           test "${RUNNER_ARCH:-}" = X64
           test "$(uname -m)" = x86_64
-          java -version
-          spec="$(java -XshowSettings:properties -version 2>&1 | sed -nE 's/^[[:space:]]*java\.specification\.version[[:space:]]*=[[:space:]]*([^[:space:]]+).*$/\1/p' | head -n 1)"
-          test "$spec" = 25 || { echo "JDK 25 required, found ${spec:-missing}" >&2; exit 1; }
           # Execute only an administrator-staged, root-owned runtime tree.
           # Never extract the trusted runtime as the runner account: a runner-
           # owned extraction can be chmod'ed or replaced after verification.
           runtime_root='/opt/oreslang-approved/oreslang-runtime'
+          java_root="$runtime_root/jdk"
+          java_exe="$java_root/bin/java"
           launcher="$runtime_root/bin/oreslang"
           test "$(id -u)" != 0 || { echo 'native runner must not execute as root' >&2; exit 1; }
           test -d "$runtime_root" || { echo 'approved runtime tree missing' >&2; exit 1; }
           test -f "$launcher" && test -x "$launcher" || { echo 'approved runtime missing executable bin/oreslang' >&2; exit 1; }
+          test -d "$java_root" && test -f "$java_exe" && test -x "$java_exe" || {
+            echo 'approved runtime must embed executable jdk/bin/java' >&2
+            exit 1
+          }
           # find -xdev omits nested mounts, including file-level bind mounts.
           # /proc/self/mountinfo sees every mount in this process namespace.
           test -r /proc/self/mountinfo && test -x /usr/bin/awk || { echo 'mount verifier unavailable' >&2; exit 1; }
@@ -217,7 +215,7 @@ jobs:
           # Every ancestor and every runtime object must be root-owned and
           # immutable to the non-root runner account. Links and special files
           # are rejected so path resolution cannot escape the approved tree.
-          for pinned_path in /opt /opt/oreslang-approved "$runtime_root" "$launcher"; do
+          for pinned_path in /opt /opt/oreslang-approved "$runtime_root" "$java_root" "$java_exe" "$launcher"; do
             test ! -L "$pinned_path" || { echo 'runtime staging path is a symlink' >&2; exit 1; }
             test "$(stat -c %u -- "$pinned_path")" = 0 || {
               echo 'runtime staging path must be root-owned' >&2; exit 1;
@@ -260,6 +258,10 @@ jobs:
             exit 1
           }
           echo 'oreslang_root_owned_runtime_manifest_verified=true'
+          "$java_exe" -version
+          spec="$("$java_exe" -XshowSettings:properties -version 2>&1 | sed -nE 's/^[[:space:]]*java\.specification\.version[[:space:]]*=[[:space:]]*([^[:space:]]+).*$/\1/p' | head -n 1)"
+          test "$spec" = 25 || { echo "approved embedded JDK 25 required, found ${spec:-missing}" >&2; exit 1; }
+          echo 'oreslang_embedded_jdk25_verified=true'
           # The private per-run wrapper rechecks root ownership, permissions,
           # object types and the complete manifest before every invocation.
           test -n "${RUNNER_TEMP:-}" && test -n "${GITHUB_RUN_ID:-}" && test -n "${GITHUB_RUN_ATTEMPT:-}" && test -n "${GITHUB_ENV:-}"
@@ -269,11 +271,14 @@ jobs:
           wrapper="$wrapper_dir/oreslang"
           printf '%s\n' '#!/bin/bash' 'set -euo pipefail' > "$wrapper"
           printf 'runtime_root=%q\n' "$runtime_root" >> "$wrapper"
+          printf 'java_root=%q\n' "$java_root" >> "$wrapper"
+          printf 'java_exe=%q\n' "$java_exe" >> "$wrapper"
           printf 'expected_manifest_sha=%q\n' "$approved_manifest_sha" >> "$wrapper"
           printf 'launcher=%q\n' "$launcher" >> "$wrapper"
           printf '%s\n' \
             'test "$(id -u)" != 0 || exit 1' \
             'test -d "$runtime_root" && test -f "$launcher" && test -x "$launcher" || exit 1' \
+            'test -d "$java_root" && test -f "$java_exe" && test -x "$java_exe" || exit 1' \
             'test -r /proc/self/mountinfo && test -x /usr/bin/awk || exit 1' \
             'mount_report="$(/usr/bin/awk -v root="$runtime_root" -v prefix="$runtime_root/" "\$5==root || index(\$5,prefix)==1 {print \$5; exit}" /proc/self/mountinfo)" || { echo "failed to read approved runtime mount table" >&2; exit 1; }' \
             'test -z "$mount_report" || { echo "approved Oreslang runtime is a mount or contains nested mount" >&2; exit 1; }' \
@@ -285,6 +290,10 @@ jobs:
             'test -z "$bad_owner" || exit 1' \
             'actual_manifest_sha="$(cd "$runtime_root" && /usr/bin/find . -xdev -type f -print0 | LC_ALL=C /usr/bin/sort -z | /usr/bin/xargs -0 -r /usr/bin/sha256sum | /usr/bin/sha256sum | /usr/bin/cut -d " " -f 1)"' \
             'test "$actual_manifest_sha" = "$expected_manifest_sha" || { echo "approved Oreslang runtime file set changed" >&2; exit 1; }' \
+            'export JAVA_HOME="$java_root"' \
+            'export PATH="$java_root/bin:/usr/bin:/bin"' \
+            'spec="$("$java_exe" -XshowSettings:properties -version 2>&1 | /usr/bin/sed -nE "s/^[[:space:]]*java\\.specification\\.version[[:space:]]*=[[:space:]]*([^[:space:]]+).*$/\\1/p" | /usr/bin/head -n 1)"' \
+            'test "$spec" = 25 || { echo "approved embedded JDK changed or is not JDK25" >&2; exit 1; }' \
             'exec /usr/bin/timeout --signal=TERM --kill-after=2s 120s "$launcher" "$@"' >> "$wrapper"
           chmod 700 "$wrapper"
           timeout 15s "$wrapper" --version || timeout 15s "$wrapper" --build-info || timeout 15s "$wrapper" --help
