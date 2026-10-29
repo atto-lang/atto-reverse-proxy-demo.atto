@@ -237,6 +237,20 @@ jobs:
           test -z "$bad_owner" || {
             echo 'approved runtime tree must be entirely root-owned and non-writable by group/other' >&2; exit 1;
           }
+          # Root ownership does not rule out privileged executable metadata.
+          # Reject setuid/setgid bits and Linux file capabilities before
+          # launching any Oreslang or bundled JDK executable.
+          suid_sgid_report="$(find "$runtime_root" -xdev -perm /6000 -print -quit)" || {
+            echo 'runtime SUID/SGID scan failed' >&2
+            exit 1
+          }
+          test -z "$suid_sgid_report" || { echo 'runtime has setuid/setgid entries' >&2; exit 1; }
+          test -x /usr/sbin/getcap || { echo 'Linux file-capability verifier unavailable' >&2; exit 1; }
+          capability_report="$(/usr/sbin/getcap -r "$runtime_root" 2>&1)" || {
+            echo 'runtime file-capability scan failed' >&2
+            exit 1
+          }
+          test -z "$capability_report" || { echo 'runtime has file capabilities or unreadable entries' >&2; exit 1; }
           file_count="$(find "$runtime_root" -xdev -type f -print | wc -l | tr -d '[:space:]')"
           test "$file_count" -gt 0 || { echo 'approved runtime tree is empty' >&2; exit 1; }
           [[ "${APPROVED_ORESLANG_RUNTIME_MANIFEST_SHA256:-}" =~ ^[0-9a-fA-F]{64}$ ]] || {
@@ -288,6 +302,11 @@ jobs:
             'test -z "$bad_special" || exit 1' \
             'bad_owner="$(/usr/bin/find "$runtime_root" -xdev \( ! -uid 0 -o -perm /022 \) -print -quit)" || exit 1' \
             'test -z "$bad_owner" || exit 1' \
+            'privileged_modes="$(/usr/bin/find "$runtime_root" -xdev -perm /6000 -print -quit)" || exit 1' \
+            'test -z "$privileged_modes" || { echo "approved runtime contains setuid/setgid entries" >&2; exit 1; }' \
+            'test -x /usr/sbin/getcap || exit 1' \
+            'capability_report="$(/usr/sbin/getcap -r "$runtime_root" 2>&1)" || exit 1' \
+            'test -z "$capability_report" || { echo "approved runtime has file capabilities or unreadable entries" >&2; exit 1; }' \
             'actual_manifest_sha="$(cd "$runtime_root" && /usr/bin/find . -xdev -type f -print0 | LC_ALL=C /usr/bin/sort -z | /usr/bin/xargs -0 -r /usr/bin/sha256sum | /usr/bin/sha256sum | /usr/bin/cut -d " " -f 1)"' \
             'test "$actual_manifest_sha" = "$expected_manifest_sha" || { echo "approved Oreslang runtime file set changed" >&2; exit 1; }' \
             'export JAVA_HOME="$java_root"' \
