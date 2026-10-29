@@ -12,6 +12,30 @@ pub async routine main(): int {
     return 1;
   fi
 
+  // Actor services are deliberately GET-only until http.handler can carry
+  // actor-owned request metadata and prove bodyless HEAD semantics after claim.
+  val actor_head = await network.connect_async("127.0.0.1", 8080);
+  await actor_head.write_text_async(
+    "HEAD /actor HTTP/1.1\r\nHost: worker.example.test\r\nConnection: close\r\n\r\n");
+  val actor_head_status = await actor_head.read_line_async();
+  await actor_head.close_async();
+  if actor_head_status.is_none() ||
+    !actor_head_status.unwrap().starts_with("HTTP/1.1 405"); then
+    stdio.println("FAIL HEAD reached local actor service");
+    return 1;
+  fi
+
+  val stream_head = await network.connect_async("127.0.0.1", 8080);
+  await stream_head.write_text_async(
+    "HEAD /stream HTTP/1.1\r\nHost: worker.example.test\r\nConnection: close\r\n\r\n");
+  val stream_head_status = await stream_head.read_line_async();
+  await stream_head.close_async();
+  if stream_head_status.is_none() ||
+    !stream_head_status.unwrap().starts_with("HTTP/1.1 405"); then
+    stdio.println("FAIL HEAD reached streaming actor service");
+    return 1;
+  fi
+
   val origin = await network.connect_async("127.0.0.1", 8080);
   await origin.write_text_async(
     "GET /api HTTP/1.1\r\nHost: worker.example.test\r\nx-demo-token: present\r\nConnection: close\r\n\r\n");
