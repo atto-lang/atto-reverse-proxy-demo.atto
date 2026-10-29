@@ -296,7 +296,7 @@ jobs:
           printf 'expected_manifest_sha=%q\n' "$approved_manifest_sha" >> "$wrapper"
           printf 'launcher=%q\n' "$launcher" >> "$wrapper"
           printf '%s\n' \
-            'test "$(id -u)" != 0 || exit 1' \
+            'test "$(/usr/bin/id -u)" != 0 || exit 1' \
             'test -d "$runtime_root" && test -f "$launcher" && test -x "$launcher" || exit 1' \
             'test -d "$java_root" && test -f "$java_exe" && test -x "$java_exe" || exit 1' \
             'test -r /proc/self/mountinfo && test -x /usr/bin/awk || exit 1' \
