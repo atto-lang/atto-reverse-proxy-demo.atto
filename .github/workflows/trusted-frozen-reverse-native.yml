@@ -24,19 +24,21 @@ jobs:
           GH_READ_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          export PATH='/usr/bin:/bin:/usr/sbin:/sbin'
+          hash -r
           test "$GITHUB_REPOSITORY" = 'ores-truffle-oreslang/oreslang-reverse-proxy-demo.ores'
           test "$GITHUB_REF" = 'refs/heads/main'
           test -n "${GH_READ_TOKEN:-}"
-          command -v jq >/dev/null
+          test -x /usr/bin/jq
           # A plan/access workaround must NEVER turn private source public.
           # Verify live repository identity and privacy independent of event
           # fields, before trusting any branch-protection response.
-          repository_json="$(curl --fail --silent --show-error --retry 0 \
+          repository_json="$(/usr/bin/curl --fail --silent --show-error --retry 0 \
             --connect-timeout 5 --max-time 15 \
             -H "Authorization: Bearer $GH_READ_TOKEN" \
             -H 'Accept: application/vnd.github+json' \
             'https://api.github.com/repos/ores-truffle-oreslang/oreslang-reverse-proxy-demo.ores')"
-          jq -e \
+          /usr/bin/jq -e \
             '(.id == 1429954649) and (.full_name == "ores-truffle-oreslang/oreslang-reverse-proxy-demo.ores") and (.private == true) and (.visibility == "private") and (.default_branch == "main") and (.archived == false)' \
             <<<"$repository_json" >/dev/null || {
               echo 'unexpected repository identity, privacy or default branch' >&2
@@ -44,12 +46,12 @@ jobs:
             }
           echo 'repository_identity_private=true'
           # Read-only GET: a stale or unprotected main must fail closed.
-          branch_json="$(curl --fail --silent --show-error --retry 0 \
+          branch_json="$(/usr/bin/curl --fail --silent --show-error --retry 0 \
             --connect-timeout 5 --max-time 15 \
             -H "Authorization: Bearer $GH_READ_TOKEN" \
             -H 'Accept: application/vnd.github+json' \
             'https://api.github.com/repos/ores-truffle-oreslang/oreslang-reverse-proxy-demo.ores/branches/main')"
-          jq -e --arg sha "$GITHUB_SHA" \
+          /usr/bin/jq -e --arg sha "$GITHUB_SHA" \
             '(.protected == true) and (.commit.sha == $sha)' \
             <<<"$branch_json" >/dev/null || {
               echo 'default main protection or workflow-control SHA mismatch' >&2
@@ -65,12 +67,12 @@ jobs:
           # must verify no repository/org ruleset grants bypass before merge and
           # before enabling the trusted runner group. Do not infer no-bypass
           # from this workflow's active-rule checks.
-          rules_json="$(curl --fail --silent --show-error --retry 0 \
+          rules_json="$(/usr/bin/curl --fail --silent --show-error --retry 0 \
             --connect-timeout 5 --max-time 15 \
             -H "Authorization: Bearer $GH_READ_TOKEN" \
             -H 'Accept: application/vnd.github+json' \
             'https://api.github.com/repos/ores-truffle-oreslang/oreslang-reverse-proxy-demo.ores/rules/branches/main?per_page=100')"
-          jq -e '
+          /usr/bin/jq -e '
             any(.[];
               .type == "pull_request" and
               (.parameters.required_approving_review_count >= 1) and
@@ -82,11 +84,11 @@ jobs:
             echo 'main lacks required independent-review/stale-review/conversation rules' >&2
             exit 1
           }
-          jq -e 'any(.[]; .type == "non_fast_forward")' <<<"$rules_json" >/dev/null || {
+          /usr/bin/jq -e 'any(.[]; .type == "non_fast_forward")' <<<"$rules_json" >/dev/null || {
             echo 'main does not block force pushes' >&2
             exit 1
           }
-          jq -e 'any(.[]; .type == "deletion")' <<<"$rules_json" >/dev/null || {
+          /usr/bin/jq -e 'any(.[]; .type == "deletion")' <<<"$rules_json" >/dev/null || {
             echo 'main does not restrict deletion' >&2
             exit 1
           }
@@ -116,32 +118,34 @@ jobs:
           GH_READ_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          export PATH='/usr/bin:/bin:/usr/sbin:/sbin'
+          hash -r
           test "$GITHUB_REPOSITORY" = 'ores-truffle-oreslang/oreslang-reverse-proxy-demo.ores'
           test "$GITHUB_REPOSITORY_ID" = '1429954649'
           test "$GITHUB_REF" = 'refs/heads/main'
           test -n "${GH_READ_TOKEN:-}"
-          command -v jq >/dev/null
+          test -x /usr/bin/jq
           for endpoint in repository branch; do
             case "$endpoint" in
               repository) url='https://api.github.com/repos/ores-truffle-oreslang/oreslang-reverse-proxy-demo.ores' ;;
               branch) url='https://api.github.com/repos/ores-truffle-oreslang/oreslang-reverse-proxy-demo.ores/branches/main' ;;
             esac
-            response="$(curl --fail --silent --show-error --retry 0 \
+            response="$(/usr/bin/curl --fail --silent --show-error --retry 0 \
               --connect-timeout 5 --max-time 15 \
               -H "Authorization: Bearer $GH_READ_TOKEN" \
               -H 'Accept: application/vnd.github+json' "$url")"
             if [[ "$endpoint" == repository ]]; then
-              jq -e '(.id == 1429954649) and (.private == true) and (.visibility == "private") and (.default_branch == "main") and (.archived == false)' <<<"$response" >/dev/null
+              /usr/bin/jq -e '(.id == 1429954649) and (.private == true) and (.visibility == "private") and (.default_branch == "main") and (.archived == false)' <<<"$response" >/dev/null
             else
-              jq -e --arg head "$GITHUB_SHA" '(.protected == true) and (.commit.sha == $head)' <<<"$response" >/dev/null
+              /usr/bin/jq -e --arg head "$GITHUB_SHA" '(.protected == true) and (.commit.sha == $head)' <<<"$response" >/dev/null
             fi
           done
-          rules_json="$(curl --fail --silent --show-error --retry 0 \
+          rules_json="$(/usr/bin/curl --fail --silent --show-error --retry 0 \
             --connect-timeout 5 --max-time 15 \
             -H "Authorization: Bearer $GH_READ_TOKEN" \
             -H 'Accept: application/vnd.github+json' \
             'https://api.github.com/repos/ores-truffle-oreslang/oreslang-reverse-proxy-demo.ores/rules/branches/main?per_page=100')"
-          jq -e '
+          /usr/bin/jq -e '
             any(.[];
               .type == "pull_request" and
               (.parameters.required_approving_review_count >= 1) and
@@ -175,18 +179,20 @@ jobs:
           APPROVED_ORESLANG_RUNTIME_MANIFEST_SHA256: ${{ vars.ORESLANG_APPROVED_RUNTIME_MANIFEST_SHA256 }}
         run: |
           set -euo pipefail
+          export PATH='/usr/bin:/bin:/usr/sbin:/sbin'
+          hash -r
           test "$EVENT_REPOSITORY_ID" = "$EXPECTED_REPOSITORY_ID"
           test "$GITHUB_REF" = 'refs/heads/main' || { echo 'untrusted control-plane ref' >&2; exit 1; }
           test "$WORKFLOW_REF_PROTECTED" = true || { echo 'default main is not protected' >&2; exit 1; }
           test "$EXPECTED_SHA" = "$EXPECTED_FROZEN_BASE_SHA" || { echo 'checkout not pinned to frozen release SHA' >&2; exit 1; }
-          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
-          actual_tree="$(git rev-parse 'HEAD^{tree}')"
+          test "$(/usr/bin/git rev-parse HEAD)" = "$EXPECTED_SHA"
+          actual_tree="$(/usr/bin/git rev-parse 'HEAD^{tree}')"
           test "$actual_tree" = "$EXPECTED_FROZEN_TREE_SHA" || { echo 'frozen source tree mismatch' >&2; exit 1; }
           printf 'source_head=%s\nsource_tree=%s\nworkflow_control_sha=%s\nref_protected=%s\nrun_id=%s\nrun_attempt=%s\n' \
             "$EXPECTED_SHA" "$actual_tree" "$WORKFLOW_CONTROL_SHA" "$WORKFLOW_REF_PROTECTED" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT"
           test "${RUNNER_OS:-}" = Linux
           test "${RUNNER_ARCH:-}" = X64
-          test "$(uname -m)" = x86_64
+          test "$(/usr/bin/uname -m)" = x86_64
           # Execute only an administrator-staged, root-owned runtime tree.
           # Never extract the trusted runtime as the runner account: a runner-
           # owned extraction can be chmod'ed or replaced after verification.
@@ -194,7 +200,7 @@ jobs:
           java_root="$runtime_root/jdk"
           java_exe="$java_root/bin/java"
           launcher="$runtime_root/bin/oreslang"
-          test "$(id -u)" != 0 || { echo 'native runner must not execute as root' >&2; exit 1; }
+          test "$(/usr/bin/id -u)" != 0 || { echo 'native runner must not execute as root' >&2; exit 1; }
           test -d "$runtime_root" || { echo 'approved runtime tree missing' >&2; exit 1; }
           test -f "$launcher" && test -x "$launcher" || { echo 'approved runtime missing executable bin/oreslang' >&2; exit 1; }
           test -d "$java_root" && test -f "$java_exe" && test -x "$java_exe" || {
@@ -217,30 +223,30 @@ jobs:
           # are rejected so path resolution cannot escape the approved tree.
           for pinned_path in /opt /opt/oreslang-approved "$runtime_root" "$java_root" "$java_exe" "$launcher"; do
             test ! -L "$pinned_path" || { echo 'runtime staging path is a symlink' >&2; exit 1; }
-            test "$(stat -c %u -- "$pinned_path")" = 0 || {
+            test "$(/usr/bin/stat -c %u -- "$pinned_path")" = 0 || {
               echo 'runtime staging path must be root-owned' >&2; exit 1;
             }
-            pinned_mode="$(stat -c %a -- "$pinned_path")"
+            pinned_mode="$(/usr/bin/stat -c %a -- "$pinned_path")"
             (( (8#$pinned_mode & 022) == 0 )) || {
               echo 'runtime staging path must not be group/world writable' >&2; exit 1;
             }
           done
-          bad_symlink="$(find "$runtime_root" -xdev -type l -print -quit)" || { echo 'runtime symlink scan failed' >&2; exit 1; }
+          bad_symlink="$(/usr/bin/find "$runtime_root" -xdev -type l -print -quit)" || { echo 'runtime symlink scan failed' >&2; exit 1; }
           test -z "$bad_symlink" || {
             echo 'approved runtime tree must not contain symlinks' >&2; exit 1;
           }
-          bad_special="$(find "$runtime_root" -xdev ! -type d ! -type f -print -quit)" || { echo 'runtime object-type scan failed' >&2; exit 1; }
+          bad_special="$(/usr/bin/find "$runtime_root" -xdev ! -type d ! -type f -print -quit)" || { echo 'runtime object-type scan failed' >&2; exit 1; }
           test -z "$bad_special" || {
             echo 'approved runtime tree contains special files' >&2; exit 1;
           }
-          bad_owner="$(find "$runtime_root" -xdev \( ! -uid 0 -o -perm /022 \) -print -quit)" || { echo 'runtime ownership scan failed' >&2; exit 1; }
+          bad_owner="$(/usr/bin/find "$runtime_root" -xdev \( ! -uid 0 -o -perm /022 \) -print -quit)" || { echo 'runtime ownership scan failed' >&2; exit 1; }
           test -z "$bad_owner" || {
             echo 'approved runtime tree must be entirely root-owned and non-writable by group/other' >&2; exit 1;
           }
           # Root ownership does not rule out privileged executable metadata.
           # Reject setuid/setgid bits and Linux file capabilities before
           # launching any Oreslang or bundled JDK executable.
-          suid_sgid_report="$(find "$runtime_root" -xdev -perm /6000 -print -quit)" || {
+          suid_sgid_report="$(/usr/bin/find "$runtime_root" -xdev -perm /6000 -print -quit)" || {
             echo 'runtime SUID/SGID scan failed' >&2
             exit 1
           }
@@ -251,7 +257,7 @@ jobs:
             exit 1
           }
           test -z "$capability_report" || { echo 'runtime has file capabilities or unreadable entries' >&2; exit 1; }
-          file_count="$(find "$runtime_root" -xdev -type f -print | wc -l | tr -d '[:space:]')"
+          file_count="$(/usr/bin/find "$runtime_root" -xdev -type f -print | /usr/bin/wc -l | /usr/bin/tr -d '[:space:]')"
           test "$file_count" -gt 0 || { echo 'approved runtime tree is empty' >&2; exit 1; }
           [[ "${APPROVED_ORESLANG_RUNTIME_MANIFEST_SHA256:-}" =~ ^[0-9a-fA-F]{64}$ ]] || {
             echo 'Missing/invalid administrator-approved Oreslang runtime manifest SHA-256' >&2
@@ -260,10 +266,10 @@ jobs:
           approved_manifest_sha="${APPROVED_ORESLANG_RUNTIME_MANIFEST_SHA256,,}"
           runtime_manifest_sha="$(
             cd "$runtime_root"
-            find . -xdev -type f -print0 |
-              LC_ALL=C sort -z |
-              xargs -0 -r sha256sum |
-              sha256sum | cut -d ' ' -f 1
+            /usr/bin/find . -xdev -type f -print0 |
+              LC_ALL=C /usr/bin/sort -z |
+              /usr/bin/xargs -0 -r /usr/bin/sha256sum |
+              /usr/bin/sha256sum | /usr/bin/cut -d ' ' -f 1
           )"
           printf 'oreslang_runtime_root=%s\noreslang_runtime_file_count=%s\noreslang_runtime_manifest_sha256=%s\n' \
             "$runtime_root" "$file_count" "$runtime_manifest_sha"
@@ -273,7 +279,7 @@ jobs:
           }
           echo 'oreslang_root_owned_runtime_manifest_verified=true'
           "$java_exe" -version
-          spec="$("$java_exe" -XshowSettings:properties -version 2>&1 | sed -nE 's/^[[:space:]]*java\.specification\.version[[:space:]]*=[[:space:]]*([^[:space:]]+).*$/\1/p' | head -n 1)"
+          spec="$("$java_exe" -XshowSettings:properties -version 2>&1 | /usr/bin/sed -nE 's/^[[:space:]]*java\.specification\.version[[:space:]]*=[[:space:]]*([^[:space:]]+).*$/\1/p' | /usr/bin/head -n 1)"
           test "$spec" = 25 || { echo "approved embedded JDK 25 required, found ${spec:-missing}" >&2; exit 1; }
           echo 'oreslang_embedded_jdk25_verified=true'
           # The private per-run wrapper rechecks root ownership, permissions,
@@ -281,9 +287,9 @@ jobs:
           test -n "${RUNNER_TEMP:-}" && test -n "${GITHUB_RUN_ID:-}" && test -n "${GITHUB_RUN_ATTEMPT:-}" && test -n "${GITHUB_ENV:-}"
           umask 077
           wrapper_dir="$RUNNER_TEMP/oreslang-release-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
-          mkdir -m 700 -- "$wrapper_dir"
+          /usr/bin/mkdir -m 700 -- "$wrapper_dir"
           wrapper="$wrapper_dir/oreslang"
-          printf '%s\n' '#!/bin/bash' 'set -euo pipefail' > "$wrapper"
+          printf '%s\n' '#!/bin/bash' 'set -euo pipefail' 'export PATH=/usr/bin:/bin:/usr/sbin:/sbin' 'hash -r' > "$wrapper"
           printf 'runtime_root=%q\n' "$runtime_root" >> "$wrapper"
           printf 'java_root=%q\n' "$java_root" >> "$wrapper"
           printf 'java_exe=%q\n' "$java_exe" >> "$wrapper"
@@ -314,26 +320,28 @@ jobs:
             'spec="$("$java_exe" -XshowSettings:properties -version 2>&1 | /usr/bin/sed -nE "s/^[[:space:]]*java\\.specification\\.version[[:space:]]*=[[:space:]]*([^[:space:]]+).*$/\\1/p" | /usr/bin/head -n 1)"' \
             'test "$spec" = 25 || { echo "approved embedded JDK changed or is not JDK25" >&2; exit 1; }' \
             'exec /usr/bin/timeout --signal=TERM --kill-after=2s 120s "$launcher" "$@"' >> "$wrapper"
-          chmod 700 "$wrapper"
-          timeout 15s "$wrapper" --version || timeout 15s "$wrapper" --build-info || timeout 15s "$wrapper" --help
+          /usr/bin/chmod 700 "$wrapper"
+          /usr/bin/timeout 15s "$wrapper" --version || /usr/bin/timeout 15s "$wrapper" --build-info || /usr/bin/timeout 15s "$wrapper" --help
           printf 'ORESLANG_VERIFIED_WRAPPER=%s\n' "$wrapper" >> "$GITHUB_ENV"
           echo 'oreslang_complete_runtime_manifest_verified=true'
       - name: Compile complete frozen Oreslang source inventory
         shell: bash
         run: |
           set -euo pipefail
+          export PATH='/usr/bin:/bin:/usr/sbin:/sbin'
+          hash -r
           wrapper="$ORESLANG_VERIFIED_WRAPPER"
           test -x "$wrapper"
-          test "$(git rev-parse 'HEAD^{tree}')" = '5937599df00b6122dccaf22bcdebdaf836f6d3ee'
-          source_symlink="$(find src tests -type l -name '*.ores' -print -quit)" || {
+          test "$(/usr/bin/git rev-parse 'HEAD^{tree}')" = '5937599df00b6122dccaf22bcdebdaf836f6d3ee'
+          source_symlink="$(/usr/bin/find src tests -type l -name '*.ores' -print -quit)" || {
             echo 'frozen source symlink scan failed' >&2
             exit 1
           }
           test -z "$source_symlink" || { echo 'frozen source contains symlinked .ores file' >&2; exit 1; }
-          find src tests -type f -name '*.ores' -print | LC_ALL=C sort > "$RUNNER_TEMP/oreslang-files.txt"
-          source_count="$(wc -l < "$RUNNER_TEMP/oreslang-files.txt" | tr -d '[:space:]')"
+          /usr/bin/find src tests -type f -name '*.ores' -print | LC_ALL=C /usr/bin/sort > "$RUNNER_TEMP/oreslang-files.txt"
+          source_count="$(/usr/bin/wc -l < "$RUNNER_TEMP/oreslang-files.txt" | /usr/bin/tr -d '[:space:]')"
           test "$source_count" = 28 || { echo "expected 28 reviewed Oreslang files, found $source_count" >&2; exit 1; }
-          sha256sum "$RUNNER_TEMP/oreslang-files.txt"
+          /usr/bin/sha256sum "$RUNNER_TEMP/oreslang-files.txt"
           while IFS= read -r file; do
             test -n "$file" || continue
             "$wrapper" --check "$file"
@@ -343,11 +351,13 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          export PATH='/usr/bin:/bin:/usr/sbin:/sbin'
+          hash -r
           wrapper="$ORESLANG_VERIFIED_WRAPPER"
-          find tests -maxdepth 1 -type f -name '*_contract.ores' -print | LC_ALL=C sort > "$RUNNER_TEMP/pure-contracts.txt"
-          contract_count="$(wc -l < "$RUNNER_TEMP/pure-contracts.txt" | tr -d '[:space:]')"
+          /usr/bin/find tests -maxdepth 1 -type f -name '*_contract.ores' -print | LC_ALL=C /usr/bin/sort > "$RUNNER_TEMP/pure-contracts.txt"
+          contract_count="$(/usr/bin/wc -l < "$RUNNER_TEMP/pure-contracts.txt" | /usr/bin/tr -d '[:space:]')"
           test "$contract_count" = 13 || { echo "expected 13 standalone contracts, found $contract_count" >&2; exit 1; }
-          sha256sum "$RUNNER_TEMP/pure-contracts.txt"
+          /usr/bin/sha256sum "$RUNNER_TEMP/pure-contracts.txt"
           while IFS= read -r file; do
             test -n "$file" || continue
             "$wrapper" "$file"
@@ -409,7 +419,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cfg="$(realpath config/example.yaml)"
+          export PATH='/usr/bin:/bin:/usr/sbin:/sbin'
+          hash -r
+          cfg="$(/usr/bin/realpath config/example.yaml)"
           server_log="$RUNNER_TEMP/reverse-ingress-server.log"
           smoke_log="$RUNNER_TEMP/reverse-ingress-smoke.log"
           server_pid=""
@@ -421,7 +433,7 @@ jobs:
           }
           trap cleanup EXIT
 
-          ores_proxy_conf_yaml="$cfg" timeout --signal=TERM --kill-after=2s 45s "$ORESLANG_VERIFIED_WRAPPER" --no-prompt \
+          ores_proxy_conf_yaml="$cfg" /usr/bin/timeout --signal=TERM --kill-after=2s 45s "$ORESLANG_VERIFIED_WRAPPER" --no-prompt \
             --allow-read="$cfg" \
             --allow-env=ores_proxy_conf_yaml \
             --allow-net=127.0.0.1:8080 \
@@ -435,7 +447,7 @@ jobs:
               echo "reverse ingress exited before readiness" >&2
               exit 1
             fi
-            if timeout --signal=TERM --kill-after=2s 5s "$ORESLANG_VERIFIED_WRAPPER" --no-prompt \
+            if /usr/bin/timeout --signal=TERM --kill-after=2s 5s "$ORESLANG_VERIFIED_WRAPPER" --no-prompt \
                 --allow-net=127.0.0.1:8080 \
                 tests/ingress_tcp_smoke.ores >"$smoke_log" 2>&1; then
               passed=1
@@ -450,22 +462,24 @@ jobs:
             echo "reverse ingress smoke did not pass" >&2
             exit 1
           fi
-          grep -Fxq 'PASS native Oreslang loopback ingress status/framing contract' "$smoke_log"
+          /usr/bin/grep -Fxq 'PASS native Oreslang loopback ingress status/framing contract' "$smoke_log"
       - name: Fail closed if reverse ingress configuration vanishes
         shell: bash
         run: |
           set -euo pipefail
+          export PATH='/usr/bin:/bin:/usr/sbin:/sbin'
+          hash -r
           missing="$RUNNER_TEMP/ores-proxy-missing-config.yaml"
-          rm -f "$missing"
+          /usr/bin/rm -f "$missing"
           set +e
-          ores_proxy_conf_yaml="$missing" timeout --signal=TERM --kill-after=2s 15s "$ORESLANG_VERIFIED_WRAPPER" --no-prompt \
+          ores_proxy_conf_yaml="$missing" /usr/bin/timeout --signal=TERM --kill-after=2s 15s "$ORESLANG_VERIFIED_WRAPPER" --no-prompt \
             --allow-read="$missing" \
             --allow-env=ores_proxy_conf_yaml \
             src/serve_reverse.ores >"$RUNNER_TEMP/missing-config.log" 2>&1
           status=$?
           set -e
           test "$status" = 74
-          grep -Fq 'ERROR: configuration admission failed' "$RUNNER_TEMP/missing-config.log"
+          /usr/bin/grep -Fq 'ERROR: configuration admission failed' "$RUNNER_TEMP/missing-config.log"
       - name: Execute complete Oreslang safety contracts
         run: |
           "$ORESLANG_VERIFIED_WRAPPER" tests/security_admission_contract.ores
