@@ -11,6 +11,25 @@ defaults:
     shell: /bin/bash --noprofile --norc -p -e -o pipefail {0}
 permissions:
   contents: read
+# Neutralize inherited dynamic-loader, JVM and Git configuration hooks before
+# the FIRST hosted/native shell or checkout action. Bash -p alone does not
+# suppress LD_PRELOAD, LD_LIBRARY_PATH or JAVA_TOOL_OPTIONS.
+env:
+  LD_PRELOAD: ''
+  LD_LIBRARY_PATH: ''
+  LD_AUDIT: ''
+  LD_DEBUG: ''
+  LD_ORIGIN_PATH: ''
+  BASH_ENV: ''
+  ENV: ''
+  JAVA_TOOL_OPTIONS: ''
+  JDK_JAVA_OPTIONS: ''
+  _JAVA_OPTIONS: ''
+  CLASSPATH: ''
+  GIT_CONFIG_COUNT: '0'
+  GIT_CONFIG_PARAMETERS: ''
+  GIT_CONFIG_GLOBAL: /dev/null
+  GIT_CONFIG_SYSTEM: /dev/null
 jobs:
   protected-main-preflight:
     # Hosted-only, source-free: do not allocate a trusted self-hosted runner
