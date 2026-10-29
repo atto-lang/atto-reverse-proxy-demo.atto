@@ -106,8 +106,10 @@ def source_guards() -> None:
     check("pub fnc local_dispatch_allowed" in bindings
           and "binding.epoch == snapshot.epoch" in bindings
           and 'binding.name == expected_name' in bindings
-          and 'binding.target == expected_target' in bindings,
-          "actor dispatch binding is generation, service and exact-target fenced")
+          and 'binding.target == expected_target' in bindings
+           and 'binding.abi == expected_abi' in bindings
+           and '"api-service", "api-v1", "abi-v2"' in read("tests/service_bindings_contract.ores"),
+          "actor dispatch binding is generation, service, exact-target and ABI fenced")
     serving = read("src/serve_reverse.ores")
     check("service_bindings.local_dispatch_allowed" in serving
           and 'if request.method != "GET"; then' in serving
