@@ -112,11 +112,27 @@ def source_guards() -> None:
           and 'if request.method != "GET"; then' in serving
           and "Stale or overprivileged actor binding" in serving,
           "canonical GET-only HttpExchange handoff rechecks actor dispatch fence")
+    check('.scoped(' in serving
+          and 'dispatch_receipt_valid(' in serving
+          and '"proxy-local-no-net"' in serving
+          and 'snapshot.epoch' in serving,
+          "live actor handoff uses scoped generation-pinned runtime receipts")
+    worker = read("config/worker-example.yaml")
+    actor_route = section(worker, "  - name: workers", "  - name: streaming-route")
+    stream_route = section(worker, "  - name: streaming-route", "  - name: unregistered-route")
+    unavailable_route = section(worker, "  - name: unregistered-route", "  - name: origin")
+    check(all("middleware:" not in route for route in
+              (actor_route, stream_route, unavailable_route)),
+          "actor service routes remain middleware-free until opaque receipts exist")
     actor_wire = read("tests/actor_ingress_tcp_smoke.ores")
     check('HEAD /actor HTTP/1.1' in actor_wire
           and 'HEAD /stream HTTP/1.1' in actor_wire
           and 'starts_with("HTTP/1.1 405")' in actor_wire,
           "wire acceptance retains HEAD refusal before actor dispatch")
+    check("X-Oreslang-Dispatch-Receipt: verified" in actor_wire
+          and "stream_receipt" in actor_wire
+          and "actor_receipt" in actor_wire,
+          "real-wire candidate requires actor-local receipt proof headers")
     headers = read("src/header_policy.ores")
     check('!admission_text.control_free' not in headers
           and "return admission_text.control_free(value)" in headers,
