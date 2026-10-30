@@ -92,6 +92,13 @@ while IFS= read -r -d '' path; do
   esac
   if (( ! allowed )) && [[ -f "$path" ]]; then
     IFS= read -r firstline < "$path" || true
+    # GNU env -S expands ${NAME} using the execution environment before
+    # resolving its interpreter. A variable can name Python without any
+    # literal python token appearing in the tracked shebang; fail closed.
+    if [[ "$firstline" == '#!'* && "$firstline" == *'${'* ]]; then
+      printf 'POLICY_FAILURE: variable-expanded shebang is not permitted: %s\n' "$path" >&2
+      exit 2
+    fi
     # env -S accepts quoted and concatenated interpreter tokens. Normalize
     # their shell-like quoting before testing, or 'python3' evades the guard.
     # Python ABI/debug variants (python3.7m, python3.11-dbg) also execute
