@@ -127,4 +127,15 @@ rm "$test_repo/src"
 mv "$test_repo/src-original" "$test_repo/src"
 rm -rf "$external_dir"
 check_ok
-printf 'SOURCE_POLICY_NEGATIVE_TESTS_PASS scenarios=15\n'
+# A staged Python interpreter cannot be hidden by a benign worktree file.
+printf 'safe\n' > "$test_repo/src/disguised.txt"
+git -C "$test_repo" add src/disguised.txt
+check_ok
+forged_blob="$(printf '#!/usr/bin/env python3\nprint(1)\n' | git -C "$test_repo" hash-object -w --stdin)"
+git -C "$test_repo" update-index --cacheinfo "100644,$forged_blob,src/disguised.txt"
+check_bad
+git -C "$test_repo" add src/disguised.txt
+check_ok
+git -C "$test_repo" rm -q -f -- src/disguised.txt
+check_ok
+printf 'SOURCE_POLICY_NEGATIVE_TESTS_PASS scenarios=16\n'
