@@ -206,6 +206,10 @@ jobs:
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           persist-credentials: false
+          # Global Git config is intentionally pinned to /dev/null. Checkout's
+          # default safe.directory=true writes via git config --global and
+          # fails for a non-root runner; require runner-owned workspace instead.
+          set-safe-directory: false
           # Never substitute a PR head or mutable target-branch SHA here.
           ref: 1a667fcd4481e3511e0cfa1008e855d96540c200
       - name: Verify exact frozen source HEAD, JDK25 and administrator-approved runtime
