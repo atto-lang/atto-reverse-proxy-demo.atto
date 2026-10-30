@@ -87,7 +87,12 @@ while IFS= read -r -d '' path; do
   esac
   if (( ! allowed )) && [[ -f "$path" ]]; then
     IFS= read -r firstline < "$path" || true
-    if [[ "$firstline" =~ ^\#!.*(^|[/[:space:]])(python|pypy)([0-9.]*)?([[:space:]]|$) ]]; then
+    # env -S accepts quoted and concatenated interpreter tokens. Normalize
+    # their shell-like quoting before testing, or 'python3' evades the guard.
+    normalized_shebang="${firstline//\"/}"
+    normalized_shebang="${normalized_shebang//\'/}"
+    normalized_shebang="${normalized_shebang//\\/}"
+    if [[ "$normalized_shebang" =~ ^\#!.*(^|[/[:space:]])(python|pypy)([0-9.]*)?([[:space:]]|$) ]]; then
       printf 'POLICY_FAILURE: Python interpreter shebang: %s\n' "$path" >&2
       exit 2
     fi
