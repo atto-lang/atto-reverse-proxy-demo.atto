@@ -390,9 +390,11 @@ jobs:
             'untracked_bytes="$("${source_git[@]}" ls-files --others -z -- | /usr/bin/wc -c)"' \
             'test "$untracked_bytes" -eq 0 || { echo "untracked or ignored source introduced" >&2; exit 1; }' \
             'tracked_manifest="$(/usr/bin/mktemp "$RUNNER_TEMP/oreslang-frozen-XXXXXXXX")"' \
+            'checkout_root="$(/usr/bin/realpath -e -- "$GITHUB_WORKSPACE")"' \
             '"${source_git[@]}" ls-files -z -- > "$tracked_manifest"' \
             'while IFS= read -r -d "" tracked_file; do' \
             '  test -f "$tracked_file" && test ! -L "$tracked_file" || exit 1' \
+            '  test "$(/usr/bin/realpath -e -- "$tracked_file")" = "$checkout_root/$tracked_file" || { echo "frozen tracked file escapes checkout through parent symlink" >&2; exit 1; }' \
             '  "${source_git[@]}" show "HEAD:$tracked_file" | /usr/bin/cmp -s -- "$tracked_file" - || { echo "frozen source bytes changed" >&2; exit 1; }' \
             'done < "$tracked_manifest"' \
             '/usr/bin/rm -f -- "$tracked_manifest"' \
