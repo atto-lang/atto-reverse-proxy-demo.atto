@@ -10,7 +10,16 @@ if [[ -n "${EXPECTED_DEMO_SHA:-}" ]]; then
   [[ "${EXPECTED_DEMO_SHA}" =~ ^[a-f0-9]{40}$ ]] || { echo "POLICY_FAILURE: invalid expected head" >&2; exit 2; }
   [[ "$(git rev-parse HEAD)" == "$EXPECTED_DEMO_SHA" ]] || { echo "POLICY_FAILURE: mismatched head" >&2; exit 2; }
 fi
-if [[ -f SOURCE_REF ]]; then
+if [[ -e SOURCE_REF || -L SOURCE_REF ]]; then
+  [[ -f SOURCE_REF && ! -L SOURCE_REF ]] || {
+    echo "POLICY_FAILURE: SOURCE_REF must be a regular, non-symlinked file" >&2; exit 2;
+  }
+  git ls-files --error-unmatch -- SOURCE_REF >/dev/null 2>&1 || {
+    echo "POLICY_FAILURE: SOURCE_REF must be tracked" >&2; exit 2;
+  }
+  [[ "$(git ls-files --stage -- SOURCE_REF)" == "100644 "* ]] || {
+    echo "POLICY_FAILURE: SOURCE_REF must be a tracked regular blob" >&2; exit 2;
+  }
   [[ "$(wc -l < SOURCE_REF)" -eq 1 ]] && grep -Eq '^[a-f0-9]{40}$' SOURCE_REF && [[ "$(wc -c < SOURCE_REF)" -eq 41 ]] || {
     echo "POLICY_FAILURE: SOURCE_REF requires exactly 40 lowercase hex characters and newline" >&2; exit 2;
   }
@@ -22,10 +31,8 @@ while IFS= read -r -d '' path; do
   count=$((count+1))
   (( count <= 50000 )) || { echo "POLICY_FAILURE: file budget" >&2; exit 2; }
   if [[ -L "$path" ]]; then
-    case "${path,,}" in
-      *.ores|*.py|*.pyi|*.ipynb)
-        echo "POLICY_FAILURE: symlinked source: $path" >&2; exit 2 ;;
-    esac
+    echo "POLICY_FAILURE: tracked symlink: $path" >&2
+    exit 2
   fi
   allowed=0
   if [[ "$mode" == rest-legacy ]]; then

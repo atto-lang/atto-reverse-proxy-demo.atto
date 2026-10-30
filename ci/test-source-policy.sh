@@ -53,4 +53,27 @@ check_ok rest-legacy
 printf 'new\n' > "$test_repo/scripts/new_tool.py"
 git -C "$test_repo" add .
 check_bad rest-legacy
-printf 'SOURCE_POLICY_NEGATIVE_TESTS_PASS scenarios=8\n'
+# Reset the earlier negative fixtures before testing valid-source baselines.
+git -C "$test_repo" rm -q -f -- scripts/new_tool.py scripts/benchmark.py
+check_ok
+# A valid-looking but untracked SOURCE_REF cannot establish provenance.
+git -C "$test_repo" rm -q --cached -- SOURCE_REF
+check_bad
+git -C "$test_repo" add SOURCE_REF
+check_ok
+# Optional SOURCE_REF cannot be replaced by a tracked symlink, even if its target is valid.
+mv "$test_repo/SOURCE_REF" "$test_repo/saved_ref"
+ln -s saved_ref "$test_repo/SOURCE_REF"
+git -C "$test_repo" add -A
+check_bad
+rm "$test_repo/SOURCE_REF"
+mv "$test_repo/saved_ref" "$test_repo/SOURCE_REF"
+git -C "$test_repo" add -A
+check_ok
+# Symlinks are rejected regardless of file extension.
+ln -s hello.ores "$test_repo/src/alias.txt"
+git -C "$test_repo" add .
+check_bad
+git -C "$test_repo" rm -q -f -- src/alias.txt
+check_ok
+printf 'SOURCE_POLICY_NEGATIVE_TESTS_PASS scenarios=10\n'
