@@ -394,8 +394,11 @@ jobs:
           # source files before allowing compiler execution.
           source_git=(/usr/bin/env -u GIT_DIR -u GIT_WORK_TREE -u GIT_COMMON_DIR -u GIT_INDEX_FILE -u GIT_OBJECT_DIRECTORY -u GIT_ALTERNATE_OBJECT_DIRECTORIES -u GIT_NAMESPACE -u GIT_SHALLOW_FILE -u GIT_CEILING_DIRECTORIES -u GIT_DISCOVERY_ACROSS_FILESYSTEM -u GIT_GRAFT_FILE -u GIT_REPLACE_REF_BASE -u GIT_EXEC_PATH -u GIT_CONFIG
             /usr/bin/git -c core.fsmonitor=false --no-replace-objects --git-dir="$GITHUB_WORKSPACE/.git" --work-tree="$GITHUB_WORKSPACE")
-          "${source_git[@]}" diff --no-ext-diff --quiet HEAD -- src tests || {
-            echo 'frozen Oreslang working files differ from committed source' >&2
+          # Scope to the ENTIRE tracked tree: removing a tracked config/workflow
+          # file from both index and worktree evades a src/tests-only diff and
+          # the subsequent index-derived per-blob comparison.
+          "${source_git[@]}" diff --no-ext-diff --quiet HEAD -- || {
+            echo 'frozen tracked worktree differs from committed source' >&2
             exit 1
           }
           # --exclude-standard would hide ignored injected .ores files. Reject
