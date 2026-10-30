@@ -25,6 +25,13 @@ jobs:
           java-version: '25'
       - name: Confirm native compiler availability
         run: command -v oreslang
+      - name: Fail on native contract inventory drift
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -z "$(find src tests -type l -print -quit)"
+          test "$(find src -maxdepth 1 -type f -name '*.ores' | wc -l)" -eq 13
+          test "$(find tests -maxdepth 1 -type f -name '*.ores' | wc -l)" -eq 11
       - name: Compiler-check all native proxy sources
         shell: bash
         run: |
