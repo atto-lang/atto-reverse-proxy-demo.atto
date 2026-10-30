@@ -116,8 +116,18 @@ printf 'corrupt-index\n' > "$test_repo/.git/index"
 check_bad
 mv "$test_repo/index-backup" "$test_repo/.git/index"
 check_ok
-# The staged blob must match the audited worktree. A benign checkout can
-# otherwise conceal a Python interpreter payload staged under a .txt name.
+# A symlinked parent to identical external bytes bypassed leaf -L checks.
+external_dir="$test_repo.external"
+mkdir -p "$external_dir"
+cp "$test_repo/src/hello.ores" "$external_dir/hello.ores"
+mv "$test_repo/src" "$test_repo/src-original"
+ln -s "$external_dir" "$test_repo/src"
+check_bad
+rm "$test_repo/src"
+mv "$test_repo/src-original" "$test_repo/src"
+rm -rf "$external_dir"
+check_ok
+# A staged Python interpreter cannot be hidden by a benign worktree file.
 printf 'safe\n' > "$test_repo/src/disguised.txt"
 git -C "$test_repo" add src/disguised.txt
 check_ok
@@ -128,4 +138,4 @@ git -C "$test_repo" add src/disguised.txt
 check_ok
 git -C "$test_repo" rm -q -f -- src/disguised.txt
 check_ok
-printf 'SOURCE_POLICY_NEGATIVE_TESTS_PASS scenarios=15\n'
+printf 'SOURCE_POLICY_NEGATIVE_TESTS_PASS scenarios=16\n'
