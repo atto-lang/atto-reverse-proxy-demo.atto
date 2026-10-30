@@ -99,6 +99,14 @@ while IFS= read -r -d '' path; do
       printf 'POLICY_FAILURE: variable-expanded shebang is not permitted: %s\n' "$path" >&2
       exit 2
     fi
+    # GNU env -S treats \_ as a word separator. Erasing its backslash
+    # leaves _python3, which bypasses a literal interpreter regex even though
+    # Linux executes python3. Reject escape separators rather than guessing
+    # whether they are active inside quotes.
+    if [[ "$firstline" == '#!'* && "$firstline" == *'\_'* ]]; then
+      printf 'POLICY_FAILURE: escaped shebang separator is not permitted: %s\n' "$path" >&2
+      exit 2
+    fi
     # env -S accepts quoted and concatenated interpreter tokens. Normalize
     # their shell-like quoting before testing, or 'python3' evades the guard.
     # Python ABI/debug variants (python3.7m, python3.11-dbg) also execute
