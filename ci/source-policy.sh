@@ -94,10 +94,12 @@ while IFS= read -r -d '' path; do
     IFS= read -r firstline < "$path" || true
     # env -S accepts quoted and concatenated interpreter tokens. Normalize
     # their shell-like quoting before testing, or 'python3' evades the guard.
+    # Python ABI/debug variants (python3.7m, python3.11-dbg) also execute
+    # Python; reject any version/ABI suffix, not just digits and dots.
     normalized_shebang="${firstline//\"/}"
     normalized_shebang="${normalized_shebang//\'/}"
     normalized_shebang="${normalized_shebang//\\/}"
-    if [[ "$normalized_shebang" =~ ^\#!.*(^|[/[:space:]])(python|pypy)([0-9.]*)?([[:space:]]|$) ]]; then
+    if [[ "$normalized_shebang" =~ ^\#!.*(^|[/[:space:]])(python|pypy)[[:alnum:]_.+-]*([[:space:]]|$) ]]; then
       printf 'POLICY_FAILURE: Python interpreter shebang: %s\n' "$path" >&2
       exit 2
     fi
