@@ -80,13 +80,13 @@ check_ok
 rm "$test_repo/SOURCE_REF"
 check_bad
 printf 'a%.0s' {1..40} > "$test_repo/SOURCE_REF"
-printf '\\n' >> "$test_repo/SOURCE_REF"
+printf '\n' >> "$test_repo/SOURCE_REF"
 git -C "$test_repo" add SOURCE_REF
 check_ok
 # A different tracked source deleted only from the working tree must also fail.
 rm "$test_repo/src/hello.ores"
 check_bad
-printf '00_abc\\n' > "$test_repo/src/hello.ores"
+printf '00_abc\n' > "$test_repo/src/hello.ores"
 git -C "$test_repo" add src/hello.ores
 check_ok
-printf 'SOURCE_POLICY_NEGATIVE_TESTS_PASS scenarios=12\\n'
+printf 'SOURCE_POLICY_NEGATIVE_TESTS_PASS scenarios=12\n'
