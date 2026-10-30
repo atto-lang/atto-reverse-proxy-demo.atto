@@ -34,6 +34,19 @@ printf '#!/usr/bin/env python3\n' > "$test_repo/runner"
 git -C "$test_repo" add .
 check_bad
 git -C "$test_repo" rm -q -f -- runner
+# GNU env -S strips quotes and concatenates quoted interpreter fragments.
+# All of these execute Python on Linux, despite the original shebang regex.
+for interpreter in "'python3'" '"python3"' "'py''thon3'"; do
+  printf '#!/usr/bin/env -S %s\n' "$interpreter" > "$test_repo/quoted-interpreter"
+  git -C "$test_repo" add quoted-interpreter
+  check_bad
+  git -C "$test_repo" rm -q -f -- quoted-interpreter
+done
+# The stricter guard must not reject unrelated interpreters.
+printf '#!/usr/bin/env node\n' > "$test_repo/node-interpreter"
+git -C "$test_repo" add node-interpreter
+check_ok
+git -C "$test_repo" rm -q -f -- node-interpreter
 ln -s hello.ores "$test_repo/src/alias.ores"
 git -C "$test_repo" add .
 check_bad
