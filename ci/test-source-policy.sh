@@ -42,6 +42,18 @@ for interpreter in "'python3'" '"python3"' "'py''thon3'"; do
   check_bad
   git -C "$test_repo" rm -q -f -- quoted-interpreter
 done
+# Python executable ABI/debug variants bypassed the previous digits-and-dots
+# regex, despite being valid executable names for Python interpreters.
+for interpreter in python3.7m python3.11-dbg python3.11d; do
+  printf '#!/usr/bin/env -S %s\n' "$interpreter" > "$test_repo/abi-interpreter"
+  git -C "$test_repo" add abi-interpreter
+  check_bad
+  git -C "$test_repo" rm -q -f -- abi-interpreter
+done
+printf '#!/usr/bin/python3.7m\n' > "$test_repo/direct-abi-interpreter"
+git -C "$test_repo" add direct-abi-interpreter
+check_bad
+git -C "$test_repo" rm -q -f -- direct-abi-interpreter
 # The stricter guard must not reject unrelated interpreters.
 printf '#!/usr/bin/env node\n' > "$test_repo/node-interpreter"
 git -C "$test_repo" add node-interpreter
@@ -138,4 +150,4 @@ git -C "$test_repo" add src/disguised.txt
 check_ok
 git -C "$test_repo" rm -q -f -- src/disguised.txt
 check_ok
-printf 'SOURCE_POLICY_NEGATIVE_TESTS_PASS scenarios=16\n'
+printf 'SOURCE_POLICY_NEGATIVE_TESTS_PASS scenarios=20\n'
