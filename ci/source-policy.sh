@@ -10,7 +10,7 @@ if [[ -n "${EXPECTED_DEMO_SHA:-}" ]]; then
   [[ "${EXPECTED_DEMO_SHA}" =~ ^[a-f0-9]{40}$ ]] || { echo "POLICY_FAILURE: invalid expected head" >&2; exit 2; }
   [[ "$(git rev-parse HEAD)" == "$EXPECTED_DEMO_SHA" ]] || { echo "POLICY_FAILURE: mismatched head" >&2; exit 2; }
 fi
-if [[ -e SOURCE_REF || -L SOURCE_REF ]]; then
+if [[ -e SOURCE_REF || -L SOURCE_REF ]] || git ls-files --error-unmatch -- SOURCE_REF >/dev/null 2>&1; then
   [[ -f SOURCE_REF && ! -L SOURCE_REF ]] || {
     echo "POLICY_FAILURE: SOURCE_REF must be a regular, non-symlinked file" >&2; exit 2;
   }
@@ -30,8 +30,8 @@ count=0
 while IFS= read -r -d '' path; do
   count=$((count+1))
   (( count <= 50000 )) || { echo "POLICY_FAILURE: file budget" >&2; exit 2; }
-  if [[ -L "$path" ]]; then
-    echo "POLICY_FAILURE: tracked symlink: $path" >&2
+  if [[ ! -f "$path" || -L "$path" ]]; then
+    echo "POLICY_FAILURE: tracked file missing, linked, or not regular: $path" >&2
     exit 2
   fi
   allowed=0
