@@ -89,4 +89,18 @@ check_bad
 printf '00_abc\n' > "$test_repo/src/hello.ores"
 git -C "$test_repo" add src/hello.ores
 check_ok
-printf 'SOURCE_POLICY_NEGATIVE_TESTS_PASS scenarios=12\n'
+# An inherited empty index must not hide a tracked forbidden source. This
+# reproduces the prior zero-file policy bypass when SOURCE_REF is optional.
+git -C "$test_repo" rm -q -f -- SOURCE_REF
+printf 'print(1)\n' > "$test_repo/src/hidden.py"
+git -C "$test_repo" add src/hidden.py
+GIT_INDEX_FILE="$test_repo/.git/nonexistent-index" check_bad
+git -C "$test_repo" rm -q -f -- src/hidden.py
+check_ok
+# A corrupted real index must fail instead of being masked by process substitution.
+cp "$test_repo/.git/index" "$test_repo/index-backup"
+printf 'corrupt-index\n' > "$test_repo/.git/index"
+check_bad
+mv "$test_repo/index-backup" "$test_repo/.git/index"
+check_ok
+printf 'SOURCE_POLICY_NEGATIVE_TESTS_PASS scenarios=14\n'
