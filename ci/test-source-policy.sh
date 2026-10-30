@@ -34,6 +34,19 @@ printf '#!/usr/bin/env python3\n' > "$test_repo/runner"
 git -C "$test_repo" add .
 check_bad
 git -C "$test_repo" rm -q -f -- runner
+# GNU env -S strips quotes and concatenates quoted interpreter fragments.
+# All of these execute Python on Linux, despite the original shebang regex.
+for interpreter in "'python3'" '"python3"' "'py''thon3'"; do
+  printf '#!/usr/bin/env -S %s\n' "$interpreter" > "$test_repo/quoted-interpreter"
+  git -C "$test_repo" add quoted-interpreter
+  check_bad
+  git -C "$test_repo" rm -q -f -- quoted-interpreter
+done
+# The stricter guard must not reject unrelated interpreters.
+printf '#!/usr/bin/env node\n' > "$test_repo/node-interpreter"
+git -C "$test_repo" add node-interpreter
+check_ok
+git -C "$test_repo" rm -q -f -- node-interpreter
 ln -s hello.ores "$test_repo/src/alias.ores"
 git -C "$test_repo" add .
 check_bad
@@ -53,4 +66,76 @@ check_ok rest-legacy
 printf 'new\n' > "$test_repo/scripts/new_tool.py"
 git -C "$test_repo" add .
 check_bad rest-legacy
-printf 'SOURCE_POLICY_NEGATIVE_TESTS_PASS scenarios=8\n'
+# Reset the earlier negative fixtures before testing valid-source baselines.
+git -C "$test_repo" rm -q -f -- scripts/new_tool.py scripts/benchmark.py
+check_ok
+# A valid-looking but untracked SOURCE_REF cannot establish provenance.
+git -C "$test_repo" rm -q --cached -- SOURCE_REF
+check_bad
+git -C "$test_repo" add SOURCE_REF
+check_ok
+# Optional SOURCE_REF cannot be replaced by a tracked symlink, even if its target is valid.
+mv "$test_repo/SOURCE_REF" "$test_repo/saved_ref"
+ln -s saved_ref "$test_repo/SOURCE_REF"
+git -C "$test_repo" add -A
+check_bad
+rm "$test_repo/SOURCE_REF"
+mv "$test_repo/saved_ref" "$test_repo/SOURCE_REF"
+git -C "$test_repo" add -A
+check_ok
+# Symlinks are rejected regardless of file extension.
+ln -s hello.ores "$test_repo/src/alias.txt"
+git -C "$test_repo" add .
+check_bad
+git -C "$test_repo" rm -q -f -- src/alias.txt
+check_ok
+# A tracked SOURCE_REF deleted only from the working tree must fail closed.
+rm "$test_repo/SOURCE_REF"
+check_bad
+printf 'a%.0s' {1..40} > "$test_repo/SOURCE_REF"
+printf '\n' >> "$test_repo/SOURCE_REF"
+git -C "$test_repo" add SOURCE_REF
+check_ok
+# A different tracked source deleted only from the working tree must also fail.
+rm "$test_repo/src/hello.ores"
+check_bad
+printf '00_abc\n' > "$test_repo/src/hello.ores"
+git -C "$test_repo" add src/hello.ores
+check_ok
+# An inherited empty index must not hide a tracked forbidden source. This
+# reproduces the prior zero-file policy bypass when SOURCE_REF is optional.
+git -C "$test_repo" rm -q -f -- SOURCE_REF
+printf 'print(1)\n' > "$test_repo/src/hidden.py"
+git -C "$test_repo" add src/hidden.py
+GIT_INDEX_FILE="$test_repo/.git/nonexistent-index" check_bad
+git -C "$test_repo" rm -q -f -- src/hidden.py
+check_ok
+# A corrupted real index must fail instead of being masked by process substitution.
+cp "$test_repo/.git/index" "$test_repo/index-backup"
+printf 'corrupt-index\n' > "$test_repo/.git/index"
+check_bad
+mv "$test_repo/index-backup" "$test_repo/.git/index"
+check_ok
+# A symlinked parent to identical external bytes bypassed leaf -L checks.
+external_dir="$test_repo.external"
+mkdir -p "$external_dir"
+cp "$test_repo/src/hello.ores" "$external_dir/hello.ores"
+mv "$test_repo/src" "$test_repo/src-original"
+ln -s "$external_dir" "$test_repo/src"
+check_bad
+rm "$test_repo/src"
+mv "$test_repo/src-original" "$test_repo/src"
+rm -rf "$external_dir"
+check_ok
+# A staged Python interpreter cannot be hidden by a benign worktree file.
+printf 'safe\n' > "$test_repo/src/disguised.txt"
+git -C "$test_repo" add src/disguised.txt
+check_ok
+forged_blob="$(printf '#!/usr/bin/env python3\nprint(1)\n' | git -C "$test_repo" hash-object -w --stdin)"
+git -C "$test_repo" update-index --cacheinfo "100644,$forged_blob,src/disguised.txt"
+check_bad
+git -C "$test_repo" add src/disguised.txt
+check_ok
+git -C "$test_repo" rm -q -f -- src/disguised.txt
+check_ok
+printf 'SOURCE_POLICY_NEGATIVE_TESTS_PASS scenarios=16\n'
