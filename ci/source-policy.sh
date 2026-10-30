@@ -35,10 +35,32 @@ mode="${SOURCE_POLICY_MODE:-strict}"
 count=0
 # Process substitution hides a failed producer's exit status. Materialize the
 # exact index inventory first and reject an empty or unreadable index.
+stage_list="$(/usr/bin/mktemp)" || exit 2
 tracked_list="$(/usr/bin/mktemp)" || exit 2
-trap '/usr/bin/rm -f -- "$tracked_list"' EXIT
+trap '/usr/bin/rm -f -- "$stage_list" "$tracked_list"' EXIT
+git_safe ls-files --stage -z > "$stage_list" || { echo "POLICY_FAILURE: unable to enumerate staged blobs" >&2; exit 2; }
 git_safe ls-files -z --cached > "$tracked_list" || { echo "POLICY_FAILURE: unable to enumerate tracked files" >&2; exit 2; }
-[[ -s "$tracked_list" ]] || { echo "POLICY_FAILURE: empty tracked source inventory" >&2; exit 2; }
+[[ -s "$stage_list" && -s "$tracked_list" ]] || { echo "POLICY_FAILURE: empty tracked source inventory" >&2; exit 2; }
+# The index is what Git commits. Audit its exact blobs, not just filenames
+# and an independently mutable worktree. Reject unmerged and special modes.
+while IFS= read -r -d '' entry; do
+  [[ "$entry" == *$'\t'* ]] || { echo "POLICY_FAILURE: malformed staged entry" >&2; exit 2; }
+  meta="${entry%%$'\t'*}"
+  path="${entry#*$'\t'}"
+  read -r filemode object stage <<< "$meta"
+  [[ "$stage" == 0 && ( "$filemode" == 100644 || "$filemode" == 100755 ) ]] || {
+    echo "POLICY_FAILURE: unmerged or nonregular staged entry: $path" >&2; exit 2;
+  }
+  [[ -f "$path" && ! -L "$path" ]] || {
+    echo "POLICY_FAILURE: missing or linked staged file: $path" >&2; exit 2;
+  }
+  actual_blob="$(git_safe hash-object --no-filters -- "$path")" || {
+    echo "POLICY_FAILURE: unable to hash tracked file: $path" >&2; exit 2;
+  }
+  [[ "$actual_blob" == "$object" ]] || {
+    echo "POLICY_FAILURE: staged blob differs from audited worktree: $path" >&2; exit 2;
+  }
+done < "$stage_list"
 while IFS= read -r -d '' path; do
   count=$((count+1))
   (( count <= 50000 )) || { echo "POLICY_FAILURE: file budget" >&2; exit 2; }
