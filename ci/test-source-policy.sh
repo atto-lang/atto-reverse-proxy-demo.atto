@@ -103,4 +103,16 @@ printf 'corrupt-index\n' > "$test_repo/.git/index"
 check_bad
 mv "$test_repo/index-backup" "$test_repo/.git/index"
 check_ok
-printf 'SOURCE_POLICY_NEGATIVE_TESTS_PASS scenarios=14\n'
+# The staged blob must match the audited worktree. A benign checkout can
+# otherwise conceal a Python interpreter payload staged under a .txt name.
+printf 'safe\n' > "$test_repo/src/disguised.txt"
+git -C "$test_repo" add src/disguised.txt
+check_ok
+forged_blob="$(printf '#!/usr/bin/env python3\nprint(1)\n' | git -C "$test_repo" hash-object -w --stdin)"
+git -C "$test_repo" update-index --cacheinfo "100644,$forged_blob,src/disguised.txt"
+check_bad
+git -C "$test_repo" add src/disguised.txt
+check_ok
+git -C "$test_repo" rm -q -f -- src/disguised.txt
+check_ok
+printf 'SOURCE_POLICY_NEGATIVE_TESTS_PASS scenarios=15\n'
