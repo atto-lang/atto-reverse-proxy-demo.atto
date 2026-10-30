@@ -62,6 +62,14 @@ for interpreter in '${ORES_POLICY_INTERPRETER}' '"${ORES_POLICY_INTERPRETER}"'; 
   check_bad
   git -C "$test_repo" rm -q -f -- dynamic-interpreter
 done
+# GNU env -S interprets \_ as a word separator before selecting Python.
+# The original backslash-removal regex sees _python3 and incorrectly permits it.
+for interpreter in '\_python3' '\_ python3'; do
+  printf '#!/usr/bin/env -S %s\n' "$interpreter" > "$test_repo/escaped-separator"
+  git -C "$test_repo" add escaped-separator
+  check_bad
+  git -C "$test_repo" rm -q -f -- escaped-separator
+done
 # The stricter guard must not reject unrelated interpreters.
 printf '#!/usr/bin/env node\n' > "$test_repo/node-interpreter"
 git -C "$test_repo" add node-interpreter
@@ -158,4 +166,4 @@ git -C "$test_repo" add src/disguised.txt
 check_ok
 git -C "$test_repo" rm -q -f -- src/disguised.txt
 check_ok
-printf 'SOURCE_POLICY_NEGATIVE_TESTS_PASS scenarios=22\n'
+printf 'SOURCE_POLICY_NEGATIVE_TESTS_PASS scenarios=24\n'
