@@ -1,0 +1,47 @@
+name: Reverse proxy safe defaults
+on:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  policy:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Validate flags-2-env admission contract
+        run: |
+          python3 - <<'PY'
+          import tomllib
+          from pathlib import Path
+          p = Path(".cli-flags.toml")
+          if p.is_symlink() or not p.is_file():
+              raise SystemExit(".cli-flags.toml must be a regular file")
+          data = tomllib.loads(p.read_text())
+          flags = data.get("flags", {})
+          if set(flags) != {"config-yaml"}:
+              raise SystemExit(f"unexpected CLI flags: {sorted(flags)}")
+          row = flags["config-yaml"]
+          if row.get("env") != "ores_proxy_conf_yaml" or row.get("type") != "string":
+              raise SystemExit("config-yaml flags-2-env contract changed")
+          if row.get("aliases") != ["config-yaml", "conf"]:
+              raise SystemExit("unexpected config aliases")
+          print("FLAGS_2_ENV_CONTRACT_PASS")
+          PY
+      - name: Validate reverse-proxy example stays loopback and protected
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f config/example.yaml
+          test ! -L config/example.yaml
+          grep -Fxq 'mode: reverse' config/example.yaml
+          grep -Fxq '  host: 127.0.0.1' config/example.yaml
+          grep -Fxq '    kind: require_header' config/example.yaml
+          grep -Fxq '    header: x-internal-token' config/example.yaml
+          grep -Fxq '    upstream: http://127.0.0.1:9000' config/example.yaml
+          ! grep -Eq '(^|[[:space:]])host:[[:space:]]+(0\.0\.0\.0|::|\*)$' config/example.yaml
+          echo 'SAFE_DEFAULTS_PASS: static config only; upstream forwarding proof NOT_EXECUTED.'
