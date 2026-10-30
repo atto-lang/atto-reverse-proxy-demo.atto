@@ -350,6 +350,9 @@ jobs:
           printf 'java_exe=%q\n' "$java_exe" >> "$wrapper"
           printf 'expected_manifest_sha=%q\n' "$approved_manifest_sha" >> "$wrapper"
           printf 'launcher=%q\n' "$launcher" >> "$wrapper"
+          # Source must still be byte-identical on EVERY native invocation,
+          # including after an earlier guest contract may have touched files.
+          printf 'expected_source_sha=%q\nexpected_source_tree=%q\n' "$EXPECTED_SHA" "$EXPECTED_FROZEN_TREE_SHA" >> "$wrapper"
           printf '%s\n' \
             'test "$(/usr/bin/id -u)" != 0 || exit 1' \
             'test -d "$runtime_root" && test -f "$launcher" && test -x "$launcher" || exit 1' \
@@ -373,7 +376,26 @@ jobs:
             'export JAVA_HOME="$java_root"' \
             'export PATH="$java_root/bin:/usr/bin:/bin"' \
             'spec="$("$java_exe" -XshowSettings:properties -version 2>&1 | /usr/bin/sed -nE "s/^[[:space:]]*java\\.specification\\.version[[:space:]]*=[[:space:]]*([^[:space:]]+).*$/\\1/p" | /usr/bin/head -n 1)"' \
-            'test "$spec" = 25 || { echo "approved embedded JDK changed or is not JDK25" >&2; exit 1; }' \
+            'test "$spec" = 25 || { echo "approved embedded JDK changed or is not JDK25" >&2; exit 1; }' >> "$wrapper"
+          # Recheck all committed bytes before each compiler/test/loopback launch;
+          # a one-time precompile check does not protect later workflow steps.
+          printf '%s\n' \
+            'cd "$GITHUB_WORKSPACE"' \
+            'source_git=(/usr/bin/env -u GIT_DIR -u GIT_WORK_TREE -u GIT_COMMON_DIR -u GIT_INDEX_FILE -u GIT_OBJECT_DIRECTORY -u GIT_ALTERNATE_OBJECT_DIRECTORIES -u GIT_NAMESPACE -u GIT_SHALLOW_FILE -u GIT_CEILING_DIRECTORIES -u GIT_DISCOVERY_ACROSS_FILESYSTEM -u GIT_GRAFT_FILE -u GIT_REPLACE_REF_BASE -u GIT_EXEC_PATH -u GIT_CONFIG /usr/bin/git -c core.fsmonitor=false --no-replace-objects --git-dir="$GITHUB_WORKSPACE/.git" --work-tree="$GITHUB_WORKSPACE")' \
+            'actual_source_head="$("${source_git[@]}" rev-parse --verify HEAD)"' \
+            'test "$actual_source_head" = "$expected_source_sha" || { echo "frozen source changed between native invocations" >&2; exit 1; }' \
+            'actual_source_tree="$("${source_git[@]}" rev-parse --verify "HEAD^{tree}")"' \
+            'test "$actual_source_tree" = "$expected_source_tree" || { echo "frozen tree changed between native invocations" >&2; exit 1; }' \
+            '"${source_git[@]}" diff --no-ext-diff --quiet HEAD -- || { echo "frozen tracked worktree changed" >&2; exit 1; }' \
+            'untracked_bytes="$("${source_git[@]}" ls-files --others -z -- | /usr/bin/wc -c)"' \
+            'test "$untracked_bytes" -eq 0 || { echo "untracked or ignored source introduced" >&2; exit 1; }' \
+            'tracked_manifest="$(/usr/bin/mktemp "$RUNNER_TEMP/oreslang-frozen-XXXXXXXX")"' \
+            '"${source_git[@]}" ls-files -z -- > "$tracked_manifest"' \
+            'while IFS= read -r -d "" tracked_file; do' \
+            '  test -f "$tracked_file" && test ! -L "$tracked_file" || exit 1' \
+            '  "${source_git[@]}" show "HEAD:$tracked_file" | /usr/bin/cmp -s -- "$tracked_file" - || { echo "frozen source bytes changed" >&2; exit 1; }' \
+            'done < "$tracked_manifest"' \
+            '/usr/bin/rm -f -- "$tracked_manifest"' \
             'exec /usr/bin/timeout --signal=TERM --kill-after=2s 120s "$launcher" "$@"' >> "$wrapper"
           /usr/bin/chmod 700 "$wrapper"
           /usr/bin/timeout 15s "$wrapper" --version || /usr/bin/timeout 15s "$wrapper" --build-info || /usr/bin/timeout 15s "$wrapper" --help
