@@ -46,6 +46,11 @@ while IFS= read -r -d '' path; do
     echo "POLICY_FAILURE: tracked file missing, linked, or not regular: $path" >&2
     exit 2
   fi
+  # A regular leaf reached through a symlinked parent is not the tracked
+  # checkout path, even if its bytes match the expected Git object.
+  [[ "$(/usr/bin/realpath -e -- "$path")" == "$root/$path" ]] || {
+    echo "POLICY_FAILURE: tracked file escapes checkout through parent path: $path" >&2; exit 2;
+  }
   allowed=0
   if [[ "$mode" == rest-legacy ]]; then
     case "$path" in
