@@ -27,11 +27,43 @@ define module header_policy as
 
   pub fnc canonical_name(String key): bool { return token(key); }
 
+  // Metadata validation only: the HTTP transport must independently parse
+  // raw bytes, reject malformed framing/duplicate fields, and impose limits.
+  // Reject the entire ASCII C0 control range and DEL, including VT, FF and ESC.
   pub fnc value_safe(String value): bool {
-    return !value.contains_literal("\r") &&
-      !value.contains_literal("\n") &&
-      !value.contains_literal("\u0000") &&
-      !value.contains_literal("\t");
+    return !value.contains_literal("\u0000") &&
+      !value.contains_literal("\u0001") &&
+      !value.contains_literal("\u0002") &&
+      !value.contains_literal("\u0003") &&
+      !value.contains_literal("\u0004") &&
+      !value.contains_literal("\u0005") &&
+      !value.contains_literal("\u0006") &&
+      !value.contains_literal("\u0007") &&
+      !value.contains_literal("\u0008") &&
+      !value.contains_literal("\u0009") &&
+      !value.contains_literal("\u000a") &&
+      !value.contains_literal("\u000b") &&
+      !value.contains_literal("\u000c") &&
+      !value.contains_literal("\u000d") &&
+      !value.contains_literal("\u000e") &&
+      !value.contains_literal("\u000f") &&
+      !value.contains_literal("\u0010") &&
+      !value.contains_literal("\u0011") &&
+      !value.contains_literal("\u0012") &&
+      !value.contains_literal("\u0013") &&
+      !value.contains_literal("\u0014") &&
+      !value.contains_literal("\u0015") &&
+      !value.contains_literal("\u0016") &&
+      !value.contains_literal("\u0017") &&
+      !value.contains_literal("\u0018") &&
+      !value.contains_literal("\u0019") &&
+      !value.contains_literal("\u001a") &&
+      !value.contains_literal("\u001b") &&
+      !value.contains_literal("\u001c") &&
+      !value.contains_literal("\u001d") &&
+      !value.contains_literal("\u001e") &&
+      !value.contains_literal("\u001f") &&
+      !value.contains_literal("\u007f");
   }
 
   // Dynamic Connection hop-by-hop nominations must be normalized and removed
