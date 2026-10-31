@@ -53,17 +53,31 @@ canonical_file() {
   /usr/bin/cmp -s -- "$candidate" "$oracle"
 }
 
+# All Git reads are bound to this checkout. Never let inherited index/object/config
+# routing select a different repository or object database on a reused runner.
+git_safe() {
+  /usr/bin/env \
+    -u GIT_DIR -u GIT_WORK_TREE -u GIT_COMMON_DIR -u GIT_INDEX_FILE \
+    -u GIT_OBJECT_DIRECTORY -u GIT_ALTERNATE_OBJECT_DIRECTORIES -u GIT_NAMESPACE \
+    -u GIT_SHALLOW_FILE -u GIT_CEILING_DIRECTORIES -u GIT_DISCOVERY_ACROSS_FILESYSTEM \
+    -u GIT_GRAFT_FILE -u GIT_REPLACE_REF_BASE -u GIT_EXEC_PATH -u GIT_CONFIG \
+    GIT_CONFIG_COUNT=0 GIT_CONFIG_PARAMETERS='' \
+    GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null \
+    /usr/bin/git -c core.fsmonitor=false -c core.filemode=true --no-replace-objects \
+      --git-dir="$root/.git" --work-tree="$root" "$@"
+}
+
 # Bind the exact files to regular, stage-0 index blobs and raw worktree bytes.
 verify_index() {
   local path="$1" entry object mode stage recorded
-  entry="$(/usr/bin/git -C "$root" -c core.fsmonitor=false -c core.filemode=true ls-files --stage -- "$path")" || return 1
+  entry="$(git_safe ls-files --stage -- "$path")" || return 1
   [[ "$entry" != *$'\n'* && "$entry" == *$'\t'"$path" ]] || return 1
   recorded="${entry%%$'\t'*}"
   read -r mode object stage <<< "$recorded"
   [[ "$mode" == 100644 && "$stage" == 0 && "$object" =~ ^[0-9a-f]{40}$ ]] || return 1
   # Staged index must be byte-for-byte the pinned HEAD path, not a replacement.
-  /usr/bin/git -C "$root" -c core.fsmonitor=false -c core.filemode=true diff --no-ext-diff --cached --quiet HEAD -- "$path" || return 1
-  [[ "$(/usr/bin/git -C "$root" -c core.fsmonitor=false -c core.filemode=true hash-object --no-filters -- "$path")" == "$object" ]]
+  git_safe diff --no-ext-diff --cached --quiet HEAD -- "$path" || return 1
+  [[ "$(git_safe hash-object --no-filters -- "$path")" == "$object" ]]
 }
 
 self_test() {
@@ -107,6 +121,10 @@ self_test() {
   /usr/bin/git -C "$root" add .
   /usr/bin/git -C "$root" commit -qm 'clean'
   verify_index config/example.yaml || return 1
+  # Ambient Git object routing must not influence exact-index verification.
+  # This path is intentionally not a Git object database; unsanitized Git
+  # would fail or inspect the wrong object store.
+  GIT_OBJECT_DIRECTORY="$outside/not-an-object-db" verify_index config/example.yaml || return 1
   printf '\nmode: forward\n' >> "$root/config/example.yaml"
   /usr/bin/git -C "$root" add config/example.yaml
   /usr/bin/git -C "$root" commit -qm 'dirty pinned HEAD'
@@ -116,7 +134,7 @@ self_test() {
   /usr/bin/git -C "$root" reset --hard -q HEAD
   /usr/bin/git -C "$root" update-index --chmod=+x config/example.yaml
   if verify_index config/example.yaml; then return 1; fi
-  echo 'REVERSE_SAFE_DEFAULTS_ADVERSARIAL_PASS cases=9 host_only=true'
+  echo 'REVERSE_SAFE_DEFAULTS_ADVERSARIAL_PASS cases=10 host_only=true'
 }
 
 main() {
@@ -129,12 +147,27 @@ main() {
     self_test "$fixtures" || { echo 'SAFE_DEFAULTS_SELF_TEST_FAILURE' >&2; exit 2; }
     return 0
   fi
-  [[ -z "${GIT_INDEX_FILE:-}" && -z "${GIT_DIR:-}" && -z "${GIT_WORK_TREE:-}" ]] || {
-    echo 'SAFE_DEFAULTS_FAILURE: inherited Git redirection' >&2; exit 2;
+  [[ -d "$root/.git" && ! -L "$root/.git" ]] || {
+    echo 'SAFE_DEFAULTS_FAILURE: expected real checkout Git directory' >&2; exit 2;
+  }
+  for git_env_name in \
+    GIT_DIR GIT_WORK_TREE GIT_COMMON_DIR GIT_INDEX_FILE GIT_OBJECT_DIRECTORY \
+    GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_NAMESPACE GIT_SHALLOW_FILE \
+    GIT_CEILING_DIRECTORIES GIT_DISCOVERY_ACROSS_FILESYSTEM GIT_GRAFT_FILE \
+    GIT_REPLACE_REF_BASE GIT_EXEC_PATH GIT_CONFIG GIT_CONFIG_COUNT \
+    GIT_CONFIG_PARAMETERS GIT_CONFIG_GLOBAL GIT_CONFIG_SYSTEM
+  do
+    [[ -z "${!git_env_name:-}" ]] || {
+      echo "SAFE_DEFAULTS_FAILURE: inherited Git control variable: $git_env_name" >&2
+      exit 2
+    }
+  done
+  [[ "$(git_safe rev-parse --show-toplevel)" == "$root" ]] || {
+    echo 'SAFE_DEFAULTS_FAILURE: Git repository root mismatch' >&2; exit 2;
   }
   expected="${EXPECTED_DEMO_SHA:-}"
   [[ "$expected" =~ ^[0-9a-f]{40}$ ]] &&
-    [[ "$(/usr/bin/git -C "$root" rev-parse HEAD)" == "$expected" ]] || {
+    [[ "$(git_safe rev-parse HEAD)" == "$expected" ]] || {
     echo 'SAFE_DEFAULTS_FAILURE: invalid or mismatched pinned head' >&2; exit 2;
   }
   for path in .cli-flags.toml config/example.yaml; do
