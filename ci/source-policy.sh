@@ -2,6 +2,13 @@
 # Fail-closed tracked-source policy; host-only, no Oreslang guest execution.
 set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
+# SOURCE_POLICY_ROOT is an isolated-test fixture override only. A SHA check
+# proves the selected Git commit, not that this script audited the checkout
+# from which it was invoked. Two worktrees can share HEAD but differ in bytes.
+if [[ -n "${EXPECTED_DEMO_SHA:-}" && -n "${SOURCE_POLICY_ROOT:-}" ]]; then
+  echo 'POLICY_FAILURE: SHA-pinned audit cannot redirect SOURCE_POLICY_ROOT' >&2
+  exit 2
+fi
 root="${SOURCE_POLICY_ROOT:-$repo_root}"
 root="$(cd "$root" && pwd -P)"
 cd "$root"
