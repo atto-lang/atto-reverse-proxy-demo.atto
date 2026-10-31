@@ -5,9 +5,19 @@ Use the native Oreslang launcher supplied by the trusted isolated
 `oreslang-jdk25` GitHub Actions runner. Workflow:
 `.github/workflows/actor-ingress-wire.yml`.
 
-The job checks out the **exact PR HEAD**, verifies the source revision,
-records the Oreslang compiler binary digest and JDK25, checks both Oreslang
-programs, launches `src/serve_reverse.ores` in a subprocess on
+The candidate workflow is **manual-dispatch only from protected main**;
+it does not accept PR-head source on a trusted self-hosted runner. A
+source-free hosted preflight validates live `main` protection and current
+commit before the native job may be allocated. An independent administrator
+must also restrict `oreslang-trusted-native` to this specifically approved
+workflow, verify review/no-bypass settings, and approve the root-owned
+`/opt/oreslang-approved/oreslang-runtime` runtime manifest. Neither
+`main` branch protection nor runner provisioning is presently verified.
+
+If those gates eventually pass, the job checks out the exact protected-main
+commit, records its Git tree and the Oreslang runtime manifest plus launcher
+digest, validates the embedded JDK25, checks both Oreslang programs, and
+launches `src/serve_reverse.ores` in a subprocess on
 `127.0.0.1:8080`, and calls `tests/actor_ingress_tcp_smoke.ores` as a
 separate native Oreslang client. The client checks:
 - HTTP 200 for the allowlisted statically compiled local Oreslang actor service, plus a separate streaming actor response with chunked HTTP/1.1 transfer framing, no conflicting Content-Length, both text body stages in order, and a terminal zero-length chunk
@@ -40,3 +50,41 @@ package-private Java host-only proof in `oreslang-source.java` PR #1943
 does not make an Oreslang guest outbound request API available.
 
 See `docs/WORKER_PARITY.md` for future HAProxy/NGINX/workerd goals.
+
+## Security of the execution control plane
+
+The previous actor-ingress workflow admitted same-repository `pull_request`
+events on a generic self-hosted runner, even though the source remained
+unreviewed and `main` was not protected. This is **not** an acceptable native
+runner boundary for private source. The current PR removes that admission path,
+requires `workflow_dispatch` on protected main, checks a live GitHub branch
+response before allocating a privileged runner, and uses the approved
+`oreslang-trusted-native` runner group rather than the default pool.
+
+The native step requires an unprivileged runner, root-owned and
+non-group/world-writable runtime files, no symlinks or special objects, a
+complete runtime manifest digest supplied by an administrator, embedded JDK25,
+and an approved launcher SHA-256. Server and client invocation use the
+digest-and-manifest checking wrapper. This is a **proposed** gate, not evidence
+that the workflow has passed, that every runtime race has been eliminated,
+or that the protected-main governance is configured.
+
+The serving guest still uses the pre-migration `define isoactor` /
+`receive(ActorMail<String>)` syntax. A compiler-backed migration to
+`define isolated actor`, explicit `state` and `handle_state` with
+`critical` state mutations is outstanding. Do not claim verified guest
+syntax until an exact-head compiler check actually executes.
+
+### Acceptance evidence ledger
+
+- Admission: hosted preflight job has **nonzero steps** and binds current
+  protected-main SHA; a missing hosted runner is NOT_EXECUTED.
+- Native: runner-group access and manifest approvals are independently
+  reviewed, nonzero steps prove approved JDK and launcher, and both programs
+  compile at that exact SHA.
+- Loopback: native server reaches readiness, the native client verifies
+  authorized HTTP 200, denied HTTP 403, unimplemented HTTP 501, invalid
+  HTTP 400, unknown HTTP 404, and bounded streaming receipts.
+- Security: stale actor receipts, true cancellation/retirement, DNS-to-dial
+  integrity, off-host upstream forwarding and CONNECT remain **not proven**
+  by this local actor test.
