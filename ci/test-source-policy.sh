@@ -190,4 +190,41 @@ grep -Fq 'POLICY_FAILURE: SHA-pinned audit cannot redirect SOURCE_POLICY_ROOT' "
   echo "TEST_FAILURE: redirected SHA-pinned audit did not fail at root binding" >&2
   exit 1
 }
-printf 'SOURCE_POLICY_NEGATIVE_TESTS_PASS scenarios=25\n'
+# The pinned commit must bind the INDEX and worktree, not merely HEAD.
+# Before this fix, deleting a tracked file from both the index and worktree
+# left the old index-only policy blind to its presence in the pinned commit.
+pinned_repo="$test_repo/pinned-audit"
+mkdir -p "$pinned_repo/ci" "$pinned_repo/docs"
+cp "$root/ci/source-policy.sh" "$pinned_repo/ci/source-policy.sh"
+printf 'safe tracked bytes\n' > "$pinned_repo/docs/allowed.txt"
+git init -q "$pinned_repo"
+git -C "$pinned_repo" config user.name 'Policy pinned test'
+git -C "$pinned_repo" config user.email 'policy@example.invalid'
+git -C "$pinned_repo" add .
+git -C "$pinned_repo" commit -q -m 'exact pinned source'
+pinned_sha="$(git -C "$pinned_repo" rev-parse HEAD)"
+EXPECTED_DEMO_SHA="$pinned_sha" bash "$pinned_repo/ci/source-policy.sh" > /dev/null || {
+  echo 'TEST_FAILURE: clean SHA-pinned checkout was rejected' >&2; exit 1;
+}
+git -C "$pinned_repo" rm -q -- docs/allowed.txt
+if EXPECTED_DEMO_SHA="$pinned_sha" bash "$pinned_repo/ci/source-policy.sh" >/dev/null 2>&1; then
+  echo 'TEST_FAILURE: removed tracked HEAD blob escaped exact-source audit' >&2; exit 1
+fi
+git -C "$pinned_repo" reset --hard -q HEAD
+printf 'unreviewed safe file\n' > "$pinned_repo/docs/addition.txt"
+git -C "$pinned_repo" add docs/addition.txt
+if EXPECTED_DEMO_SHA="$pinned_sha" bash "$pinned_repo/ci/source-policy.sh" >/dev/null 2>&1; then
+  echo 'TEST_FAILURE: newly staged file escaped exact-source audit' >&2; exit 1
+fi
+git -C "$pinned_repo" reset --hard -q HEAD
+# An ignored file is still an unexpected input to the pinned checkout.
+printf 'ignored\n' > "$pinned_repo/docs/ignored.txt"
+printf 'docs/ignored.txt\n' > "$pinned_repo/.git/info/exclude"
+if EXPECTED_DEMO_SHA="$pinned_sha" bash "$pinned_repo/ci/source-policy.sh" >/dev/null 2>&1; then
+  echo 'TEST_FAILURE: ignored untracked file escaped exact-source audit' >&2; exit 1
+fi
+rm "$pinned_repo/docs/ignored.txt"
+EXPECTED_DEMO_SHA="$pinned_sha" bash "$pinned_repo/ci/source-policy.sh" > /dev/null || {
+  echo 'TEST_FAILURE: pinned checkout failed after fixture recovery' >&2; exit 1;
+}
+printf 'SOURCE_POLICY_NEGATIVE_TESTS_PASS scenarios=28\n'
