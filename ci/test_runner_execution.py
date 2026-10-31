@@ -36,6 +36,7 @@ def good(profile="wire"):
         "head_sha": HEAD, "event": "pull_request",
         "repository": {"id": gate.SOURCE_REPO_ID},
         "head_repository": {"id": gate.SOURCE_REPO_ID},
+        "head_repository": {"id": gate.SOURCE_REPO_ID},
         "status": "completed", "conclusion": "success", "run_attempt": 1,
     }
     job = {
