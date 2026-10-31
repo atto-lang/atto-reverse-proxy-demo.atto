@@ -51,30 +51,59 @@ jobs:
           test "${GITHUB_REF_PROTECTED:-}" = true
           test "$GITHUB_REPOSITORY_ID" = '1429954649'
           test -n "${GH_READ_TOKEN:-}"
-          response="$(/usr/bin/curl -q --fail --silent --show-error --retry 0 --proto '=https' --noproxy '*' --proxy '' --connect-timeout 5 --max-time 15 -H "Authorization: Bearer $GH_READ_TOKEN" -H 'Accept: application/vnd.github+json' 'https://api.github.com/repos/ores-truffle-oreslang/oreslang-reverse-proxy-demo.ores/branches/main')"
-          /usr/bin/jq -e --arg sha "$GITHUB_SHA" '(.protected == true) and (.commit.sha == $sha)' <<<"$response" >/dev/null
-          # Effective rule inspection is required as well as protected=true.
-          # Ruleset bypass lists may need separate administrator-only access.
-          rules="$(
+          test -x /usr/bin/jq
+          # Source-free hosted admission. No workflow checkout or private
+          # repository source is touched before governance is established.
+          get_github_json() {
             /usr/bin/curl -q --fail --silent --show-error --retry 0 \
               --proto '=https' --noproxy '*' --proxy '' \
+              --cacert /etc/ssl/certs/ca-certificates.crt \
+              --capath /etc/ssl/certs \
               --connect-timeout 5 --max-time 15 \
               -H "Authorization: Bearer $GH_READ_TOKEN" \
-              -H 'Accept: application/vnd.github+json' \
-              'https://api.github.com/repos/ores-truffle-oreslang/oreslang-reverse-proxy-demo.ores/rules/branches/main?per_page=100'
-          )"
+              -H 'Accept: application/vnd.github+json' "$1"
+          }
+          repository_json="$(get_github_json \
+            'https://api.github.com/repos/ores-truffle-oreslang/oreslang-reverse-proxy-demo.ores')"
           /usr/bin/jq -e '
+            (.id == 1429954649) and
+            (.full_name == "ores-truffle-oreslang/oreslang-reverse-proxy-demo.ores") and
+            (.private == true) and (.visibility == "private") and
+            (.default_branch == "main") and (.archived == false)
+          ' <<<"$repository_json" >/dev/null || {
+            echo 'actor wire admission: repo identity, private status or default branch differs' >&2
+            exit 1
+          }
+          branch_json="$(get_github_json \
+            'https://api.github.com/repos/ores-truffle-oreslang/oreslang-reverse-proxy-demo.ores/branches/main')"
+          /usr/bin/jq -e --arg sha "$GITHUB_SHA" '
+            (.protected == true) and (.commit.sha == $sha)
+          ' <<<"$branch_json" >/dev/null || {
+            echo 'actor wire admission: main is not protected at this control-plane SHA' >&2
+            exit 1
+          }
+          # Active GitHub rules, not a PR-authored declaration, must require
+          # independent approval and mandatory CI for the protected branch.
+          rules_json="$(get_github_json \
+            'https://api.github.com/repos/ores-truffle-oreslang/oreslang-reverse-proxy-demo.ores/rules/branches/main?per_page=100')"
+          /usr/bin/jq -e '
+            (type == "array") and
             any(.[]; .type == "pull_request" and
               (.parameters.required_approving_review_count >= 1) and
               (.parameters.dismiss_stale_reviews_on_push == true) and
               (.parameters.require_last_push_approval == true) and
               (.parameters.required_review_thread_resolution == true)) and
+            any(.[]; .type == "required_status_checks" and
+              ((.parameters.required_status_checks // []) | length > 0)) and
             any(.[]; .type == "non_fast_forward") and
             any(.[]; .type == "deletion")
-          ' <<<"$rules" >/dev/null || {
-            echo 'missing effective protected-main review or history rules' >&2
+          ' <<<"$rules_json" >/dev/null || {
+            echo 'actor wire admission: effective protected-main review/status/force-push rules absent' >&2
             exit 1
           }
+          # This API cannot establish an empty organization/repository bypass
+          # list; an independent administrator must verify there is no bypass
+          # and restrict the named runner group to this exact workflow.
           echo 'ACTOR_WIRE_HOSTED_PROTECTED_MAIN_PREFLIGHT_PASS; NO_GUEST_EXECUTED'
   actor-ingress:
     needs: hosted-preflight
