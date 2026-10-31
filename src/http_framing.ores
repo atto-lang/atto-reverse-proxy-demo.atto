@@ -1,0 +1,84 @@
+// Conservative HTTP/1.1 text-frame admission proof for bodyless requests.
+// This is NOT a raw-byte parser, live HTTP adapter, or authorization boundary.
+// Callers must supply unmodified header bytes decoded without canonicalization,
+// enforce a byte cap BEFORE allocating the String, and separately validate
+// transfer semantics, TLS, peer identity, and (for CONNECT) pinned DNS/IP ACLs.
+// A frame with any body, chunking, transfer-encoding or content-length is denied.
+import module header_policy from "./header_policy";
+import module proxy_wire from "./proxy_wire";
+
+define module http_framing as
+  // The append marker prevents split_literal implementations from silently
+  // discarding a trailing empty segment. Exactly one empty-line terminator
+  // must be present and no bytes may follow it, including pipelined requests.
+  pub fnc parse(String frame, String expected_mode):
+      Result<proxy_wire.Target, String> {
+    if !(expected_mode == "forward" || expected_mode == "reverse") ||
+      !frame.ends_with("\r\n\r\n") ||
+      frame.starts_with("\r\n"); then
+      return Err("HTTP/1.1 requires exactly one CRLF header terminator");
+    fi
+    val sections = (frame + "FRAME_END").split_literal("\r\n\r\n");
+    if sections.size != 2 || sections.get(1) != "FRAME_END"; then
+      return Err("ambiguous header terminator, body, or pipelined request");
+    fi
+    val lines = sections.get(0).split_literal("\r\n");
+    // 1 request line + 1..32 header lines; not a byte/memory bound.
+    if lines.size < 2 || lines.size > 33; then
+      return Err("HTTP header count outside bounded subset");
+    fi
+    val String request_line = lines.get(0);
+    if !header_policy.value_safe(request_line); then
+      return Err("unsafe request-line control character");
+    fi
+
+    let int hosts = 0;
+    let int connections = 0;
+    let String host = "";
+    for (let i = 1; i < lines.size; i++) {
+      val String line = lines.get(i);
+      // LF-only separators, bare CR/LF, obs-fold and non-ASCII controls
+      // never enter the admitted field-name/value metadata subset.
+      if !header_policy.value_safe(line) || line.starts_with(" ") ||
+        line == ""; then
+        return Err("invalid HTTP field line or folded header");
+      fi
+      // Accept only exact Name: Value spacing in this restricted proof.
+      // Raw HTTP adapters must not normalize spacing before validation.
+      val pair = line.split_literal(": ");
+      if pair.size != 2; then return Err("ambiguous header colon or whitespace"); fi
+      val String name = pair.get(0);
+      val String value = pair.get(1);
+      if value == "" || value.starts_with(" ") || value.ends_with(" ") ||
+        !header_policy.value_safe(value); then
+        return Err("invalid HTTP header value");
+      fi
+      // Host/Connection canonical spellings are intentionally limited to
+      // two variants. Other mixed-case names fail closed, never normalized.
+      if !(name == "Host" || name == "Connection" ||
+        header_policy.canonical_name(name)); then
+        return Err("noncanonical HTTP header name");
+      fi
+      if name == "Host" || name == "host"; then
+        hosts = hosts + 1;
+        if hosts != 1; then return Err("duplicate Host header"); fi
+        host = value;
+      elif name == "Connection" || name == "connection"; then
+        connections = connections + 1;
+        if connections != 1 || value != "close"; then
+          return Err("unsupported or duplicate Connection header");
+        fi
+      elif name == "content-length" || name == "transfer-encoding" ||
+        name == "te" || name == "trailer" || name == "upgrade" ||
+        name == "expect" || name == "proxy-connection"; then
+        // Reject CL: 0 too: this v0 contract only admits absent framing.
+        return Err("framed body or protocol upgrade unsupported");
+      fi
+    }
+    if hosts != 1; then return Err("exactly one Host is required"); fi
+    if expected_mode == "forward"; then
+      return proxy_wire.connect(request_line, host);
+    fi
+    return proxy_wire.reverse(request_line, host);
+  }
+end
