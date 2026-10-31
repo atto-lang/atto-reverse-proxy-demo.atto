@@ -119,9 +119,12 @@ jobs:
               '$5==root || index($5,prefix)==1 {print $5; exit}' /proc/self/mountinfo
           )"
           test -z "$mounted" || { echo 'runtime path is or contains a bind mount' >&2; exit 1; }
-          test -z "$(/usr/bin/find "$runtime_root" -xdev -type l -print -quit)" || { echo 'runtime symlink' >&2; exit 1; }
-          test -z "$(/usr/bin/find "$runtime_root" -xdev ! -type d ! -type f -print -quit)" || { echo 'runtime special object' >&2; exit 1; }
-          test -z "$(/usr/bin/find "$runtime_root" -xdev \( ! -uid 0 -o -perm /022 -o -perm /6000 \) -print -quit)" || { echo 'mutable or privileged runtime tree' >&2; exit 1; }
+          linked="$(/usr/bin/find "$runtime_root" -xdev -type l -print -quit)" || { echo 'runtime symlink scan failed' >&2; exit 1; }
+          test -z "$linked" || { echo 'runtime symlink' >&2; exit 1; }
+          special="$(/usr/bin/find "$runtime_root" -xdev ! -type d ! -type f -print -quit)" || { echo 'runtime special-file scan failed' >&2; exit 1; }
+          test -z "$special" || { echo 'runtime special object' >&2; exit 1; }
+          unsafe="$(/usr/bin/find "$runtime_root" -xdev \( ! -uid 0 -o -perm /022 -o -perm /6000 \) -print -quit)" || { echo 'runtime ownership scan failed' >&2; exit 1; }
+          test -z "$unsafe" || { echo 'mutable or privileged runtime tree' >&2; exit 1; }
           test -x /usr/sbin/getcap
           cap_report="$(/usr/sbin/getcap -r "$runtime_root" 2>&1)" || { echo 'runtime capability scan failed' >&2; exit 1; }
           test -z "$cap_report" || { echo 'runtime carries file capabilities' >&2; exit 1; }
