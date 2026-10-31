@@ -53,6 +53,28 @@ jobs:
           test -n "${GH_READ_TOKEN:-}"
           response="$(/usr/bin/curl -q --fail --silent --show-error --retry 0 --proto '=https' --noproxy '*' --proxy '' --connect-timeout 5 --max-time 15 -H "Authorization: Bearer $GH_READ_TOKEN" -H 'Accept: application/vnd.github+json' 'https://api.github.com/repos/ores-truffle-oreslang/oreslang-reverse-proxy-demo.ores/branches/main')"
           /usr/bin/jq -e --arg sha "$GITHUB_SHA" '(.protected == true) and (.commit.sha == $sha)' <<<"$response" >/dev/null
+          # Effective rule inspection is required as well as protected=true.
+          # Ruleset bypass lists may need separate administrator-only access.
+          rules="$(
+            /usr/bin/curl -q --fail --silent --show-error --retry 0 \
+              --proto '=https' --noproxy '*' --proxy '' \
+              --connect-timeout 5 --max-time 15 \
+              -H "Authorization: Bearer $GH_READ_TOKEN" \
+              -H 'Accept: application/vnd.github+json' \
+              'https://api.github.com/repos/ores-truffle-oreslang/oreslang-reverse-proxy-demo.ores/rules/branches/main?per_page=100'
+          )"
+          /usr/bin/jq -e '
+            any(.[]; .type == "pull_request" and
+              (.parameters.required_approving_review_count >= 1) and
+              (.parameters.dismiss_stale_reviews_on_push == true) and
+              (.parameters.require_last_push_approval == true) and
+              (.parameters.required_review_thread_resolution == true)) and
+            any(.[]; .type == "non_fast_forward") and
+            any(.[]; .type == "deletion")
+          ' <<<"$rules" >/dev/null || {
+            echo 'missing effective protected-main review or history rules' >&2
+            exit 1
+          }
           echo 'ACTOR_WIRE_HOSTED_PROTECTED_MAIN_PREFLIGHT_PASS; NO_GUEST_EXECUTED'
   actor-ingress:
     needs: hosted-preflight
