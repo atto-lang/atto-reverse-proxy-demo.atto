@@ -250,8 +250,45 @@ jobs:
           echo 'ACTOR_WIRE_NATIVE_MAIN_GOVERNANCE_RECHECK_PASS'
           test "${RUNNER_OS:-}" = Linux && test "${RUNNER_ARCH:-}" = X64 && test "$(uname -m)" = x86_64
           test -n "${RUNNER_NAME:-}" || { echo 'runner not assigned' >&2; exit 1; }
-          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA" || { echo 'exact source HEAD mismatch' >&2; exit 1; }
-          printf 'runner_name=%s\nsource_head=%s\nsource_tree=%s\n' "$RUNNER_NAME" "$EXPECTED_SHA" "$(git rev-parse HEAD^{tree})"
+          # Bind every Git read to the actual checked-out repository; ambient
+          # GIT_DIR/INDEX/OBJECT routing on a reused runner must not substitute
+          # an unrelated clean worktree or forged commit tree.
+          test -d "$GITHUB_WORKSPACE/.git" && test ! -L "$GITHUB_WORKSPACE/.git" || {
+            echo 'exact source audit needs an actual checkout git directory' >&2; exit 1;
+          }
+          git_exact() {
+            /usr/bin/env \
+              -u GIT_DIR -u GIT_WORK_TREE -u GIT_COMMON_DIR -u GIT_INDEX_FILE \
+              -u GIT_OBJECT_DIRECTORY -u GIT_ALTERNATE_OBJECT_DIRECTORIES \
+              -u GIT_NAMESPACE -u GIT_SHALLOW_FILE -u GIT_CEILING_DIRECTORIES \
+              -u GIT_DISCOVERY_ACROSS_FILESYSTEM -u GIT_GRAFT_FILE \
+              -u GIT_REPLACE_REF_BASE -u GIT_EXEC_PATH -u GIT_CONFIG \
+              /usr/bin/git -c core.fsmonitor=false -c core.filemode=true \
+              --no-replace-objects --git-dir="$GITHUB_WORKSPACE/.git" \
+              --work-tree="$GITHUB_WORKSPACE" "$@"
+          }
+          actual_head="$(git_exact rev-parse --verify HEAD)"
+          actual_tree="$(git_exact rev-parse --verify 'HEAD^{tree}')"
+          test "$actual_head" = "$EXPECTED_SHA" || {
+            echo 'exact source HEAD mismatch' >&2; exit 1;
+          }
+          [[ "$actual_tree" =~ ^[0-9a-f]{40}$ ]] || {
+            echo 'invalid source tree identity' >&2; exit 1;
+          }
+          git_exact diff --no-ext-diff --quiet HEAD -- || {
+            echo 'tracked checkout differs from exact HEAD' >&2; exit 1;
+          }
+          git_exact diff --no-ext-diff --cached --quiet HEAD -- || {
+            echo 'staged index differs from exact HEAD' >&2; exit 1;
+          }
+          extra_bytes="$(git_exact ls-files --others -z -- | /usr/bin/wc -c)" || {
+            echo 'unable to inspect untracked source files' >&2; exit 1;
+          }
+          [[ "$extra_bytes" -eq 0 ]] || {
+            echo 'untracked or ignored source files present' >&2; exit 1;
+          }
+          printf 'runner_name=%s\nsource_head=%s\nsource_tree=%s\n' \
+            "$RUNNER_NAME" "$actual_head" "$actual_tree"
           # The compiler and JDK are supplied by a separately approved
           # root-owned runtime; no mutable PATH lookup or setup-java download.
           test "$(/usr/bin/id -u)" != 0 || { echo 'runner must be unprivileged' >&2; exit 1; }
