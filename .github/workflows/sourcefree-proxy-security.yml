@@ -48,7 +48,10 @@ jobs:
             "$EXPECTED_SHA" "$(git rev-parse HEAD^{tree})" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT"
           # Hosted Bash only: do not conflate structural receipts with native.
           bash -n ci/sourcefree_proxy_audit.sh
+          bash -n ci/source_checkout_integrity.sh
+          bash -n ci/test_source_checkout_integrity.sh
           bash -n ci/test_workflow_admission.sh
           bash ci/sourcefree_proxy_audit.sh --self-test
+          bash ci/test_source_checkout_integrity.sh
           bash ci/test_workflow_admission.sh
           EXPECTED_SHA="$EXPECTED_SHA" bash ci/sourcefree_proxy_audit.sh
