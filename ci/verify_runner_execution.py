@@ -19,6 +19,7 @@ SOURCE_REPO_ID = 1429954649
 PROFILES = {
     "native": {
         "workflow_id": 393589123,
+        "path": ".github/workflows/native-contracts.yml",
         "job": "native-contracts",
         "steps": (
             "Checkout exact PR tree",
@@ -30,6 +31,7 @@ PROFILES = {
     },
     "wire": {
         "workflow_id": 394408723,
+        "path": ".github/workflows/actor-ingress-wire.yml",
         "job": "actor-ingress",
         "steps": (
             "Checkout exact PR head",
@@ -75,6 +77,24 @@ def check_execution(run: dict, jobs_payload: dict, *, profile: str,
                 and pr["base"]["repo"].get("id") == SOURCE_REPO_ID,
                 "foreign base repository")
     require(isinstance(run, dict) and isinstance(jobs_payload, dict), "malformed JSON")
+    # Bind the run to the fresh PR identity, not merely a caller-supplied SHA.
+    require(pr is not None, "fresh PR snapshot required")
+    require(run.get("path") == config["path"], "wrong workflow path")
+    require(run.get("head_branch") == pr["head"].get("ref"), "run head branch differs from PR")
+    prs = run.get("pull_requests")
+    require(isinstance(prs, list), "run PR associations missing")
+    linked = [p for p in prs if isinstance(p, dict) and p.get("number") == 11]
+    require(len(linked) == 1, "run is not uniquely linked to PR #11")
+    linked_pr = linked[0]
+    require(isinstance(linked_pr.get("head"), dict)
+            and linked_pr["head"].get("sha") == expected_head
+            and isinstance(linked_pr["head"].get("repo"), dict)
+            and linked_pr["head"]["repo"].get("id") == SOURCE_REPO_ID,
+            "run PR association head mismatch")
+    require(isinstance(linked_pr.get("base"), dict)
+            and isinstance(linked_pr["base"].get("repo"), dict)
+            and linked_pr["base"]["repo"].get("id") == SOURCE_REPO_ID,
+            "run PR association base repository mismatch")
     require(run.get("id") == expected_run_id and positive_int(expected_run_id),
             "run ID mismatch")
     require(run.get("workflow_id") == config["workflow_id"], "workflow ID mismatch")
@@ -84,9 +104,8 @@ def check_execution(run: dict, jobs_payload: dict, *, profile: str,
     require(isinstance(repo, dict) and repo.get("id") == SOURCE_REPO_ID,
             "source repository identity mismatch")
     head_repo = run.get("head_repository")
-    require(head_repo is None or (isinstance(head_repo, dict)
-                                  and head_repo.get("id") == SOURCE_REPO_ID),
-            "unapproved head repository")
+    require(isinstance(head_repo, dict) and head_repo.get("id") == SOURCE_REPO_ID,
+            "missing or unapproved run head repository")
     require(run.get("status") == "completed" and run.get("conclusion") == "success",
             "run not successfully completed")
     attempt = run.get("run_attempt")
@@ -94,6 +113,9 @@ def check_execution(run: dict, jobs_payload: dict, *, profile: str,
 
     jobs = jobs_payload.get("jobs")
     require(isinstance(jobs, list), "jobs payload missing")
+    require(type(jobs_payload.get("total_count")) is int
+            and jobs_payload["total_count"] == len(jobs),
+            "incomplete or inconsistent paginated jobs payload")
     matching = [j for j in jobs if isinstance(j, dict)
                 and j.get("name") == config["job"]]
     require(len(matching) == 1, "required job missing or ambiguous")
