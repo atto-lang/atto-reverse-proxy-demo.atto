@@ -17,6 +17,15 @@ pub routine main(): int {
     header_policy.request_copy("x-custom", "fine", "keep-alive,") ||
     header_policy.request_copy("x-custom", "fine", ",keep-alive") ||
     header_policy.request_copy("X-CUSTOM", "fine", "") ||
+    header_policy.request_copy("x-custom", "x\u0001y", "") ||
+    header_policy.request_copy("x-custom", "x\u0007y", "") ||
+    header_policy.request_copy("x-custom", "x\u000by", "") ||
+    header_policy.request_copy("x-custom", "x\u000cy", "") ||
+    header_policy.request_copy("x-custom", "x\u001by", "") ||
+    header_policy.request_copy("x-custom", "x\u001fy", "") ||
+    header_policy.request_copy("x-custom", "x\u007fy", "") ||
+    header_policy.response_copy("x-custom", "x\u000by", "") ||
+    !header_policy.response_action("x-custom", "x\u007fy", "").is_err() ||
     header_policy.request_copy("x-custom", "ok\r\nInjected: yes", "") ||
     header_policy.request_copy("x:evil", "fine", "") ||
     header_policy.response_copy("transfer-encoding", "chunked", "") ||
