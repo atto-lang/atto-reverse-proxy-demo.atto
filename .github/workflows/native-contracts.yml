@@ -1,22 +1,26 @@
-# RETIRED: the historical workflow was callable by same-repo PR heads and
-# scheduled self-hosted 'oreslang-jdk25' runners. Repo-local PR authors can
-# control those source bytes; fork exclusion alone did not create a trust
-# boundary. Native tests must move to independently reviewed protected-main
-# trusted workflows with complete root-owned runtime manifest attestation.
-# This intentionally fails if manually invoked and NEVER runs guest code.
-name: Legacy native proxy workflow disabled (NOT_EXECUTED)
+# Legacy PR-head native workflow retired before trusted runners are provisioned.
+# This used to execute same-repository PR-controlled code on a self-hosted
+# runner. It must never be treated as successful native release evidence.
+# The independently reviewed frozen-source admission workflow is proposed in
+# .github/workflows/trusted-frozen-reverse-native.yml (PR #20).
+# Admin: protect default main, require independent review, and restrict native
+# runner groups to specifically approved workflows before enabling runners.
+name: Legacy Native Oreslang Proxy Contracts (retired, fail closed)
 on:
   workflow_dispatch:
 permissions: {}
 jobs:
-  fail-closed-legacy-native:
+  legacy-disabled:
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      github.repository_id == '1429954649' &&
+      github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     timeout-minutes: 2
     steps:
-      - name: Refuse unapproved native self-hosted execution
+      - name: Refuse legacy native admission
         shell: bash
         run: |
-          echo "::error::LEGACY_NATIVE_DISABLED: this source-branch workflow cannot certify Oreslang."
-          echo "::error::Use the independently reviewed protected-main native control plane."
-          echo "NATIVE_ORESLANG_PROXY_TESTS=NOT_EXECUTED"
-          exit 78
+          echo 'ERROR: legacy PR-head native workflow retired; not an Oreslang test result' >&2
+          echo 'Use protected-main trusted-frozen-reverse-native workflow after independent review' >&2
+          exit 1
