@@ -6,7 +6,7 @@ Updated 2026-10-31. **This is a test plan, not executable CI evidence.**
 
 The legacy `.github/workflows/native-contracts.yml` on these audit branches is
 **retired and fail-closed**. It does not accept pull-request triggers, does not
-reserve a self-hosted runner and returns exit 78 (`NOT_EXECUTED`) on manual
+reserve a self-hosted runner and exits nonzero (`NOT_EXECUTED`) on manual
 dispatch. Excluding forks alone was not enough: same-repository PR authors
 could still control guest code on a privileged self-hosted runner.
 
