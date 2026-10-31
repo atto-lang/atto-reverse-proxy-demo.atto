@@ -128,4 +128,40 @@ has .github/workflows/actor-ingress-wire.yml 'Recheck protected private main bef
 has .github/workflows/actor-ingress-wire.yml 'APPROVED_ORESLANG_RUNTIME_MANIFEST_SHA256' 'approved native runtime manifest'
 has .github/workflows/actor-ingress-wire.yml '--allow-net=127.0.0.1:8080' 'loopback-only native client'
 absent .github/workflows/actor-ingress-wire.yml 'runs-on: [self-hosted' 'no unrestricted native runner'
+# Retain high-value lexical/header/pool/middleware assertions from the
+# retired Python checker. These are structural, not native guest evidence.
+for n in $(/usr/bin/seq 0 31) 127; do
+  printf -v token '\\u%04x' "$n"
+  /usr/bin/grep -Fq -- "$token" src/admission_text.ores ||
+    die "C0/DEL literal missing in lexical guard: $n"
+done
+pass 'all 32 C0 plus DEL literals are in shared lexical guard'
+has src/header_policy.ores 'return admission_text.control_free(value)' 'complete header-value control filter'
+has src/header_policy.ores 'for (const original of connection_tokens.split_literal' 'connection nomination full token list'
+has src/header_policy.ores 'Only ASCII SP' 'connection token ASCII normalization'
+has src/header_policy.ores 'return !matched' 'connection nomination deny on match'
+has tests/backend_pools_contract.ores 'weighted-round-robin' 'weighted pool fixture'
+has tests/backend_pools_contract.ores 'FAIL deterministic backend rotation' 'backend deterministic rotation negative'
+has tests/backend_pools_contract.ores 'FAIL unknown backend pool' 'unknown pool rejected'
+has tests/service_bindings_contract.ores 'gated_documents.add(gated_deny)' 'actor middleware deny fixture'
+has tests/service_bindings_contract.ores 'kind: require_header' 'actor required-header fixture'
+has tests/service_bindings_contract.ores 'kind: trace' 'actor trace fixture'
+has tests/service_bindings_contract.ores 'FAIL middleware-gated service route escaped admission' 'actor middleware regression oracle'
+has tests/network_admission_contract.ores 'middleware: denied' 'predial deny route fixture'
+has tests/network_admission_contract.ores 'middleware: token' 'predial required-header route fixture'
+has tests/network_admission_contract.ores '/deny/request' 'predial denial path'
+has tests/network_admission_contract.ores '/required/request' 'predial header requirement path'
+for entry in 'workers|streaming-route' 'streaming-route|unregistered-route' 'unregistered-route|origin'; do
+  IFS='|' read -r start stop <<< "$entry"
+  /usr/bin/awk -v start="$start" -v stop="$stop" '
+    $0 == "  - name: " start {within=1; found=1; next}
+    $0 == "  - name: " stop {if(within) exit 0}
+    within && /middleware:/ {exit 2}
+    END {if(!found) exit 3}
+  ' config/worker-example.yaml || die "actor route middleware must remain unavailable: $start"
+done
+pass 'all three actor service routes are middleware-free'
+has tests/actor_ingress_tcp_smoke.ores 'HEAD /actor HTTP/1.1' 'actor HEAD refusal fixture'
+has tests/actor_ingress_tcp_smoke.ores 'HEAD /stream HTTP/1.1' 'stream HEAD refusal fixture'
+has tests/actor_ingress_tcp_smoke.ores 'starts_with("HTTP/1.1 405")' 'actor HEAD 405 verdict'
 printf 'SOURCEFREE_PROXY_AUDIT_PASS checks=%s host_only=true; NATIVE_NOT_EXECUTED\n' "$count"
