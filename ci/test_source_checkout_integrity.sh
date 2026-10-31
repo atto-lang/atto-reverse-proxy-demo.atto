@@ -56,6 +56,15 @@ chmod +x source.ores
 expect_deny chmod-drift-with-filemode-disabled bash ci/source_checkout_integrity.sh
 chmod -x source.ores
 git config --unset core.filemode
+ln -s source.ores untracked-link.ores
+expect_deny untracked-symlink bash ci/source_checkout_integrity.sh
+rm untracked-link.ores
+git update-index --skip-worktree source.ores
+expect_deny skip-worktree-index-flag bash ci/source_checkout_integrity.sh
+git update-index --no-skip-worktree source.ores
+git update-index --assume-unchanged source.ores
+expect_deny assume-unchanged-index-flag bash ci/source_checkout_integrity.sh
+git update-index --no-assume-unchanged source.ores
 expect_deny wrong-expected-head env EXPECTED_SHA=0000000000000000000000000000000000000000 bash ci/source_checkout_integrity.sh
 GIT_DIR="$work" expect_deny poisoned-git-dir bash ci/source_checkout_integrity.sh
 printf 'print(1)\n' > source.py
