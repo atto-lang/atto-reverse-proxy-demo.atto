@@ -2,6 +2,8 @@
 # Host-only, source-local, canonical config contract. NOT an Oreslang guest test.
 set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
+source_script="$root/ci/verify-safe-defaults.sh"
+safe_defaults_tmp_dir=''
 
 # The expected configuration is embedded in this independently reviewed gate.
 # Do not learn expected values from the mutable source checkout being audited.
@@ -134,14 +136,30 @@ self_test() {
   /usr/bin/git -C "$root" reset --hard -q HEAD
   /usr/bin/git -C "$root" update-index --chmod=+x config/example.yaml
   if verify_index config/example.yaml; then return 1; fi
-  echo 'REVERSE_SAFE_DEFAULTS_ADVERSARIAL_PASS cases=10 host_only=true'
+  # Regression: a hostile TMPDIR containing quotes and shell metacharacters
+  # must not execute a command through the EXIT cleanup trap.
+  local poisoned_tmp="$outside/poison\";touch INJECTED;#"
+  /usr/bin/mkdir -p -- "$poisoned_tmp"
+  if (
+    cd "$fixtures" &&
+    TMPDIR="$poisoned_tmp" EXPECTED_DEMO_SHA=invalid \
+      /bin/bash "$source_script" --verify >/dev/null 2>&1
+  ); then
+    return 1
+  fi
+  [[ ! -e "$fixtures/INJECTED" ]] || return 1
+  [[ -z "$(/usr/bin/find "$poisoned_tmp" -mindepth 1 -print -quit)" ]] || return 1
+  echo 'REVERSE_SAFE_DEFAULTS_ADVERSARIAL_PASS cases=11 host_only=true'
 }
 
 main() {
   local mode="${1:-}" fixtures expected path oracle
   case "$mode" in --verify|--self-test) ;; *) echo 'usage: verify-safe-defaults.sh --verify|--self-test' >&2; exit 2;; esac
-  fixtures="$(/usr/bin/mktemp -d)"
-  trap "/usr/bin/rm -rf -- \"$fixtures\"" EXIT
+  safe_defaults_tmp_dir="$(/usr/bin/mktemp -d)"
+  fixtures="$safe_defaults_tmp_dir"
+  # TMPDIR can contain shell metacharacters. Never interpolate it into trap code.
+  # This must be global: main's local variables disappear before EXIT cleanup.
+  trap '/usr/bin/rm -rf -- "$safe_defaults_tmp_dir"' EXIT
   write_oracles "$fixtures"
   if [[ "$mode" == --self-test ]]; then
     self_test "$fixtures" || { echo 'SAFE_DEFAULTS_SELF_TEST_FAILURE' >&2; exit 2; }
