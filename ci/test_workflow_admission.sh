@@ -53,7 +53,7 @@ deny_mutation 'unrestrict client network' '--allow-net=127.0.0.1:8080' '--allow-
 deny_mutation 'remove pre-checkout authorization' 'Recheck protected private main before source checkout' 'Skip authentication'
 # Test an added PR trigger, rather than merely replacing an existing field.
 cp "$tmp/clean" "$tmp/mutated"
-printf '\n  pull_request:\n' >> "$tmp/mutated"
+/usr/bin/sed -i '/^on:$/a\  pull_request:' "$tmp/mutated"
 if validate "$tmp/mutated"; then
   echo 'SOURCEFREE_FAIL: PR trigger accepted' >&2; exit 1
 fi
