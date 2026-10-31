@@ -151,3 +151,44 @@ GitHub run #41228083823 failed with no reported executed steps, so the new
 Bash suite is **NOT_EXECUTED** in Actions. No Oreslang compilation, HTTP
 wire verification, approval, or merge readiness follows from the static
 source-policy reconciliation.
+
+## Exact checkout integrity: ignored files and index flags
+
+The hosted source audit now invokes `ci/source_checkout_integrity.sh`
+before inspecting Oreslang source. The gate independently scans ordinary
+untracked files (`git ls-files --others --exclude-standard`) **and**
+ignored untracked files (`git ls-files --others --ignored
+--exclude-standard`). Git's plain `--others` command already includes
+ignored files without exclusion options; this explicit split prevents a
+future addition of `--exclude-standard` from silently narrowing coverage.
+
+The same gate pins the real worktree and HEAD, rejects staged/unstaged
+changes and executable mode drift, and rejects index entries carrying
+`skip-worktree` or `assume-unchanged` flags that can hide changes from
+normal Git diff inspections. Git source and index listings must complete
+successfully; failures do not become empty pass conditions. Tracked
+Python-source extensions are rejected.
+
+### Host-only executed evidence (31 October 2026)
+
+- `ci/test_source_checkout_integrity.sh`: **13/13 cases passed**
+  in a disposable synthetic Git repository (clean, empty Git env,
+  untracked ordinary and ignored files, dirty tracked bytes,
+  staged changes, filemode-off chmod drift, untracked symlink,
+  skip-worktree and assume-unchanged, wrong HEAD, poisoned Git routing,
+  tracked Python). Both committed Bash blobs were verified to match the
+  locally executed files using Git blob SHA.
+- `ci/test_workflow_admission.sh`: **9/9 negative mutations passed**
+  on a synthetic workflow fixture. The mutated PR trigger was inserted
+  into the actual `on:` mapping; the test checks other downgrade
+  attempts involving ref protection, runtime digest, runner group,
+  hosted dependency and loopback permission.
+- Remote, exact-head GitHub content inspection: **62/62 authored**
+  source-structure assertions present; the reviewed manifests match
+  **38** Oreslang source/test files and **17** standalone pure contract
+  files. This is static inspection, **not** a Bash process exit receipt.
+
+The complete source-free audit still needs to execute on the exact PR
+checkout in GitHub Actions; runner admission has remained blocked. None
+of these host-only results proves Oreslang compilation, network behavior,
+branch protection, independent review, or merge readiness.
