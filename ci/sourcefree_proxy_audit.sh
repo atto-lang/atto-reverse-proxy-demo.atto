@@ -44,30 +44,11 @@ selftest() {
 }
 if [[ "$#" -eq 1 && "$1" == --self-test ]]; then selftest; exit 0; fi
 [[ "$#" -eq 0 ]] || die 'usage: sourcefree_proxy_audit.sh [--self-test]'
-[[ -d .git && ! -L .git ]] || die 'expected real checkout'
-for key in GIT_DIR GIT_WORK_TREE GIT_COMMON_DIR GIT_INDEX_FILE GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_NAMESPACE; do
-  [[ -z "$(/usr/bin/printenv "$key" 2>/dev/null || true)" ]] || die "Git redirect: $key"
-done
-git_exact() {
-  /usr/bin/git --no-replace-objects -c core.fsmonitor=false -c core.filemode=true \
-    --git-dir="$ROOT/.git" --work-tree="$ROOT" "$@"
-}
-[[ "$(git_exact rev-parse --show-toplevel)" == "$ROOT" ]] || die 'Git root mismatch'
-head="$(git_exact rev-parse --verify HEAD)"
-[[ "$head" =~ ^[0-9a-f]{40}$ ]] || die 'invalid HEAD'
-if [[ -n "$(/usr/bin/printenv EXPECTED_SHA 2>/dev/null || true)" ]]; then
-  [[ "$head" == "$EXPECTED_SHA" ]] || die 'wrong exact head'
-fi
-git_exact diff --no-ext-diff --quiet HEAD -- || die 'modified tracked worktree'
-git_exact diff --no-ext-diff --cached --quiet HEAD -- || die 'staged modifications'
-[[ "$(git_exact ls-files --others -z | /usr/bin/wc -c)" -eq 0 ]] || die 'untracked/ignored files'
-while IFS= read -r -d '' path; do
-  case "$path" in
-    *.[Pp][Yy]|*.[Pp][Yy][Ii]|*.[Ii][Pp][Yy][Nn][Bb])
-      die "tracked Python forbidden: $path" ;;
-  esac
-done < <(git_exact ls-files -z)
-pass 'no tracked Python source'
+# Centralized Git identity and ignored-file authority checks are exercised
+# independently by ci/test_source_checkout_integrity.sh.
+regular ci/source_checkout_integrity.sh
+bash ci/source_checkout_integrity.sh
+pass 'checkout integrity including ignored and nonignored paths'
 regular ci/oreslang-files.txt
 regular ci/pure-contracts.txt
 for dir in src tests; do
