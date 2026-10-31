@@ -1,0 +1,57 @@
+# Hosted-only source and actor-wire structural audit. No native runner.
+# Same-repository PRs may run Bash on GitHub-hosted workers, without secrets.
+name: Source-free reverse proxy security audit
+on:
+  # The current actor stack is a PR against another development branch.
+  # A hosted-only push trigger permits checking the exact current branch HEAD
+  # before its target branch adopts this new workflow definition.
+  push:
+    branches:
+      - feat/actor-dispatch-receipts-2238
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: reverse-sourcefree-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  security-contracts:
+    if: >-
+      github.event.repository.id == 1429954649 &&
+      ((github.event_name == 'pull_request' &&
+        github.event.pull_request.head.repo.id == 1429954649 &&
+        github.event.pull_request.base.repo.id == 1429954649) ||
+       (github.event_name == 'push' &&
+        github.ref == 'refs/heads/feat/actor-dispatch-receipts-2238') ||
+       (github.event_name == 'workflow_dispatch' &&
+        github.ref == 'refs/heads/main'))
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Checkout exact event head
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+          submodules: false
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+      - name: Verify source identity and execute source-free audit
+        shell: bash
+        env:
+          EXPECTED_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          EXPECTED_REPO_ID: '1429954649'
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY_ID" = "$EXPECTED_REPO_ID"
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          printf 'source_head=%s\nsource_tree=%s\nrun_id=%s\nrun_attempt=%s\n' \
+            "$EXPECTED_SHA" "$(git rev-parse HEAD^{tree})" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT"
+          # Hosted Bash only: do not conflate structural receipts with native.
+          bash -n ci/sourcefree_proxy_audit.sh
+          bash -n ci/source_checkout_integrity.sh
+          bash -n ci/test_source_checkout_integrity.sh
+          bash -n ci/test_workflow_admission.sh
+          bash ci/sourcefree_proxy_audit.sh --self-test
+          bash ci/test_source_checkout_integrity.sh
+          bash ci/test_workflow_admission.sh
+          EXPECTED_SHA="$EXPECTED_SHA" bash ci/sourcefree_proxy_audit.sh

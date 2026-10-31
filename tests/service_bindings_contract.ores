@@ -1,0 +1,165 @@
+import module proxy_yaml from "../src/proxy_yaml";
+import module generation from "../src/generation";
+import module service_bindings from "../src/service_bindings";
+
+pub routine main(): int {
+  val String source = "version: ores.proxy/v1\nmode: reverse\nlisten:\n  host: 127.0.0.1\n  port: 8080\nruntime:\n  carriers: 20\n  actors: 100\n  max_inflight: 1024\n" +
+    "services:\n  - name: api-service\n    kind: actor\n    target: api-v1\n" +
+    "routes:\n  - name: api\n    host: api.example.test\n    path_prefix: /\n    upstream: service://api-service\n";
+  val parsed = proxy_yaml.parse(source, "reverse");
+  if parsed.is_err(); then stdio.println("FAIL valid service YAML"); return 1; fi
+  val opened = generation.open(source, "reverse");
+  if opened.is_err(); then stdio.println("FAIL open service generation"); return 1; fi
+
+  let Array<service_bindings.CodeImage> trusted_images =
+    new Array<service_bindings.CodeImage>();
+  trusted_images.add(new service_bindings.CodeImage("api-v1", "abi-v1", false));
+  trusted_images.add(new service_bindings.CodeImage("api-v2", "abi-v1", false));
+  trusted_images.add(new service_bindings.CodeImage("api-net", "abi-v1", true));
+  val trusted_result = service_bindings.registry(trusted_images);
+  if trusted_result.is_err(); then stdio.println("FAIL trusted image registry"); return 1; fi
+  val trusted = trusted_result.unwrap();
+
+  let Array<service_bindings.CodeImage> wrong_images =
+    new Array<service_bindings.CodeImage>();
+  wrong_images.add(new service_bindings.CodeImage("other-v1", "abi-v1", false));
+  val wrong = service_bindings.registry(wrong_images).unwrap();
+
+  let supervisor = opened.unwrap();
+  val old = supervisor.snapshot().unwrap();
+  if service_bindings.bind(rt borrow old, rt borrow wrong,
+      "api-service").is_ok(); then
+    stdio.println("FAIL YAML target escaped trusted actor registry"); return 1;
+  fi
+  val allowed = service_bindings.bind(rt borrow old, rt borrow trusted,
+    "api-service");
+  if allowed.is_err(); then stdio.println("FAIL service bind"); return 1; fi
+  val old_bind = allowed.unwrap();
+  if old_bind.target != "api-v1" || old_bind.epoch != 1 ||
+    old_bind.abi != "abi-v1" || old_bind.network_capable ||
+    !service_bindings.local_dispatch_allowed(rt borrow old_bind,
+      rt borrow old, "api-service", "api-v1", "abi-v1") ||
+    service_bindings.local_dispatch_allowed(rt borrow old_bind,
+      rt borrow old, "api-service", "api-v2", "abi-v1") ||
+    service_bindings.local_dispatch_allowed(rt borrow old_bind,
+      rt borrow old, "other-service", "api-v1", "abi-v1") ||
+    service_bindings.local_dispatch_allowed(rt borrow old_bind,
+      rt borrow old, "api-service", "api-v1", "abi-v2") ||
+    service_bindings.bind(rt borrow old, rt borrow trusted,
+      "ambient-fetch").is_ok(); then
+    stdio.println("FAIL service capability binding or dispatch fence"); return 1;
+  fi
+  if proxy_yaml.parse(source.replace_literal("target: api-v1",
+      "target: ../arbitrary-source"), "reverse").is_ok() ||
+    proxy_yaml.parse(source.replace_literal("kind: actor", "kind: origin"), "reverse").is_ok() ||
+    proxy_yaml.parse(source.replace_literal("services:", "services:\n  - name: api-service\n    kind: actor\n    target: api-v0"), "reverse").is_ok(); then
+    stdio.println("FAIL invalid service declaration"); return 1;
+  fi
+  val selected = service_bindings.reverse_route(rt borrow old,
+      rt borrow trusted, "api.example.test", "/ok");
+  if selected.is_err() || selected.unwrap().target != "api-v1"; then
+    stdio.println("FAIL reverse actor service route"); return 1;
+  fi
+
+  // Two service names may intentionally point at the same code image, but
+  // service identity is part of the dispatch authority. A route to an alias
+  // must not satisfy a caller expecting api-service merely because the target
+  // image is also api-v1.
+  val String alias_source = source
+    .replace_literal("    target: api-v1\n",
+      "    target: api-v1\n  - name: api-alias\n    kind: actor\n    target: api-v1\n")
+    .replace_literal("upstream: service://api-service",
+      "upstream: service://api-alias");
+  val alias_opened = generation.open(alias_source, "reverse");
+  if alias_opened.is_err(); then
+    stdio.println("FAIL open same-image service alias fixture"); return 1;
+  fi
+  val alias_snapshot = alias_opened.unwrap().snapshot().unwrap();
+  val alias_binding = service_bindings.reverse_route(rt borrow alias_snapshot,
+    rt borrow trusted, "api.example.test", "/ok");
+  if alias_binding.is_err(); then
+    stdio.println("FAIL resolve same-image service alias fixture"); return 1;
+  fi
+  val alias_actor = alias_binding.unwrap();
+  if service_bindings.local_dispatch_allowed(rt borrow alias_actor,
+      rt borrow alias_snapshot, "api-service", "api-v1", "abi-v1"); then
+    stdio.println("FAIL same-image service alias escaped identity fence");
+    return 1;
+  fi
+  // A route matcher and approved image cannot substitute for middleware
+  // admission, including trace-only middleware.
+  val String gated_deny = source
+    .replace_literal("routes:\n",
+      "middleware:\n  - name: gate\n    kind: deny\nroutes:\n")
+    .replace_literal("    upstream: service://api-service\n",
+      "    upstream: service://api-service\n    middleware: gate\n");
+  let Array<String> gated_documents = new Array<String>();
+  gated_documents.add(gated_deny);
+  gated_documents.add(gated_deny.replace_literal("kind: deny\n",
+    "kind: require_header\n    header: x-token\n"));
+  gated_documents.add(gated_deny.replace_literal("kind: deny\n",
+    "kind: trace\n"));
+  for (const gated of gated_documents) {
+    val parsed_gated = proxy_yaml.parse(gated, "reverse");
+    if parsed_gated.is_err(); then
+      stdio.println("FAIL valid middleware-gated service fixture"); return 1;
+    fi
+    val gated_snapshot = new generation.Snapshot(1, parsed_gated.unwrap());
+    if service_bindings.reverse_route(rt borrow gated_snapshot,
+        rt borrow trusted, "api.example.test", "/ok").is_ok(); then
+      stdio.println("FAIL middleware-gated service route escaped admission");
+      return 1;
+    fi
+  }
+
+  if proxy_yaml.parse(source.replace_literal("service://api-service",
+      "service://missing"), "reverse").is_ok(); then
+    stdio.println("FAIL route with unbound actor service"); return 1;
+  fi
+  // A trusted registry may contain an actor with internal NET authority, but
+  // public reverse ingress must not be able to route an HttpExchange to it.
+  val String net_source = source.replace_literal("target: api-v1",
+    "target: api-net");
+  val net_opened = generation.open(net_source, "reverse");
+  if net_opened.is_err(); then
+    stdio.println("FAIL open network-capable actor fixture"); return 1;
+  fi
+  val net_snapshot = net_opened.unwrap().snapshot().unwrap();
+  if service_bindings.reverse_route(rt borrow net_snapshot,
+      rt borrow trusted, "api.example.test", "/ok").is_ok(); then
+    stdio.println("FAIL public ingress reached network-capable actor image");
+    return 1;
+  fi
+  if supervisor.prepare(source.replace_literal("target: api-v1",
+      "target: api-v2")).is_err(); then
+    stdio.println("FAIL stage actor version"); return 1;
+  fi
+  val next = supervisor.publish(1);
+  if next.is_err(); then stdio.println("FAIL publish actor service"); return 1; fi
+  val updated = next.unwrap();
+  val new_bind = service_bindings.bind(rt borrow updated, rt borrow trusted,
+    "api-service");
+  if new_bind.is_err(); then
+    stdio.println("FAIL generation-local service isolation"); return 1;
+  fi
+  val new_actor = new_bind.unwrap();
+  if new_actor.target != "api-v2" || new_actor.epoch != 2 ||
+    old_bind.target != "api-v1" || old_bind.epoch != 1 ||
+    service_bindings.local_dispatch_allowed(rt borrow old_bind,
+      rt borrow updated, "api-service", "api-v1", "abi-v1") ||
+    !service_bindings.local_dispatch_allowed(rt borrow new_actor,
+      rt borrow updated, "api-service", "api-v2", "abi-v1"); then
+    stdio.println("FAIL stale actor binding escaped generation fence"); return 1;
+  fi
+
+  let Array<service_bindings.CodeImage> duplicates =
+    new Array<service_bindings.CodeImage>();
+  duplicates.add(new service_bindings.CodeImage("api-v1", "abi-v1", false));
+  duplicates.add(new service_bindings.CodeImage("api-v1", "abi-v2", false));
+  if service_bindings.registry(duplicates).is_ok(); then
+    stdio.println("FAIL duplicate trusted actor target"); return 1;
+  fi
+
+  stdio.println("PASS trusted reverse service binding contract (no network authority)");
+  return 0;
+}

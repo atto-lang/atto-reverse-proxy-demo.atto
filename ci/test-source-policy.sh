@@ -21,6 +21,12 @@ check_bad() {
   fi
 }
 check_ok
+# SOURCE_REF provenance must be inert (100644), not executable even if
+# its 40-hex contents and the worktree are otherwise valid.
+git -C "$test_repo" update-index --chmod=+x -- SOURCE_REF
+check_bad
+git -C "$test_repo" update-index --chmod=-x -- SOURCE_REF
+check_ok
 mkdir -p "$test_repo/nested space"
 printf 'placeholder\n' > "$test_repo/nested space/unsafe.PY"
 git -C "$test_repo" add .
@@ -41,6 +47,34 @@ for interpreter in "'python3'" '"python3"' "'py''thon3'"; do
   git -C "$test_repo" add quoted-interpreter
   check_bad
   git -C "$test_repo" rm -q -f -- quoted-interpreter
+done
+# Python executable ABI/debug variants bypassed the previous digits-and-dots
+# regex, despite being valid executable names for Python interpreters.
+for interpreter in python3.7m python3.11-dbg python3.11d; do
+  printf '#!/usr/bin/env -S %s\n' "$interpreter" > "$test_repo/abi-interpreter"
+  git -C "$test_repo" add abi-interpreter
+  check_bad
+  git -C "$test_repo" rm -q -f -- abi-interpreter
+done
+printf '#!/usr/bin/python3.7m\n' > "$test_repo/direct-abi-interpreter"
+git -C "$test_repo" add direct-abi-interpreter
+check_bad
+git -C "$test_repo" rm -q -f -- direct-abi-interpreter
+# GNU env -S also expands environment variables before interpreter lookup.
+# Reject both unquoted and quoted variable-based executable selection.
+for interpreter in '${ORES_POLICY_INTERPRETER}' '"${ORES_POLICY_INTERPRETER}"'; do
+  printf '#!/usr/bin/env -S %s\n' "$interpreter" > "$test_repo/dynamic-interpreter"
+  git -C "$test_repo" add dynamic-interpreter
+  check_bad
+  git -C "$test_repo" rm -q -f -- dynamic-interpreter
+done
+# GNU env -S interprets \_ as a word separator before selecting Python.
+# The original backslash-removal regex sees _python3 and incorrectly permits it.
+for interpreter in '\_python3' '\_ python3'; do
+  printf '#!/usr/bin/env -S %s\n' "$interpreter" > "$test_repo/escaped-separator"
+  git -C "$test_repo" add escaped-separator
+  check_bad
+  git -C "$test_repo" rm -q -f -- escaped-separator
 done
 # The stricter guard must not reject unrelated interpreters.
 printf '#!/usr/bin/env node\n' > "$test_repo/node-interpreter"
@@ -138,4 +172,101 @@ git -C "$test_repo" add src/disguised.txt
 check_ok
 git -C "$test_repo" rm -q -f -- src/disguised.txt
 check_ok
-printf 'SOURCE_POLICY_NEGATIVE_TESTS_PASS scenarios=16\n'
+# A SHA-pinned production audit must not be redirected to a clean sibling
+# checkout. Both clones have identical HEAD but the invoking tree is dirty.
+redirect_case="$test_repo/sha-override"
+git init -q "$redirect_case/clean"
+git -C "$redirect_case/clean" config user.name "Policy test"
+git -C "$redirect_case/clean" config user.email "policy@example.invalid"
+mkdir -p "$redirect_case/clean/src"
+printf 'safe\n' > "$redirect_case/clean/src/hello.ores"
+git -C "$redirect_case/clean" add .
+git -C "$redirect_case/clean" commit -q -m 'clean baseline'
+git clone -q "$redirect_case/clean" "$redirect_case/dirty"
+mkdir -p "$redirect_case/dirty/ci"
+cp "$root/ci/source-policy.sh" "$redirect_case/dirty/ci/source-policy.sh"
+printf '#!/usr/bin/env python3\n' > "$redirect_case/dirty/src/hello.ores"
+redirect_sha="$(git -C "$redirect_case/dirty" rev-parse HEAD)"
+if SOURCE_POLICY_ROOT="$redirect_case/clean" EXPECTED_DEMO_SHA="$redirect_sha" \
+  bash "$redirect_case/dirty/ci/source-policy.sh" > "$redirect_case/result.log" 2>&1; then
+  echo "TEST_FAILURE: SHA-pinned policy accepted redirected clean checkout" >&2
+  exit 1
+fi
+grep -Fq 'POLICY_FAILURE: SHA-pinned audit cannot redirect SOURCE_POLICY_ROOT' "$redirect_case/result.log" || {
+  echo "TEST_FAILURE: redirected SHA-pinned audit did not fail at root binding" >&2
+  exit 1
+}
+# The pinned commit must bind the INDEX and worktree, not merely HEAD.
+# Before this fix, deleting a tracked file from both the index and worktree
+# left the old index-only policy blind to its presence in the pinned commit.
+pinned_repo="$test_repo/pinned-audit"
+mkdir -p "$pinned_repo/ci" "$pinned_repo/docs"
+cp "$root/ci/source-policy.sh" "$pinned_repo/ci/source-policy.sh"
+printf 'safe tracked bytes\n' > "$pinned_repo/docs/allowed.txt"
+git init -q "$pinned_repo"
+git -C "$pinned_repo" config user.name 'Policy pinned test'
+git -C "$pinned_repo" config user.email 'policy@example.invalid'
+git -C "$pinned_repo" add .
+git -C "$pinned_repo" commit -q -m 'exact pinned source'
+pinned_sha="$(git -C "$pinned_repo" rev-parse HEAD)"
+EXPECTED_DEMO_SHA="$pinned_sha" bash "$pinned_repo/ci/source-policy.sh" > /dev/null || {
+  echo 'TEST_FAILURE: clean SHA-pinned checkout was rejected' >&2; exit 1;
+}
+git -C "$pinned_repo" rm -q -- docs/allowed.txt
+if EXPECTED_DEMO_SHA="$pinned_sha" bash "$pinned_repo/ci/source-policy.sh" >/dev/null 2>&1; then
+  echo 'TEST_FAILURE: removed tracked HEAD blob escaped exact-source audit' >&2; exit 1
+fi
+git -C "$pinned_repo" reset --hard -q HEAD
+printf 'unreviewed safe file\n' > "$pinned_repo/docs/addition.txt"
+git -C "$pinned_repo" add docs/addition.txt
+if EXPECTED_DEMO_SHA="$pinned_sha" bash "$pinned_repo/ci/source-policy.sh" >/dev/null 2>&1; then
+  echo 'TEST_FAILURE: newly staged file escaped exact-source audit' >&2; exit 1
+fi
+git -C "$pinned_repo" reset --hard -q HEAD
+# An ignored file is still an unexpected input to the pinned checkout.
+printf 'ignored\n' > "$pinned_repo/docs/ignored.txt"
+printf 'docs/ignored.txt\n' > "$pinned_repo/.git/info/exclude"
+if EXPECTED_DEMO_SHA="$pinned_sha" bash "$pinned_repo/ci/source-policy.sh" >/dev/null 2>&1; then
+  echo 'TEST_FAILURE: ignored untracked file escaped exact-source audit' >&2; exit 1
+fi
+rm "$pinned_repo/docs/ignored.txt"
+EXPECTED_DEMO_SHA="$pinned_sha" bash "$pinned_repo/ci/source-policy.sh" > /dev/null || {
+  echo 'TEST_FAILURE: pinned checkout failed after fixture recovery' >&2; exit 1;
+}
+# A checkout with core.filemode=false must not hide executable-bit drift.
+# The policy explicitly forces core.filemode=true for its HEAD comparisons.
+git -C "$pinned_repo" config core.filemode false
+chmod +x "$pinned_repo/docs/allowed.txt"
+if EXPECTED_DEMO_SHA="$pinned_sha" bash "$pinned_repo/ci/source-policy.sh" >/dev/null 2>&1; then
+  echo 'TEST_FAILURE: executable-bit drift escaped SHA-pinned audit with core.filemode=false' >&2
+  exit 1
+fi
+chmod -x "$pinned_repo/docs/allowed.txt"
+git -C "$pinned_repo" config --unset core.filemode
+EXPECTED_DEMO_SHA="$pinned_sha" bash "$pinned_repo/ci/source-policy.sh" > /dev/null || {
+  echo 'TEST_FAILURE: pinned checkout rejected after chmod fixture recovery' >&2; exit 1;
+}
+# A migration-only Python exception must never be accepted by SHA-pinned
+# production admission, even with a clean tracked Git tree and matching HEAD.
+legacy_repo="$test_repo/legacy-pinned-mode"
+mkdir -p "$legacy_repo/ci" "$legacy_repo/scripts"
+cp "$root/ci/source-policy.sh" "$legacy_repo/ci/source-policy.sh"
+printf 'print(1)\n' > "$legacy_repo/scripts/benchmark.py"
+git init -q "$legacy_repo"
+git -C "$legacy_repo" config user.name 'Legacy policy test'
+git -C "$legacy_repo" config user.email 'policy@example.invalid'
+git -C "$legacy_repo" add .
+git -C "$legacy_repo" commit -q -m 'legacy allowlisted source'
+legacy_sha="$(git -C "$legacy_repo" rev-parse HEAD)"
+SOURCE_POLICY_MODE=rest-legacy bash "$legacy_repo/ci/source-policy.sh" >/dev/null || {
+  echo 'TEST_FAILURE: unpinned legacy fixture compatibility regressed' >&2; exit 1
+}
+if SOURCE_POLICY_MODE=rest-legacy EXPECTED_DEMO_SHA="$legacy_sha" \
+  bash "$legacy_repo/ci/source-policy.sh" > "$legacy_repo/rejection.log" 2>&1; then
+  echo 'TEST_FAILURE: SHA-pinned audit accepted migration-only Python exemption' >&2
+  exit 1
+fi
+grep -Fq 'POLICY_FAILURE: SHA-pinned source policy requires strict mode' "$legacy_repo/rejection.log" || {
+  echo 'TEST_FAILURE: pinned legacy exemption failed for wrong reason' >&2; exit 1
+}
+printf 'SOURCE_POLICY_NEGATIVE_TESTS_PASS scenarios=31\n'

@@ -2,28 +2,41 @@ name: Reverse proxy source contracts
 on:
   pull_request:
   workflow_dispatch:
-permissions:
-  contents: read
+permissions: {}
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 jobs:
   inventory:
+    # Hosted, read-only source audit. Never authorize fork input or any
+    # self-hosted runner from this PR-head contract.
+    if: >-
+      (github.event_name == 'pull_request' &&
+       github.event.pull_request.head.repo.id == 1429954649 &&
+       github.event.pull_request.base.repo.id == 1429954649)
+      || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
     runs-on: ubuntu-24.04
     timeout-minutes: 5
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           persist-credentials: false
+          submodules: false
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
-      - name: Verify exact source tree
+      - name: Verify exact source head and tree
         shell: bash
         env:
-          EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          EXPECTED_DEMO_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
-      - name: Reject missing, empty or linked contract inputs
+          [[ "$EXPECTED_DEMO_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$(git rev-parse HEAD)" == "$EXPECTED_DEMO_SHA" ]]
+          [[ -z "$(git status --porcelain)" ]]
+          printf 'EXACT_DEMO_HEAD=%s\n' "$EXPECTED_DEMO_SHA"
+          printf 'EXACT_DEMO_TREE=%s\n' "$(git rev-parse HEAD^{tree})"
+      - name: Reject absent, untracked, empty, nonregular or linked contract inputs
         shell: bash
         run: |
           set -euo pipefail
@@ -43,7 +56,26 @@ jobs:
             test -f "$file"
             test -s "$file"
             test ! -L "$file"
+            git ls-files --error-unmatch -- "$file" >/dev/null
+            [[ "$(git ls-files --stage -- "$file")" == "100644 "* ]]
+            cmp -s "$file" <(git show "HEAD:$file")
           done
           test -z "$(find src tests config -type l -print -quit)"
+          echo 'TRACKED_SOURCE_CONTRACT_INVENTORY_PASS required_files=11'
+      - name: Exercise source-policy negative fixtures
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash -n ci/source-policy.sh
+          bash -n ci/test-source-policy.sh
+          bash ci/test-source-policy.sh
+      - name: Audit exact checked-out source against pinned head
+        shell: bash
+        env:
+          EXPECTED_DEMO_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          bash ci/source-policy.sh
       - name: Preserve non-production verdict
+        shell: bash
         run: echo 'SOURCE_INVENTORY_ONLY; native compile/execute, upstream forwarding and network proof NOT_EXECUTED.'

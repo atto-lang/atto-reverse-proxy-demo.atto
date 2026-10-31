@@ -2,6 +2,13 @@
 # Fail-closed tracked-source policy; host-only, no Oreslang guest execution.
 set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
+# SOURCE_POLICY_ROOT is an isolated-test fixture override only. A SHA check
+# proves the selected Git commit, not that this script audited the checkout
+# from which it was invoked. Two worktrees can share HEAD but differ in bytes.
+if [[ -n "${EXPECTED_DEMO_SHA:-}" && -n "${SOURCE_POLICY_ROOT:-}" ]]; then
+  echo 'POLICY_FAILURE: SHA-pinned audit cannot redirect SOURCE_POLICY_ROOT' >&2
+  exit 2
+fi
 root="${SOURCE_POLICY_ROOT:-$repo_root}"
 root="$(cd "$root" && pwd -P)"
 cd "$root"
@@ -10,11 +17,26 @@ cd "$root"
 unset GIT_DIR GIT_WORK_TREE GIT_COMMON_DIR GIT_INDEX_FILE GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_NAMESPACE GIT_SHALLOW_FILE GIT_CEILING_DIRECTORIES GIT_DISCOVERY_ACROSS_FILESYSTEM GIT_GRAFT_FILE GIT_REPLACE_REF_BASE GIT_EXEC_PATH GIT_CONFIG
 export GIT_CONFIG_COUNT=0 GIT_CONFIG_PARAMETERS='' GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null
 [[ -d "$root/.git" && ! -L "$root/.git" ]] || { echo "POLICY_FAILURE: expected a real checkout Git directory" >&2; exit 2; }
-git_safe() { /usr/bin/git -c core.fsmonitor=false --no-replace-objects --git-dir="$root/.git" --work-tree="$root" "$@"; }
+git_safe() { /usr/bin/git -c core.fsmonitor=false -c core.filemode=true --no-replace-objects --git-dir="$root/.git" --work-tree="$root" "$@"; }
 [[ "$(git_safe rev-parse --show-toplevel)" == "$root" ]] || { echo "POLICY_FAILURE: Git repository root mismatch" >&2; exit 2; }
 if [[ -n "${EXPECTED_DEMO_SHA:-}" ]]; then
   [[ "${EXPECTED_DEMO_SHA}" =~ ^[a-f0-9]{40}$ ]] || { echo "POLICY_FAILURE: invalid expected head" >&2; exit 2; }
   [[ "$(git_safe rev-parse HEAD)" == "$EXPECTED_DEMO_SHA" ]] || { echo "POLICY_FAILURE: mismatched head" >&2; exit 2; }
+  # The commit SHA alone is insufficient: an attacker may remove a forbidden
+  # file from BOTH the index and worktree and make an index-based audit pass
+  # without changing HEAD. Admit only the pinned commit's complete checkout.
+  git_safe diff --no-ext-diff --cached --quiet HEAD -- || {
+    echo "POLICY_FAILURE: SHA-pinned audit has staged changes against HEAD" >&2; exit 2;
+  }
+  git_safe diff --no-ext-diff --quiet HEAD -- || {
+    echo "POLICY_FAILURE: SHA-pinned audit has modified tracked files" >&2; exit 2;
+  }
+  untracked_bytes="$(git_safe ls-files --others -z -- | /usr/bin/wc -c)" || {
+    echo "POLICY_FAILURE: unable to enumerate untracked files" >&2; exit 2;
+  }
+  [[ "$untracked_bytes" -eq 0 ]] || {
+    echo "POLICY_FAILURE: SHA-pinned audit has untracked or ignored files" >&2; exit 2;
+  }
 fi
 if [[ -e SOURCE_REF || -L SOURCE_REF ]] || git_safe ls-files --error-unmatch -- SOURCE_REF >/dev/null 2>&1; then
   [[ -f SOURCE_REF && ! -L SOURCE_REF ]] || {
@@ -32,6 +54,12 @@ if [[ -e SOURCE_REF || -L SOURCE_REF ]] || git_safe ls-files --error-unmatch -- 
 fi
 mode="${SOURCE_POLICY_MODE:-strict}"
 [[ "$mode" == strict || "$mode" == rest-legacy ]] || { echo "POLICY_FAILURE: unknown mode" >&2; exit 2; }
+# Rest-legacy is a migration-only fixture mode: never relax Python admission
+# when a workflow claims an exact pinned production source identity.
+if [[ -n "${EXPECTED_DEMO_SHA:-}" && "$mode" != strict ]]; then
+  echo 'POLICY_FAILURE: SHA-pinned source policy requires strict mode' >&2
+  exit 2
+fi
 count=0
 # Process substitution hides a failed producer's exit status. Materialize the
 # exact index inventory first and reject an empty or unreadable index.
@@ -92,12 +120,29 @@ while IFS= read -r -d '' path; do
   esac
   if (( ! allowed )) && [[ -f "$path" ]]; then
     IFS= read -r firstline < "$path" || true
+    # GNU env -S expands ${NAME} using the execution environment before
+    # resolving its interpreter. A variable can name Python without any
+    # literal python token appearing in the tracked shebang; fail closed.
+    if [[ "$firstline" == '#!'* && "$firstline" == *'${'* ]]; then
+      printf 'POLICY_FAILURE: variable-expanded shebang is not permitted: %s\n' "$path" >&2
+      exit 2
+    fi
+    # GNU env -S treats \_ as a word separator. Erasing its backslash
+    # leaves _python3, which bypasses a literal interpreter regex even though
+    # Linux executes python3. Reject escape separators rather than guessing
+    # whether they are active inside quotes.
+    if [[ "$firstline" == '#!'* && "$firstline" == *'\_'* ]]; then
+      printf 'POLICY_FAILURE: escaped shebang separator is not permitted: %s\n' "$path" >&2
+      exit 2
+    fi
     # env -S accepts quoted and concatenated interpreter tokens. Normalize
     # their shell-like quoting before testing, or 'python3' evades the guard.
+    # Python ABI/debug variants (python3.7m, python3.11-dbg) also execute
+    # Python; reject any version/ABI suffix, not just digits and dots.
     normalized_shebang="${firstline//\"/}"
     normalized_shebang="${normalized_shebang//\'/}"
     normalized_shebang="${normalized_shebang//\\/}"
-    if [[ "$normalized_shebang" =~ ^\#!.*(^|[/[:space:]])(python|pypy)([0-9.]*)?([[:space:]]|$) ]]; then
+    if [[ "$normalized_shebang" =~ ^\#!.*(^|[/[:space:]])(python|pypy)[[:alnum:]_.+-]*([[:space:]]|$) ]]; then
       printf 'POLICY_FAILURE: Python interpreter shebang: %s\n' "$path" >&2
       exit 2
     fi

@@ -1,0 +1,116 @@
+import module proxy_yaml from "../src/proxy_yaml";
+import module generation from "../src/generation";
+import module backend_pools from "../src/backend_pools";
+
+pub routine main(): int {
+  val String doc = "version: ores.proxy/v1\nmode: reverse\nlisten:\n  host: 127.0.0.1\n  port: 8080\nruntime:\n  carriers: 20\n  actors: 100\n  max_inflight: 1024\n" +
+    "backends:\n  - name: blue\n    pool: core\n    origin: https://blue.example.test:443\n    weight: 3\n  - name: green\n    pool: core\n    origin: https://green.example.test:443\n    weight: 1\n" +
+    "routes:\n  - name: api\n    host: api.example.test\n    path_prefix: /\n    upstream: pool://core\n";
+  if proxy_yaml.parse(doc, "reverse").is_err(); then
+    stdio.println("FAIL weighted pool YAML"); return 1;
+  fi
+  val opened = generation.open(doc, "reverse");
+  if opened.is_err(); then stdio.println("FAIL config generation"); return 1; fi
+  let control = opened.unwrap();
+  val initial = control.snapshot();
+  if initial.is_err(); then stdio.println("FAIL snapshot"); return 1; fi
+  val snapshot = initial.unwrap();
+  for (let cursor = 0; cursor < 4; cursor++) {
+    val selected = backend_pools.choose(rt borrow snapshot,
+      "core", "weighted-round-robin", cursor);
+    if selected.is_err(); then
+      stdio.println("FAIL backend pool choice"); return 1;
+    fi
+    val chosen = selected.unwrap();
+    if (cursor < 3 && chosen.name != "blue") ||
+      (cursor == 3 && chosen.name != "green"); then
+      stdio.println("FAIL deterministic backend rotation"); return 1;
+    fi
+  }
+  if backend_pools.choose(rt borrow snapshot,
+      "missing", "weighted-round-robin", 0).is_ok(); then
+    stdio.println("FAIL unknown backend pool"); return 1;
+  fi
+  if proxy_yaml.parse(doc.replace_literal("weight: 3", "weight: 1000000"),
+      "reverse").is_ok() ||
+    proxy_yaml.parse(doc.replace_literal("origin: https://green.example.test:443",
+      "origin: http://user@127.0.0.1:8080"), "reverse").is_ok() ||
+    proxy_yaml.parse(doc.replace_literal("- name: green",
+      "- name: blue"), "reverse").is_ok() ||
+    proxy_yaml.parse(doc.replace_literal("pool: core",
+      "pool: arbitrary/path"), "reverse").is_ok(); then
+    stdio.println("FAIL malformed backend pool admission"); return 1;
+  fi
+  val direct = backend_pools.reverse_route(rt borrow snapshot,
+      "api.example.test", "/other", "least-active", 0);
+  if direct.is_err(); then
+    stdio.println("FAIL pool route binding"); return 1;
+  fi
+  val direct_plan = direct.unwrap();
+  if direct_plan.name != "blue" || direct_plan.epoch != snapshot.epoch ||
+    !backend_pools.current(rt borrow direct_plan, rt borrow snapshot); then
+    stdio.println("FAIL generation-pinned pool route binding"); return 1;
+  fi
+  // Route matching alone cannot bypass deny or require_header middleware.
+  val String denied_doc = doc.replace_literal("routes:\n",
+      "middleware:\n  - name: gate\n    kind: deny\nroutes:\n")
+    .replace_literal("    upstream: pool://core\n",
+      "    upstream: pool://core\n    middleware: gate\n");
+  val denied_open = generation.open(denied_doc, "reverse");
+  if denied_open.is_err(); then
+    stdio.println("FAIL deny-middleware pool fixture"); return 1;
+  fi
+  val denied_control = denied_open.unwrap();
+  val denied_snapshot_result = denied_control.snapshot();
+  if denied_snapshot_result.is_err(); then
+    stdio.println("FAIL deny-middleware snapshot"); return 1;
+  fi
+  val denied_snapshot = denied_snapshot_result.unwrap();
+  if backend_pools.reverse_route(rt borrow denied_snapshot,
+      "api.example.test", "/other", "least-active", 0).is_ok(); then
+    stdio.println("FAIL pool plan bypassed deny middleware"); return 1;
+  fi
+  val String header_doc = denied_doc.replace_literal("kind: deny\n",
+      "kind: require_header\n    header: x-demo-token\n");
+  val header_open = generation.open(header_doc, "reverse");
+  if header_open.is_err(); then
+    stdio.println("FAIL required-header pool fixture"); return 1;
+  fi
+  val header_control = header_open.unwrap();
+  val header_snapshot_result = header_control.snapshot();
+  if header_snapshot_result.is_err(); then
+    stdio.println("FAIL required-header snapshot"); return 1;
+  fi
+  val header_snapshot = header_snapshot_result.unwrap();
+  if backend_pools.reverse_route(rt borrow header_snapshot,
+      "api.example.test", "/other", "least-active", 0).is_ok(); then
+    stdio.println("FAIL pool plan bypassed required header"); return 1;
+  fi
+  if proxy_yaml.parse(doc.replace_literal("pool://core", "pool://missing"),
+      "reverse").is_ok(); then
+    stdio.println("FAIL dangling pool reference"); return 1;
+  fi
+
+  // Plans are generation-bound even when the same YAML is republished.
+  if control.prepare(doc).is_err(); then
+    stdio.println("FAIL prepare next pool generation"); return 1;
+  fi
+  val published = control.publish(snapshot.epoch);
+  if published.is_err(); then
+    stdio.println("FAIL publish next pool generation"); return 1;
+  fi
+  val newer_snapshot = published.unwrap();
+  val newer = backend_pools.reverse_route(rt borrow newer_snapshot,
+      "api.example.test", "/other", "least-active", 0);
+  if newer.is_err(); then
+    stdio.println("FAIL newer pool route plan"); return 1;
+  fi
+  val newer_plan = newer.unwrap();
+  if newer_plan.epoch != newer_snapshot.epoch ||
+    backend_pools.current(rt borrow direct_plan, rt borrow newer_snapshot) ||
+    !backend_pools.current(rt borrow newer_plan, rt borrow newer_snapshot); then
+    stdio.println("FAIL stale pool plan generation fence"); return 1;
+  fi
+  stdio.println("PASS native reverse YAML backend pool contracts (no sockets)");
+  return 0;
+}

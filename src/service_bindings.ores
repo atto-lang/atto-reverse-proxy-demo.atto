@@ -1,0 +1,178 @@
+// Workerd-inspired symbolic service binding compiler, native Oreslang only.
+// NOT a network/socket capability and NOT an ActorRef. The trusted supervisor
+// must resolve every YAML target through a pre-approved code-image registry.
+// Registry entries are trusted runtime state; YAML cannot create or widen them.
+import module proxy_yaml from "./proxy_yaml";
+import module generation from "./generation";
+import module route_policy from "./route_policy";
+
+define module service_bindings as
+  pub define class CodeImage as
+    pub val String target;
+    pub val String abi;
+    pub val bool network_capable;
+    pub constructor(String target, String abi, bool network_capable) {
+      self.target = target;
+      self.abi = abi;
+      self.network_capable = network_capable;
+    }
+  end
+
+  pub define class Registry as
+    val Array<CodeImage> images;
+
+    private constructor(Array<CodeImage> source) {
+      self.images = new Array<CodeImage>();
+      for (const image of source) {
+        self.images.add(new CodeImage(image.target, image.abi,
+          image.network_capable));
+      }
+    }
+
+    pub fnc contains(String target): bool {
+      for (const image of self.images) {
+        if image.target == target; then return true; fi
+      }
+      return false;
+    }
+
+    pub fnc image(String target): Result<CodeImage, String> {
+      for (const image of self.images) {
+        if image.target == target; then
+          return Ok(new CodeImage(image.target, image.abi,
+            image.network_capable));
+        fi
+      }
+      return Err("unregistered actor code image");
+    }
+  end
+
+  // Supervisor-side registry constructor. A serving runtime must keep this
+  // object actor-owned and build it from trusted code-image/capability metadata,
+  // never from request bytes or YAML.
+  pub fnc registry(Array<CodeImage> images): Result<Registry, String> {
+    if images.size == 0 || images.size > 128; then
+      return Err("trusted actor registry must contain 1..128 images");
+    fi
+    let Array<CodeImage> checked = new Array<CodeImage>();
+    for (const image of images) {
+      if !proxy_yaml.valid_identifier(image.target) ||
+        !proxy_yaml.valid_identifier(image.abi); then
+        return Err("invalid trusted code-image metadata");
+      fi
+      for (const existing of checked) {
+        if existing.target == image.target; then
+          return Err("duplicate trusted actor target");
+        fi
+      }
+      checked.add(new CodeImage(image.target, image.abi,
+        image.network_capable));
+    }
+    return Ok(new Registry(checked));
+  }
+
+  pub define class Binding as
+    pub val int epoch;
+    pub val String name;
+    pub val String kind;
+    pub val String target;
+    pub val String abi;
+    pub val bool network_capable;
+    private constructor(int epoch, String name, String kind, String target,
+                        String abi, bool network_capable) {
+      self.epoch = epoch;
+      self.name = name;
+      self.kind = kind;
+      self.target = target;
+      self.abi = abi;
+      self.network_capable = network_capable;
+    }
+  end
+
+  // Caller-side half of the actor dispatch fence. Binding constructors are
+  // private, so only this module can mint the descriptor. A binding is usable
+  // only in the generation that minted it and only for the exact local code
+  // image selected by the caller. The pooled actor should eventually perform
+  // the second check from a typed, actor-owned mail receipt once http.handler
+  // can carry metadata in addition to the single-use HttpExchange claim.
+  pub fnc current(borrow Binding binding,
+                  borrow generation.Snapshot snapshot): bool {
+    return binding.epoch == snapshot.epoch;
+  }
+
+  pub fnc local_dispatch_allowed(borrow Binding binding,
+                                 borrow generation.Snapshot snapshot,
+                                 String expected_name,
+                                 String expected_target,
+                                 String expected_abi): bool {
+    return current(binding, snapshot) &&
+      binding.kind == "actor" &&
+      binding.name == expected_name &&
+      binding.target == expected_target &&
+      binding.abi == expected_abi &&
+      !binding.network_capable &&
+      proxy_yaml.valid_identifier(binding.name) &&
+      proxy_yaml.valid_identifier(binding.target) &&
+      proxy_yaml.valid_identifier(binding.abi);
+  }
+
+  pub fnc bind(borrow generation.Snapshot snapshot, borrow Registry trusted,
+               String service_name): Result<Binding, String> {
+    // Snapshot epochs are minted and range-checked by generation.Coordinator.
+    // Avoid re-validating an imported field here; binding only accepts a
+    // coordinator snapshot and preserves its epoch unchanged.
+    if !proxy_yaml.valid_identifier(service_name); then
+      return Err("invalid service binding request");
+    fi
+    val proxy_yaml.Config configuration = snapshot.configuration;
+    for (const service of configuration.services) {
+      if service.name == service_name; then
+        if service.kind != "actor"; then
+          return Err("unsupported service binding kind");
+        fi
+        val approved = trusted.image(service.target);
+        if approved.is_err(); then
+          return Err("service target is not a trusted code image");
+        fi
+        val image = approved.unwrap();
+        return Ok(new Binding(snapshot.epoch, service.name,
+          service.kind, service.target, image.abi, image.network_capable));
+      fi
+    }
+    return Err("undeclared service binding");
+  }
+
+  // Reverse routes can target symbolic local actor services without gaining
+  // network authority. Route, service and trusted image are resolved against
+  // the SAME immutable snapshot/registry pair.
+  pub fnc reverse_route(borrow generation.Snapshot snapshot,
+                        borrow Registry trusted, String host,
+                        String path): Result<Binding, String> {
+    if snapshot.configuration.mode != "reverse"; then
+      return Err("not a reverse proxy configuration");
+    fi
+    val selected = route_policy.select(rt borrow snapshot.configuration, host, path);
+    if selected.is_err(); then return Err("route not found"); fi
+    val route = selected.unwrap();
+    // Matching a route does not prove middleware completion. Until the
+    // supervisor provides an opaque generation-pinned receipt, fail closed.
+    if route.middleware != ""; then
+      return Err("middleware receipt required before reverse service planning");
+    fi
+    if !proxy_yaml.valid_service_ref(route.upstream); then
+      return Err("route is not a service binding");
+    fi
+    val parts = route.upstream.split_literal("service://");
+    if parts.size != 2; then return Err("malformed local binding"); fi
+    val resolved = bind(snapshot, trusted, parts.get(1));
+    if resolved.is_err(); then return Err("local service binding unavailable"); fi
+    val binding = resolved.unwrap();
+    // Public HTTP ingress does not imply NET authority. Even a code image that
+    // is trusted for some other internal purpose must not be reachable through
+    // this route if its registry metadata grants network capability.
+    if binding.network_capable; then
+      return Err("network-capable actor image forbidden on public ingress route");
+    fi
+    return Ok(binding);
+  }
+end

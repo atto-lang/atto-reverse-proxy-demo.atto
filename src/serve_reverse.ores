@@ -1,18 +1,68 @@
 // Opt-in loopback-only ingress proof. Routes and middleware operate on a
 // single parsed snapshot in the Oreslang supervisor. No outbound proxy call.
-// Always responds 501 to admitted routes, so it cannot masquerade as a proxy.
+// HTTP upstream routes return 501; a pre-approved local actor service can
+// respond through the existing guest HTTP actor adapter. Not a full proxy.
 // This is NOT src/main.ores and is intentionally NOT a production entrypoint.
 import module proxy_yaml from "./proxy_yaml";
 import module proxy_wire from "./proxy_wire";
 import module route_policy from "./route_policy";
+import module config_path from "./config_path";
+import module generation from "./generation";
+import module service_bindings from "./service_bindings";
 
 // Reusable actor lifecycle: pooled handlers return after each request and do
 // not self.end(). HTTP transport owns the FD and single-use claim generation.
 define isoactor UpstreamUnavailable as
   receive(ActorMail<String> mail): void {
     val exchange = http.claim(mail.value);
+    if !exchange.dispatch_receipt_valid(
+      "UpstreamUnavailable", "upstream-unavailable",
+      "proxy-local-no-net", 1); then
+      await exchange.respond(503, "text/plain; charset=utf-8",
+        "Invalid actor dispatch receipt");
+      return;
+    fi
+    exchange.set_header("X-Oreslang-Dispatch-Receipt", "verified");
     await exchange.respond(501, "text/plain; charset=utf-8",
       "Upstream forwarding unavailable in this runtime");
+    return;
+  }
+end
+
+// Pre-registered code image. Only this exact image is bindable in this
+// demonstration. No dynamic eval, unrestricted ActorRef or ambient fetch.
+define isoactor HelloV1 as
+  receive(ActorMail<String> mail): void {
+    val exchange = http.claim(mail.value);
+    if !exchange.dispatch_receipt_valid(
+      "HelloV1", "greeting", "proxy-local-no-net", 1); then
+      await exchange.respond(503, "text/plain; charset=utf-8",
+        "Invalid actor dispatch receipt");
+      return;
+    fi
+    exchange.set_header("X-Oreslang-Dispatch-Receipt", "verified");
+    await exchange.respond(200, "text/plain; charset=utf-8",
+      "hello from native Oreslang actor service");
+    return;
+  }
+end
+
+// Native Oreslang streaming actor path. Transport-owned byte credits and
+// response commit are managed by HttpExchange; each write is awaited.
+define isoactor StreamV1 as
+  receive(ActorMail<String> mail): void {
+    val exchange = http.claim(mail.value);
+    if !exchange.dispatch_receipt_valid(
+      "StreamV1", "streaming", "proxy-local-no-net", 1); then
+      await exchange.respond(503, "text/plain; charset=utf-8",
+        "Invalid actor dispatch receipt");
+      return;
+    fi
+    exchange.set_header("X-Oreslang-Dispatch-Receipt", "verified");
+    await exchange.start(200, "text/plain; charset=utf-8");
+    await exchange.write("stage-one\n");
+    await exchange.write("stage-two\n");
+    await exchange.finish();
     return;
   }
 end
@@ -24,7 +74,10 @@ pub async routine main(): int {
     return 64;
   fi
   val String path = selected.unwrap();
-  if path == ""; then return 64; fi
+  if !config_path.valid(path); then
+    stdio.println("ERROR: config path must be canonical and absolute");
+    return 65;
+  fi
   if fs.is_symlink(path) || !fs.exists(path) || fs.is_dir(path); then
     stdio.println("ERROR: nonregular configuration");
     return 65;
@@ -35,6 +88,22 @@ pub async routine main(): int {
     return 65;
   fi
   val config = parsed.unwrap();
+  val snapshot = new generation.Snapshot(1, config);
+
+  // Trusted code-image registry is independent of YAML service declarations.
+  // Only these two pre-registered local actors are bindable; no network grant.
+  let Array<service_bindings.CodeImage> trusted_images =
+    new Array<service_bindings.CodeImage>();
+  trusted_images.add(new service_bindings.CodeImage(
+    "hello-v1", "abi-v1", false));
+  trusted_images.add(new service_bindings.CodeImage(
+    "stream-v1", "abi-v1", false));
+  val trusted_result = service_bindings.registry(trusted_images);
+  if trusted_result.is_err(); then
+    stdio.println("ERROR: trusted actor image registry invalid");
+    return 78;
+  fi
+  val trusted_services = trusted_result.unwrap();
 
   // Port conversion and source-configurable bind scopes are not yet admitted.
   // Never accidentally expose this transport proof on a public listener.
@@ -44,26 +113,43 @@ pub async routine main(): int {
     return 78;
   fi
 
-  val unavailable = http.handler("UpstreamUnavailable").pooled(100);
+  // Exactly 100 maximum lazily created reusable actors across three pools.
+  // This is separate from transport admission and the carrier-thread budget.
+  val unavailable_handler = http.handler("UpstreamUnavailable");
+  val unavailable_scoped = unavailable_handler.scoped(
+    "upstream-unavailable", "proxy-local-no-net", snapshot.epoch);
+  val unavailable = unavailable_scoped.pooled(25);
+  val hello_handler = http.handler("HelloV1");
+  val hello_scoped = hello_handler.scoped(
+    "greeting", "proxy-local-no-net", snapshot.epoch);
+  val hello = hello_scoped.pooled(50);
+  val stream_handler = http.handler("StreamV1");
+  val stream_scoped = stream_handler.scoped(
+    "streaming", "proxy-local-no-net", snapshot.epoch);
+  val stream = stream_scoped.pooled(25);
   val server = http.listen("127.0.0.1", 8080, 1024, 65536, 30000);
-  stdio.println("INCOMPLETE reverse proxy ingress; loopback only; 501 upstream response");
+  stdio.println("EXPERIMENTAL loopback actor ingress; HTTP upstream forwarding returns 501");
   loop {
     val exchange = await server.accept();
     val String host = exchange.header("Host");
     val String request_line = exchange.method + " " + exchange.target + " HTTP/1.1";
     val admitted = proxy_wire.reverse(request_line, host);
     if admitted.is_err(); then
-      exchange.respond(400, "text/plain; charset=utf-8", "Noncanonical request");
+      await exchange.respond(400, "text/plain; charset=utf-8", "Noncanonical request");
       continue;
     fi
-    val matched = route_policy.select(rt borrow config, host, exchange.target);
+    val request = admitted.unwrap();
+    val matched = route_policy.select(rt borrow config,
+      request.authority, request.path);
     if matched.is_err(); then
-      exchange.respond(404, "text/plain; charset=utf-8", "No route");
+      await exchange.respond(404, "text/plain; charset=utf-8", "No route");
       continue;
     fi
     val target = matched.unwrap();
-    if proxy_wire.upstream_origin(target.upstream).is_err(); then
-      exchange.respond(502, "text/plain; charset=utf-8", "Invalid upstream origin");
+    if !proxy_yaml.valid_service_ref(target.upstream) &&
+      !proxy_yaml.valid_pool_ref(target.upstream) &&
+      proxy_wire.upstream_origin(target.upstream).is_err(); then
+      await exchange.respond(502, "text/plain; charset=utf-8", "Invalid upstream origin");
       continue;
     fi
 
@@ -89,10 +175,47 @@ pub async routine main(): int {
       }
     fi
     if !permit; then
-      exchange.respond(403, "text/plain; charset=utf-8", "Request denied");
+      await exchange.respond(403, "text/plain; charset=utf-8", "Request denied");
       continue;
     fi
-    unavailable.dispatch(exchange);
+    if proxy_yaml.valid_service_ref(target.upstream); then
+      // HEAD response framing is not yet proven through the guest actor adapter.
+      // Keep public actor services GET-only until actor-owned request metadata
+      // can enforce bodyless HEAD semantics after http.claim().
+      if request.method != "GET"; then
+        await exchange.respond(405, "text/plain; charset=utf-8",
+          "Actor service currently requires GET");
+        continue;
+      fi
+      val bound = service_bindings.reverse_route(rt borrow snapshot,
+        rt borrow trusted_services, request.authority, request.path);
+      if bound.is_err(); then
+        await exchange.respond(503, "text/plain; charset=utf-8",
+          "Service binding unavailable");
+        continue;
+      fi
+      val actor_binding = bound.unwrap();
+      // Caller-side half of the double-entry fence. The scoped handler mints
+      // the matching actor-owned receipt; HelloV1/StreamV1 revalidate exact
+      // image, service binding, authority class and snapshot generation after
+      // http.claim() and before executing response logic.
+      if service_bindings.local_dispatch_allowed(rt borrow actor_binding,
+          rt borrow snapshot, "greeting", "hello-v1", "abi-v1"); then
+        hello.dispatch(rt borrow mut exchange);
+      elif service_bindings.local_dispatch_allowed(rt borrow actor_binding,
+          rt borrow snapshot, "streaming", "stream-v1", "abi-v1"); then
+        stream.dispatch(rt borrow mut exchange);
+      elif actor_binding.target == "hello-v1" ||
+        actor_binding.target == "stream-v1"; then
+        await exchange.respond(503, "text/plain; charset=utf-8",
+          "Stale or overprivileged actor binding");
+      else
+        await exchange.respond(501, "text/plain; charset=utf-8",
+          "Actor image not registered in this demonstration");
+      fi
+      continue;
+    fi
+    unavailable.dispatch(rt borrow mut exchange);
   }
   return 0;
 }

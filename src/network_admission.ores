@@ -1,0 +1,169 @@
+// Pure supervisor-side pre-dial admission oracle.
+// This module NEVER opens a socket. It composes already-proven request,
+// generation, policy and traffic-control state so a future transport has one
+// fail-closed boundary immediately before minting a real network capability.
+import module generation from "./generation";
+import module proxy_yaml from "./proxy_yaml";
+import module route_policy from "./route_policy";
+import module slot_pool from "./slot_pool";
+import module traffic_controls from "./traffic_controls";
+
+define module network_admission as
+  // Produced only by the trusted resolver in a serving runtime. The booleans
+  // are reference-model inputs until std/net exposes an opaque resolved-address
+  // capability. Unknown/IPv6/unclassified addresses must be represented as
+  // dns_pinned=false or public_address=false and therefore fail closed.
+  pub define class ResolvedEndpoint as
+    pub val String hostname;
+    pub val String resolved_ip;
+    pub val String port;
+    pub val bool dns_pinned;
+    pub val bool public_address;
+    pub constructor(String hostname, String resolved_ip, String port,
+                    bool dns_pinned, bool public_address) {
+      self.hostname = hostname;
+      self.resolved_ip = resolved_ip;
+      self.port = port;
+      self.dns_pinned = dns_pinned;
+      self.public_address = public_address;
+    }
+  end
+
+  // Descriptor proving all pure prerequisites agreed at one instant. This is
+  // NOT itself a socket capability and must never be accepted by std/net as a
+  // dial token. The runtime must mint an opaque capability after rechecking the
+  // pinned address at connect time.
+  pub define class ReverseEndpoint as
+    pub val String origin;
+    pub val String resolved_ip;
+    pub val bool dns_pinned;
+    pub val bool network_allowed;
+    pub constructor(String origin, String resolved_ip, bool dns_pinned,
+                    bool network_allowed) {
+      self.origin = origin;
+      self.resolved_ip = resolved_ip;
+      self.dns_pinned = dns_pinned;
+      self.network_allowed = network_allowed;
+    }
+  end
+
+  pub define class ForwardPermit as
+    pub val int epoch;
+    pub val int slot;
+    pub val int nonce;
+    pub val String hostname;
+    pub val String resolved_ip;
+    pub val String port;
+    private constructor(int epoch, int slot, int nonce, String hostname,
+                        String resolved_ip, String port) {
+      self.epoch = epoch;
+      self.slot = slot;
+      self.nonce = nonce;
+      self.hostname = hostname;
+      self.resolved_ip = resolved_ip;
+      self.port = port;
+    }
+  end
+
+  pub define class ReversePermit as
+    pub val int epoch;
+    pub val int slot;
+    pub val int nonce;
+    pub val String origin;
+    pub val String resolved_ip;
+    private constructor(int epoch, int slot, int nonce, String origin,
+                        String resolved_ip) {
+      self.epoch = epoch;
+      self.slot = slot;
+      self.nonce = nonce;
+      self.origin = origin;
+      self.resolved_ip = resolved_ip;
+    }
+  end
+
+  fnc shared_gate(borrow generation.Snapshot snapshot,
+                  borrow slot_pool.Pool requests,
+                  borrow slot_pool.Handle request,
+                  borrow traffic_controls.WindowDecision rate,
+                  borrow traffic_controls.Breaker breaker,
+                  int now_ms): Result<bool, String> {
+    // generation.Snapshot epochs are range-checked by the coordinator.
+    if !requests.permits(rt borrow request) ||
+      request.ticket.epoch != snapshot.epoch; then
+      return Err("request lease is stale or belongs to another generation");
+    fi
+    if !rate.permitted || rate.next.epoch != snapshot.epoch ||
+      rate.next.started_ms < 0 || rate.next.started_ms > now_ms ||
+      rate.next.used <= 0 || rate.next.used > 1000000; then
+      return Err("rate budget does not admit this generation");
+    fi
+    if !traffic_controls.permits(rt borrow breaker, snapshot.epoch, now_ms); then
+      return Err("circuit breaker denies egress");
+    fi
+    return Ok(true);
+  }
+
+  pub fnc authorize_connect(borrow generation.Snapshot snapshot,
+                            borrow slot_pool.Pool requests,
+                            borrow slot_pool.Handle request,
+                            borrow traffic_controls.WindowDecision rate,
+                            borrow traffic_controls.Breaker breaker,
+                            borrow ResolvedEndpoint endpoint,
+                            int now_ms): Result<ForwardPermit, String> {
+    if snapshot.configuration.mode != "forward"; then
+      return Err("CONNECT egress requires a forward generation");
+    fi
+    if shared_gate(snapshot, requests, request, rate, breaker, now_ms).is_err(); then
+      return Err("shared egress gate denied CONNECT");
+    fi
+    if !endpoint.dns_pinned || !endpoint.public_address ||
+      endpoint.hostname == "" || endpoint.resolved_ip == "" ||
+      endpoint.port != "443"; then
+      return Err("destination is not a pinned public CONNECT endpoint");
+    fi
+    if !route_policy.configured_connect(rt borrow snapshot.configuration,
+      "CONNECT", endpoint.hostname + ":" + endpoint.port); then
+      return Err("CONNECT target is not admitted by the pinned policy");
+    fi
+    return Ok(new ForwardPermit(snapshot.epoch, request.slot, request.nonce,
+      endpoint.hostname, endpoint.resolved_ip, endpoint.port));
+  }
+
+  pub fnc authorize_reverse(borrow generation.Snapshot snapshot,
+                            borrow slot_pool.Pool requests,
+                            borrow slot_pool.Handle request,
+                            borrow traffic_controls.WindowDecision rate,
+                            borrow traffic_controls.Breaker breaker,
+                            borrow ReverseEndpoint endpoint,
+                            String request_host, String request_path,
+                            int now_ms): Result<ReversePermit, String> {
+    if snapshot.configuration.mode != "reverse"; then
+      return Err("upstream egress requires a reverse generation");
+    fi
+    if shared_gate(snapshot, requests, request, rate, breaker, now_ms).is_err(); then
+      return Err("shared egress gate denied reverse upstream");
+    fi
+    if !endpoint.dns_pinned || !endpoint.network_allowed ||
+      endpoint.origin == "" || endpoint.resolved_ip == ""; then
+      return Err("reverse destination is not pinned and capability-approved");
+    fi
+    val selected = route_policy.select(rt borrow snapshot.configuration,
+      request_host, request_path);
+    if selected.is_err(); then return Err("reverse route not found"); fi
+    val route = selected.unwrap();
+    // A route match is not middleware admission. The eventual serving actor
+    // must supply an unforgeable, generation-pinned middleware receipt before
+    // egress; this pure reference oracle has no such authority. Deny all
+    // middleware-bearing routes rather than interpreting a symbolic chain as
+    // successful authentication, header validation or policy enforcement.
+    if route.middleware != ""; then
+      return Err("middleware admission receipt required before upstream egress");
+    fi
+    if route.upstream != endpoint.origin ||
+      !proxy_yaml.valid_upstream_origin(route.upstream); then
+      return Err("resolved endpoint does not match admitted HTTP origin");
+    fi
+    return Ok(new ReversePermit(snapshot.epoch, request.slot, request.nonce,
+      endpoint.origin, endpoint.resolved_ip));
+  }
+end
