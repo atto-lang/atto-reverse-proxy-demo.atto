@@ -57,6 +57,10 @@ pub async routine main(): int {
   stdio.println("INCOMPLETE reverse proxy ingress; loopback only; 501 upstream response");
   loop {
     val exchange = await server.accept();
+    // This demo reconstructs an HTTP/1.1 request line from normalized
+    // exchange fields. It does NOT verify the wire protocol version, duplicate
+    // Host headers, CL/TE conflicts, or byte framing. Those checks must be
+    // enforced by the HTTP adapter before any forwarding is implemented.
     val String host = exchange.header("Host");
     val String request_line = exchange.method + " " + exchange.target + " HTTP/1.1";
     val admitted = proxy_wire.reverse(request_line, host);
