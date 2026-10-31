@@ -5,6 +5,7 @@
 // No network authority or outbound capability is granted by these helpers.
 import module proxy_yaml from "./proxy_yaml";
 import module route_policy from "./route_policy";
+import module header_policy from "./header_policy";
 
 define module proxy_wire as
   pub define class Target as
@@ -15,7 +16,10 @@ define module proxy_wire as
   end
 
   fnc strict_path(String path): bool {
-    if !path.starts_with("/") || path.starts_with("//") ||
+    // Semicolon path parameters can be reinterpreted by downstream routers.
+    // Reject every C0/DEL control in the extracted target, not just CR/LF/TAB.
+    if !header_policy.value_safe(path) || path.contains_literal(";") ||
+      !path.starts_with("/") || path.starts_with("//") ||
       path.contains_literal("//") || path.contains_literal("..") ||
       path.contains_literal("%") || path.contains_literal("\\") ||
       path.contains_literal("?") || path.contains_literal("#") ||
