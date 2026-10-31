@@ -100,17 +100,17 @@ The proof verifier now requires the run to identify the immutable workflow path,
 a fresh GitHub REST PR #11 snapshot, the same head branch, exactly one PR #11
 association with the matching head SHA and source/base repository identity,
 and the complete jobs page set (`total_count == len(jobs)`). Incomplete
-pagination, a missing head-repository identity, unrelated PR runs, ambiguous
-job names, and skipped or unassigned jobs all fail closed. The verifier does
+pagination, a missing head-repository identity, unrelated PR runs, unexpected extra jobs, ambiguous
+job names, duplicated step numbers, and skipped or unassigned jobs all fail closed. The verifier does
 not generate a release-approval receipt; it only reports API-level step
 execution metadata, and a live JDK25 compiler digest/tree check still requires
 independent job-log inspection.
 
-`ci/test_runner_execution.py` contains **25 synthetic unittest methods**.
-Local verification on the reviewed branch passed 25/25, and tested Git
+`ci/test_runner_execution.py` contains **27 synthetic unittest methods**.
+Local verification on the reviewed branch passed 27/27, and tested Git
 blob SHA readback matched:
-- `ci/verify_runner_execution.py`: `097f275bc3f78b1215d6e7418878351f62982cb6`.
-- `ci/test_runner_execution.py`: `228b95426c0083f2fa2c891a763c375ad5c663b7`.
+- `ci/verify_runner_execution.py`: `62c98818f583a1f52e1b7f7d09069c0a33c07fea`.
+- `ci/test_runner_execution.py`: `c33595487c0ea2ace7e3dd5daa42b4783333a2ed`.
 
 The source-free workflow's pull-request and push filters now include the
 actor-ingress base and the review branch, so the tests are eligible for CI.
