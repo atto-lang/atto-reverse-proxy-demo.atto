@@ -23,6 +23,7 @@ jobs:
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          test -z "$(git status --porcelain)"
       - name: Reject missing, empty or linked contract inputs
         shell: bash
         run: |
@@ -31,10 +32,12 @@ jobs:
             src/main.ores \
             src/proxy_wire.ores \
             src/header_policy.ores \
+            src/http_framing.ores \
             src/slot_pool.ores \
             src/serve_reverse.ores \
             tests/wire_contract.ores \
             tests/header_policy_contract.ores \
+            tests/http_framing_contract.ores \
             tests/slot_pool_contract.ores \
             tests/ingress_tcp_smoke.ores \
             config/example.yaml \
@@ -43,7 +46,27 @@ jobs:
             test -f "$file"
             test -s "$file"
             test ! -L "$file"
+            git ls-files --error-unmatch -- "$file" >/dev/null
+            [[ "$(git ls-files --stage -- "$file")" == "100644 "* ]]
+            cmp -s "$file" <(git show "HEAD:$file")
           done
           test -z "$(find src tests config -type l -print -quit)"
+          # Inventory every tracked Oreslang source/test; never silently skip
+          # a new native contract in the source-only integrity audit.
+          checked=0
+          while IFS= read -r -d '' file; do
+            case "$file" in
+              src/*.ores|tests/*.ores)
+                test -f "$file"
+                test -s "$file"
+                test ! -L "$file"
+                [[ "$(git ls-files --stage -- "$file")" == "100644 "* ]]
+                cmp -s "$file" <(git show "HEAD:$file")
+                checked=$((checked + 1))
+                ;;
+            esac
+          done < <(git ls-files -z -- src tests)
+          test "$checked" -ge 26
+          printf 'ORESLANG_SOURCE_INVENTORY_ONLY files=%s native=NOT_EXECUTED\\n' "$checked"
       - name: Preserve non-production verdict
         run: echo 'SOURCE_INVENTORY_ONLY; native compile/execute, upstream forwarding and network proof NOT_EXECUTED.'
