@@ -17,7 +17,7 @@ A native, **pure control-plane** coordinator in `src/generation.ores` exercises 
 
 ## Native verification gate
 
-The exact-head native compiler/contract workflow is [`.github/workflows/native-contracts.yml`](.github/workflows/native-contracts.yml); runner prerequisites, executed commands and non-production release gates are in [`docs/NATIVE_VALIDATION.md`](docs/NATIVE_VALIDATION.md). A queued or absent workflow is **not** a passed compiler test. Network serving remains disabled.
+The legacy [`.github/workflows/native-contracts.yml`](.github/workflows/native-contracts.yml) is **retired and deliberately fails closed**; it is not an active native compiler qualification. The proposed [trusted frozen-source workflow](.github/workflows/trusted-frozen-reverse-native.yml) is manual on independently protected `main` only and pins an older, frozen source tree; it **does not qualify this integration candidate**. The separate [actor ingress wire workflow](.github/workflows/actor-ingress-wire.yml) also requires protected `main`, a selected-workflow trusted runner group, and a root-owned approved runtime manifest. See [`docs/NATIVE_VALIDATION.md`](docs/NATIVE_VALIDATION.md) and [`docs/STACK_INTEGRATION_REVIEW_20261031.md`](docs/STACK_INTEGRATION_REVIEW_20261031.md). No executed native compiler or TCP proof exists for this PR; zero-step jobs are runner admission failures.
 
 ## Opt-in native Oreslang loopback ingress
 
