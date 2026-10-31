@@ -85,6 +85,27 @@ The serving guest still uses the pre-migration `define isoactor` /
 `critical` state mutations is outstanding. Do not claim verified guest
 syntax until an exact-head compiler check actually executes.
 
+### Physical source-checkout identity gate
+
+After the native runner rechecks private protected-main governance **before
+checkout**, the pinned checkout is audited before any compiler invocation.
+The check uses explicit `--git-dir` and `--work-tree` paths for the actual
+job workspace and clears ambient Git object/index/repository routing variables.
+The checkout's Git directory must be real, not a symbolic link.
+
+Acceptance requires the exact `github.sha` HEAD, a canonical 40-hex tree
+identity, identical index and tracked worktree contents, and **zero** extra
+untracked files, including ignored files. `core.filemode=true` ensures
+executable-bit changes are not hidden by runner Git configuration. A separate
+frozen runtime manifest and launcher digest gate follows this source audit.
+
+A local hermetic Git test on October 31, 2026 accepted the clean checkout and
+an invocation with poisoned ambient Git routing, and rejected dirty tracked
+bytes, staged modifications, ignored/untracked files, and chmod drift. These
+checks only prove the standalone Bash identity predicate on a synthetic Git
+repository. They are **not** a successful GitHub workflow run, native Oreslang
+compile, or on-wire proxy receipt.
+
 ### Acceptance evidence ledger
 
 - Admission: hosted preflight job has **nonzero steps** and binds current
