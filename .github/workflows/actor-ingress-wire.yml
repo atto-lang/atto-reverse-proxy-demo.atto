@@ -111,11 +111,20 @@ jobs:
             mode="$("/usr/bin/stat" -c %a -- "$path")"
             (( (8#$mode & 022) == 0 )) || { echo 'runtime path is writable by non-root' >&2; exit 1; }
           done
+          # -xdev alone omits nested mounts and file bind mounts; check the
+          # process mount table before trusting any manifest hashes.
+          test -r /proc/self/mountinfo && test -x /usr/bin/awk
+          mounted="$(
+            /usr/bin/awk -v root="$runtime_root" -v prefix="$runtime_root/" \
+              '$5==root || index($5,prefix)==1 {print $5; exit}' /proc/self/mountinfo
+          )"
+          test -z "$mounted" || { echo 'runtime path is or contains a bind mount' >&2; exit 1; }
           test -z "$(/usr/bin/find "$runtime_root" -xdev -type l -print -quit)" || { echo 'runtime symlink' >&2; exit 1; }
           test -z "$(/usr/bin/find "$runtime_root" -xdev ! -type d ! -type f -print -quit)" || { echo 'runtime special object' >&2; exit 1; }
           test -z "$(/usr/bin/find "$runtime_root" -xdev \( ! -uid 0 -o -perm /022 -o -perm /6000 \) -print -quit)" || { echo 'mutable or privileged runtime tree' >&2; exit 1; }
           test -x /usr/sbin/getcap
-          test -z "$(/usr/sbin/getcap -r "$runtime_root")" || { echo 'runtime carries file capabilities' >&2; exit 1; }
+          cap_report="$(/usr/sbin/getcap -r "$runtime_root" 2>&1)" || { echo 'runtime capability scan failed' >&2; exit 1; }
+          test -z "$cap_report" || { echo 'runtime carries file capabilities' >&2; exit 1; }
           [[ "${APPROVED_ORESLANG_RUNTIME_MANIFEST_SHA256:-}" =~ ^[0-9a-fA-F]{64}$ ]] || { echo 'approved manifest digest missing' >&2; exit 1; }
           actual_manifest="$(
             cd "$runtime_root"
