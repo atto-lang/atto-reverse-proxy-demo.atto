@@ -49,7 +49,7 @@ export PATH="$java_root/bin:/usr/bin:/bin"
 spec="$("$java_exe" -XshowSettings:properties -version 2>&1 | /usr/bin/sed -nE "s/^[[:space:]]*java\\.specification\\.version[[:space:]]*=[[:space:]]*([^[:space:]]+).*$/\\1/p" | /usr/bin/head -n 1)"
 test "$spec" = 25 || { echo "approved embedded JDK changed or is not JDK25" >&2; exit 1; }
 cd "$GITHUB_WORKSPACE"
-source_git=(/usr/bin/env -u GIT_DIR -u GIT_WORK_TREE -u GIT_COMMON_DIR -u GIT_INDEX_FILE -u GIT_OBJECT_DIRECTORY -u GIT_ALTERNATE_OBJECT_DIRECTORIES -u GIT_NAMESPACE -u GIT_SHALLOW_FILE -u GIT_CEILING_DIRECTORIES -u GIT_DISCOVERY_ACROSS_FILESYSTEM -u GIT_GRAFT_FILE -u GIT_REPLACE_REF_BASE -u GIT_EXEC_PATH -u GIT_CONFIG -u GIT_CONFIG_COUNT -u GIT_CONFIG_PARAMETERS -u GIT_CONFIG_GLOBAL -u GIT_CONFIG_SYSTEM /usr/bin/git -c core.fsmonitor=false -c core.filemode=true --no-replace-objects --git-dir="$GITHUB_WORKSPACE/.git" --work-tree="$GITHUB_WORKSPACE")
+source_git=(/usr/bin/env -u GIT_DIR -u GIT_WORK_TREE -u GIT_COMMON_DIR -u GIT_INDEX_FILE -u GIT_OBJECT_DIRECTORY -u GIT_ALTERNATE_OBJECT_DIRECTORIES -u GIT_NAMESPACE -u GIT_SHALLOW_FILE -u GIT_CEILING_DIRECTORIES -u GIT_DISCOVERY_ACROSS_FILESYSTEM -u GIT_GRAFT_FILE -u GIT_REPLACE_REF_BASE -u GIT_EXEC_PATH -u GIT_CONFIG -u GIT_CONFIG_COUNT -u GIT_CONFIG_PARAMETERS GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null /usr/bin/git -c core.fsmonitor=false -c core.filemode=true --no-replace-objects --git-dir="$GITHUB_WORKSPACE/.git" --work-tree="$GITHUB_WORKSPACE")
 actual_source_head="$("${source_git[@]}" rev-parse --verify HEAD)"
 test "$actual_source_head" = "$expected_source_sha" || { echo "frozen source changed between native invocations" >&2; exit 1; }
 actual_source_tree="$("${source_git[@]}" rev-parse --verify "HEAD^{tree}")"
