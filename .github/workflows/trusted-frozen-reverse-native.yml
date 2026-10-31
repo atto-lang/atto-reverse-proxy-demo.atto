@@ -235,12 +235,12 @@ jobs:
           # exact-source identity checks on a reused self-hosted runner.
           actual_head="$(
             /usr/bin/env -u GIT_DIR -u GIT_WORK_TREE -u GIT_COMMON_DIR -u GIT_INDEX_FILE -u GIT_OBJECT_DIRECTORY -u GIT_ALTERNATE_OBJECT_DIRECTORIES -u GIT_NAMESPACE -u GIT_SHALLOW_FILE -u GIT_CEILING_DIRECTORIES -u GIT_DISCOVERY_ACROSS_FILESYSTEM -u GIT_GRAFT_FILE -u GIT_REPLACE_REF_BASE -u GIT_EXEC_PATH -u GIT_CONFIG \
-              /usr/bin/git -c core.fsmonitor=false --no-replace-objects --git-dir="$GITHUB_WORKSPACE/.git" --work-tree="$GITHUB_WORKSPACE" rev-parse --verify HEAD
+              /usr/bin/git -c core.fsmonitor=false -c core.filemode=true --no-replace-objects --git-dir="$GITHUB_WORKSPACE/.git" --work-tree="$GITHUB_WORKSPACE" rev-parse --verify HEAD
           )"
           test "$actual_head" = "$EXPECTED_SHA" || { echo 'frozen source HEAD mismatch' >&2; exit 1; }
           actual_tree="$(
             /usr/bin/env -u GIT_DIR -u GIT_WORK_TREE -u GIT_COMMON_DIR -u GIT_INDEX_FILE -u GIT_OBJECT_DIRECTORY -u GIT_ALTERNATE_OBJECT_DIRECTORIES -u GIT_NAMESPACE -u GIT_SHALLOW_FILE -u GIT_CEILING_DIRECTORIES -u GIT_DISCOVERY_ACROSS_FILESYSTEM -u GIT_GRAFT_FILE -u GIT_REPLACE_REF_BASE -u GIT_EXEC_PATH -u GIT_CONFIG \
-              /usr/bin/git -c core.fsmonitor=false --no-replace-objects --git-dir="$GITHUB_WORKSPACE/.git" --work-tree="$GITHUB_WORKSPACE" rev-parse --verify 'HEAD^{tree}'
+              /usr/bin/git -c core.fsmonitor=false -c core.filemode=true --no-replace-objects --git-dir="$GITHUB_WORKSPACE/.git" --work-tree="$GITHUB_WORKSPACE" rev-parse --verify 'HEAD^{tree}'
           )"
           test "$actual_tree" = "$EXPECTED_FROZEN_TREE_SHA" || { echo 'frozen source tree mismatch' >&2; exit 1; }
           printf 'source_head=%s\nsource_tree=%s\nworkflow_control_sha=%s\nref_protected=%s\nrun_id=%s\nrun_attempt=%s\n' \
@@ -381,7 +381,7 @@ jobs:
           # a one-time precompile check does not protect later workflow steps.
           printf '%s\n' \
             'cd "$GITHUB_WORKSPACE"' \
-            'source_git=(/usr/bin/env -u GIT_DIR -u GIT_WORK_TREE -u GIT_COMMON_DIR -u GIT_INDEX_FILE -u GIT_OBJECT_DIRECTORY -u GIT_ALTERNATE_OBJECT_DIRECTORIES -u GIT_NAMESPACE -u GIT_SHALLOW_FILE -u GIT_CEILING_DIRECTORIES -u GIT_DISCOVERY_ACROSS_FILESYSTEM -u GIT_GRAFT_FILE -u GIT_REPLACE_REF_BASE -u GIT_EXEC_PATH -u GIT_CONFIG /usr/bin/git -c core.fsmonitor=false --no-replace-objects --git-dir="$GITHUB_WORKSPACE/.git" --work-tree="$GITHUB_WORKSPACE")' \
+            'source_git=(/usr/bin/env -u GIT_DIR -u GIT_WORK_TREE -u GIT_COMMON_DIR -u GIT_INDEX_FILE -u GIT_OBJECT_DIRECTORY -u GIT_ALTERNATE_OBJECT_DIRECTORIES -u GIT_NAMESPACE -u GIT_SHALLOW_FILE -u GIT_CEILING_DIRECTORIES -u GIT_DISCOVERY_ACROSS_FILESYSTEM -u GIT_GRAFT_FILE -u GIT_REPLACE_REF_BASE -u GIT_EXEC_PATH -u GIT_CONFIG /usr/bin/git -c core.fsmonitor=false -c core.filemode=true --no-replace-objects --git-dir="$GITHUB_WORKSPACE/.git" --work-tree="$GITHUB_WORKSPACE")' \
             'actual_source_head="$("${source_git[@]}" rev-parse --verify HEAD)"' \
             'test "$actual_source_head" = "$expected_source_sha" || { echo "frozen source changed between native invocations" >&2; exit 1; }' \
             'actual_source_tree="$("${source_git[@]}" rev-parse --verify "HEAD^{tree}")"' \
@@ -396,6 +396,14 @@ jobs:
             '  test -f "$tracked_file" && test ! -L "$tracked_file" || exit 1' \
             '  test "$(/usr/bin/realpath -e -- "$tracked_file")" = "$checkout_root/$tracked_file" || { echo "frozen tracked file escapes checkout through parent symlink" >&2; exit 1; }' \
             '  "${source_git[@]}" show "HEAD:$tracked_file" | /usr/bin/cmp -s -- "$tracked_file" - || { echo "frozen source bytes changed" >&2; exit 1; }' \
+            '  # Check committed executable mode even if index marks file assume-unchanged.' \
+            '  head_entry=""' \
+            '  IFS= read -r -d "" head_entry < <("${source_git[@]}" ls-tree -z HEAD -- ":(literal)$tracked_file") || exit 1' \
+            '  expected_mode="${head_entry%% *}"' \
+            '  current_mode="$(/usr/bin/stat -c %a -- "$tracked_file")"' \
+            '  [[ "$current_mode" =~ ^[0-7]{3,4}$ ]] || exit 1' \
+            '  (( (8#$current_mode & 8#6022) == 0 )) || exit 1' \
+            '  case "$expected_mode" in 100644) (( (8#$current_mode & 8#111) == 0 )) || exit 1 ;; 100755) (( (8#$current_mode & 8#100) != 0 )) || exit 1 ;; *) exit 1 ;; esac' \
             'done < "$tracked_manifest"' \
             '/usr/bin/rm -f -- "$tracked_manifest"' \
             'exec /usr/bin/env -u GITHUB_ENV -u GITHUB_PATH -u GITHUB_OUTPUT -u GITHUB_STATE -u GITHUB_STEP_SUMMARY -u GH_READ_TOKEN -u GITHUB_TOKEN -u GH_TOKEN -u ACTIONS_RUNTIME_TOKEN -u ACTIONS_ID_TOKEN_REQUEST_TOKEN -u ACTIONS_ID_TOKEN_REQUEST_URL -u GIT_ASKPASS -u SSH_AUTH_SOCK /usr/bin/timeout --signal=TERM --kill-after=2s 120s "$launcher" "$@"' >> "$wrapper"
@@ -412,7 +420,7 @@ jobs:
           test -x "$wrapper"
           compile_tree="$(
             /usr/bin/env -u GIT_DIR -u GIT_WORK_TREE -u GIT_COMMON_DIR -u GIT_INDEX_FILE -u GIT_OBJECT_DIRECTORY -u GIT_ALTERNATE_OBJECT_DIRECTORIES -u GIT_NAMESPACE -u GIT_SHALLOW_FILE -u GIT_CEILING_DIRECTORIES -u GIT_DISCOVERY_ACROSS_FILESYSTEM -u GIT_GRAFT_FILE -u GIT_REPLACE_REF_BASE -u GIT_EXEC_PATH -u GIT_CONFIG \
-              /usr/bin/git -c core.fsmonitor=false --no-replace-objects --git-dir="$GITHUB_WORKSPACE/.git" --work-tree="$GITHUB_WORKSPACE" rev-parse --verify 'HEAD^{tree}'
+              /usr/bin/git -c core.fsmonitor=false -c core.filemode=true --no-replace-objects --git-dir="$GITHUB_WORKSPACE/.git" --work-tree="$GITHUB_WORKSPACE" rev-parse --verify 'HEAD^{tree}'
           )"
           test "$compile_tree" = '5937599df00b6122dccaf22bcdebdaf836f6d3ee' || { echo 'frozen source tree changed before compile' >&2; exit 1; }
           # HEAD^{tree} alone does not attest checked-out file bytes: a reused
@@ -420,7 +428,7 @@ jobs:
           # Compare working files to the frozen commit, then reject untracked
           # source files before allowing compiler execution.
           source_git=(/usr/bin/env -u GIT_DIR -u GIT_WORK_TREE -u GIT_COMMON_DIR -u GIT_INDEX_FILE -u GIT_OBJECT_DIRECTORY -u GIT_ALTERNATE_OBJECT_DIRECTORIES -u GIT_NAMESPACE -u GIT_SHALLOW_FILE -u GIT_CEILING_DIRECTORIES -u GIT_DISCOVERY_ACROSS_FILESYSTEM -u GIT_GRAFT_FILE -u GIT_REPLACE_REF_BASE -u GIT_EXEC_PATH -u GIT_CONFIG
-            /usr/bin/git -c core.fsmonitor=false --no-replace-objects --git-dir="$GITHUB_WORKSPACE/.git" --work-tree="$GITHUB_WORKSPACE")
+            /usr/bin/git -c core.fsmonitor=false -c core.filemode=true --no-replace-objects --git-dir="$GITHUB_WORKSPACE/.git" --work-tree="$GITHUB_WORKSPACE")
           # Scope to the ENTIRE tracked tree: removing a tracked config/workflow
           # file from both index and worktree evades a src/tests-only diff and
           # the subsequent index-derived per-blob comparison.
@@ -463,6 +471,22 @@ jobs:
               echo 'tracked working bytes differ from frozen HEAD blob' >&2
               exit 1
             }
+            # Git diff can ignore executable mode under core.filemode=false or
+            # assume-unchanged. Compare actual mode with pinned HEAD explicitly.
+            head_entry=''
+            IFS= read -r -d '' head_entry < <("${source_git[@]}" ls-tree -z HEAD -- ":(literal)$tracked_file") || {
+              echo 'unable to read exact committed file mode' >&2
+              exit 1
+            }
+            expected_mode="${head_entry%% *}"
+            current_mode="$(/usr/bin/stat -c %a -- "$tracked_file")"
+            [[ "$current_mode" =~ ^[0-7]{3,4}$ ]] || exit 1
+            (( (8#$current_mode & 8#6022) == 0 )) || { echo 'unsafe checkout permissions' >&2; exit 1; }
+            case "$expected_mode" in
+              100644) (( (8#$current_mode & 8#111) == 0 )) || { echo 'unreviewed executable-bit drift' >&2; exit 1; } ;;
+              100755) (( (8#$current_mode & 8#100) != 0 )) || { echo 'missing committed executable bit' >&2; exit 1; } ;;
+              *) echo 'unapproved tracked Git file mode' >&2; exit 1 ;;
+            esac
           done < "$tracked_manifest"
           echo 'frozen_source_worktree_clean=true'
           source_symlink="$(/usr/bin/find src tests -type l -name '*.ores' -print -quit)" || {
