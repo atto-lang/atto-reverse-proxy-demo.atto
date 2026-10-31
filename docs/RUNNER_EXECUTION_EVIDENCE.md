@@ -106,11 +106,11 @@ not generate a release-approval receipt; it only reports API-level step
 execution metadata, and a live JDK25 compiler digest/tree check still requires
 independent job-log inspection.
 
-`ci/test_runner_execution.py` contains **27 synthetic unittest methods**.
-Local verification on the reviewed branch passed 27/27, and tested Git
+`ci/test_runner_execution.py` contains **33 synthetic unittest methods**.
+Local verification on the reviewed branch passed 33/33, and tested Git
 blob SHA readback matched:
-- `ci/verify_runner_execution.py`: `62c98818f583a1f52e1b7f7d09069c0a33c07fea`.
-- `ci/test_runner_execution.py`: `c33595487c0ea2ace7e3dd5daa42b4783333a2ed`.
+- `ci/verify_runner_execution.py`: `a8c31e08f477d0fe0edf3862804e9f00f82d0360`.
+- `ci/test_runner_execution.py`: `f6b690572fec7275b96a3802cc18b4f765635783`.
 
 The source-free workflow's pull-request and push filters now include the
 actor-ingress base and the review branch, so the tests are eligible for CI.
@@ -124,3 +124,19 @@ source-bearing export, and **no proxy-specific approved private source
 carrier exists**. Do not weaken the original repository-ID guard in
 `native-contracts.yml` or `actor-ingress-wire.yml` to force an
 unapproved cross-org execution.
+
+### Further fail-closed admission hardening
+
+The evidence checker rejects malformed PR snapshots, step objects, and runner
+label arrays with a controlled `UNEXECUTED_OR_UNVERIFIED` verdict instead of
+unhandled exceptions. A reviewed run must include **all 30 native job steps**
+or **all 4 real-wire job steps** in workflow order; a subset is insufficient
+even if GitHub reports the job completed. The 33 local synthetic tests
+exercise missing required intermediate steps as well as the earlier runner,
+head SHA, PR linkage, and pagination negatives.
+
+An executing workflow still needs an **independent immutable workflow-blob
+readback** and the actual job logs, because GitHub's success and step names
+alone do not prove the compiler binary digest, unmodified script bodies, or
+native guest semantics. PR #33 is a review-only change and does not authorize
+cross-organization source export or waive source `main` protection.
