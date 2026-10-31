@@ -18,9 +18,11 @@ JSON from GitHub, not PR text, copied check names, synthetic fixtures,
 or self-reported workflow output:
 
 ```sh
+gh api repos/ores-truffle-oreslang/oreslang-reverse-proxy-demo.ores/pulls/11 > /tmp/reverse-pr.json
 gh api repos/ores-truffle-oreslang/oreslang-reverse-proxy-demo.ores/actions/runs/RUN_ID > /tmp/reverse-run.json
 gh api repos/ores-truffle-oreslang/oreslang-reverse-proxy-demo.ores/actions/runs/RUN_ID/jobs?per_page=100 > /tmp/reverse-jobs.json
 python3 -I ci/verify_runner_execution.py \
+  --pr-json /tmp/reverse-pr.json \
   --run-json /tmp/reverse-run.json --jobs-json /tmp/reverse-jobs.json \
   --profile wire --expected-head aa88404cc08ec6092a93e42d2d8e9a58970c755a \
   --expected-run-id RUN_ID
