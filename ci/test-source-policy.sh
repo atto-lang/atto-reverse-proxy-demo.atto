@@ -227,4 +227,17 @@ rm "$pinned_repo/docs/ignored.txt"
 EXPECTED_DEMO_SHA="$pinned_sha" bash "$pinned_repo/ci/source-policy.sh" > /dev/null || {
   echo 'TEST_FAILURE: pinned checkout failed after fixture recovery' >&2; exit 1;
 }
-printf 'SOURCE_POLICY_NEGATIVE_TESTS_PASS scenarios=28\n'
+# A checkout with core.filemode=false must not hide executable-bit drift.
+# The policy explicitly forces core.filemode=true for its HEAD comparisons.
+git -C "$pinned_repo" config core.filemode false
+chmod +x "$pinned_repo/docs/allowed.txt"
+if EXPECTED_DEMO_SHA="$pinned_sha" bash "$pinned_repo/ci/source-policy.sh" >/dev/null 2>&1; then
+  echo 'TEST_FAILURE: executable-bit drift escaped SHA-pinned audit with core.filemode=false' >&2
+  exit 1
+fi
+chmod -x "$pinned_repo/docs/allowed.txt"
+git -C "$pinned_repo" config --unset core.filemode
+EXPECTED_DEMO_SHA="$pinned_sha" bash "$pinned_repo/ci/source-policy.sh" > /dev/null || {
+  echo 'TEST_FAILURE: pinned checkout rejected after chmod fixture recovery' >&2; exit 1;
+}
+printf 'SOURCE_POLICY_NEGATIVE_TESTS_PASS scenarios=29\n'
