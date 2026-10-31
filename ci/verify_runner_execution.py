@@ -55,11 +55,25 @@ def positive_int(value: object) -> bool:
 
 
 def check_execution(run: dict, jobs_payload: dict, *, profile: str,
-                    expected_head: str, expected_run_id: int) -> dict:
+                    expected_head: str, expected_run_id: int,
+                    pr: dict | None = None) -> dict:
     """Return verified step metadata; never claim guest or wire acceptance."""
     require(profile in PROFILES, "unknown workflow profile")
     require(bool(re.fullmatch(r"[0-9a-f]{40}", expected_head)), "expected SHA invalid")
     config = PROFILES[profile]
+    if pr is not None:
+        require(isinstance(pr, dict), "PR snapshot malformed")
+        require(pr.get("state") == "open" and pr.get("number") == 11,
+                "not the target open PR")
+        require(isinstance(pr.get("head"), dict)
+                and pr["head"].get("sha") == expected_head
+                and isinstance(pr["head"].get("repo"), dict)
+                and pr["head"]["repo"].get("id") == SOURCE_REPO_ID,
+                "stale PR head or foreign head repository")
+        require(isinstance(pr.get("base"), dict)
+                and isinstance(pr["base"].get("repo"), dict)
+                and pr["base"]["repo"].get("id") == SOURCE_REPO_ID,
+                "foreign base repository")
     require(isinstance(run, dict) and isinstance(jobs_payload, dict), "malformed JSON")
     require(run.get("id") == expected_run_id and positive_int(expected_run_id),
             "run ID mismatch")
@@ -99,7 +113,8 @@ def check_execution(run: dict, jobs_payload: dict, *, profile: str,
     steps = job.get("steps")
     require(isinstance(steps, list) and bool(steps), "zero executed steps")
     names = [s.get("name") for s in steps if isinstance(s, dict)]
-    require(len(names) == len(steps) and len(names) == len(set(names)),
+    require(len(names) == len(steps) and all(isinstance(n, str) and n for n in names)
+            and len(names) == len(set(names)),
             "missing, malformed or duplicate step names")
     require(all(s.get("status") == "completed" and s.get("conclusion") == "success"
                 and positive_int(s.get("number")) for s in steps),
@@ -115,6 +130,8 @@ def check_execution(run: dict, jobs_payload: dict, *, profile: str,
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--pr-json", type=Path, required=True,
+                        help="Fresh raw GitHub REST PR #11 snapshot")
     parser.add_argument("--run-json", type=Path, required=True)
     parser.add_argument("--jobs-json", type=Path, required=True)
     parser.add_argument("--profile", choices=sorted(PROFILES), required=True)
@@ -122,12 +139,13 @@ def main() -> int:
     parser.add_argument("--expected-run-id", required=True, type=int)
     args = parser.parse_args()
     try:
+        pr = json.loads(args.pr_json.read_text(encoding="utf-8"))
         run = json.loads(args.run_json.read_text(encoding="utf-8"))
         jobs = json.loads(args.jobs_json.read_text(encoding="utf-8"))
         verified = check_execution(
             run, jobs, profile=args.profile,
             expected_head=args.expected_head,
-            expected_run_id=args.expected_run_id)
+            expected_run_id=args.expected_run_id, pr=pr)
     except (Unexecuted, OSError, ValueError, TypeError, KeyError) as exc:
         print(f"UNEXECUTED_OR_UNVERIFIED: {exc}", file=sys.stderr)
         return 1
