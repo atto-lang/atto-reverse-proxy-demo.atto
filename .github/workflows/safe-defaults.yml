@@ -1,3 +1,4 @@
+# Host-only strict byte-for-byte config fixture; does not execute Python or Oreslang.
 name: Reverse proxy safe defaults
 on:
   pull_request:
@@ -13,35 +14,59 @@ jobs:
         with:
           persist-credentials: false
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
-      - name: Validate flags-2-env admission contract
+      - name: Verify exact PR-head checkout
+        shell: bash
+        env:
+          EXPECTED_DEMO_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
-          python3 - <<'PY'
-          import tomllib
-          from pathlib import Path
-          p = Path(".cli-flags.toml")
-          if p.is_symlink() or not p.is_file():
-              raise SystemExit(".cli-flags.toml must be a regular file")
-          data = tomllib.loads(p.read_text())
-          flags = data.get("flags", {})
-          if set(flags) != {"config-yaml"}:
-              raise SystemExit(f"unexpected CLI flags: {sorted(flags)}")
-          row = flags["config-yaml"]
-          if row.get("env") != "ores_proxy_conf_yaml" or row.get("type") != "string":
-              raise SystemExit("config-yaml flags-2-env contract changed")
-          if row.get("aliases") != ["config-yaml", "conf"]:
-              raise SystemExit("unexpected config aliases")
-          print("FLAGS_2_ENV_CONTRACT_PASS")
-          PY
-      - name: Validate reverse-proxy example stays loopback and protected
+          set -euo pipefail
+          [[ "$EXPECTED_DEMO_SHA" =~ ^[a-f0-9]{40}$ ]]
+          test "$(git rev-parse HEAD)" = "$EXPECTED_DEMO_SHA"
+      - name: Validate exact canonical flags and reverse example without Python
         shell: bash
         run: |
           set -euo pipefail
-          test -f config/example.yaml
-          test ! -L config/example.yaml
-          grep -Fxq 'mode: reverse' config/example.yaml
-          grep -Fxq '  host: 127.0.0.1' config/example.yaml
-          grep -Fxq '    kind: require_header' config/example.yaml
-          grep -Fxq '    header: x-internal-token' config/example.yaml
-          grep -Fxq '    upstream: http://127.0.0.1:9000' config/example.yaml
-          ! grep -Eq '(^|[[:space:]])host:[[:space:]]+(0\.0\.0\.0|::|\*)$' config/example.yaml
-          echo 'SAFE_DEFAULTS_PASS: static config only; upstream forwarding proof NOT_EXECUTED.'
+          fixture_dir="$(mktemp -d)"
+          trap 'rm -rf -- "$fixture_dir"' EXIT
+          cat > "$fixture_dir/flags" <<'EXPECTED_FLAGS'
+          # Native Oreslang proxy flags-2-env contract.
+          [flags.config-yaml]
+          env = "ores_proxy_conf_yaml"
+          aliases = ["config-yaml", "conf"]
+          type = "string"
+          help = "Absolute trusted path to a proxy YAML configuration file."
+          EXPECTED_FLAGS
+          cat > "$fixture_dir/config" <<'EXPECTED_CONFIG'
+          version: ores.proxy/v1
+          mode: reverse
+          listen:
+            host: 127.0.0.1
+            port: 8080
+          runtime:
+            carriers: 20
+            actors: 100
+            max_inflight: 1024
+          middleware:
+            - name: trace
+              kind: trace
+            - name: protected
+              kind: require_header
+              header: x-internal-token
+          routes:
+            - name: api
+              host: api.example.test
+              path_prefix: /api
+              upstream: http://127.0.0.1:9000
+              middleware: trace,protected
+          EXPECTED_CONFIG
+          for pair in ".cli-flags.toml:flags" "config/example.yaml:config"; do
+            actual="${pair%%:*}"
+            fixture="${pair#*:}"
+            [[ -f "$actual" && ! -L "$actual" ]] &&
+              git ls-files --error-unmatch -- "$actual" >/dev/null 2>&1 &&
+              cmp -s -- "$actual" "$fixture_dir/$fixture" || {
+                echo "SAFE_DEFAULTS_FAILURE: noncanonical $actual" >&2
+                exit 1
+              }
+          done
+          echo 'SAFE_DEFAULTS_STRUCTURAL_PASS; ORESLANG_COMPILER_AND_WIRE_NOT_EXECUTED'
