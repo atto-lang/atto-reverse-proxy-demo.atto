@@ -44,3 +44,4 @@ jobs:
             "$EXPECTED_SHA" "$(git rev-parse HEAD^{tree})" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT"
           python3 -I ci/sourcefree_proxy_audit.py
           python3 -I ci/test_workflow_provenance.py
+          python3 -I ci/test_runner_execution.py
