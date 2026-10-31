@@ -1,214 +1,26 @@
-# Native compiler and contract gate. No runtime source checkout or cross-org mirror.
-# A trusted, isolated runner carrying the 'oreslang-jdk25' label must have an
-# approved Oreslang Java/Graal executable on PATH. Missing runtime is a failure.
-name: Native Oreslang Proxy Contracts
+# Legacy PR-head native workflow retired before trusted runners are provisioned.
+# This used to execute same-repository PR-controlled code on a self-hosted
+# runner. It must never be treated as successful native release evidence.
+# The independently reviewed frozen-source admission workflow is proposed in
+# .github/workflows/trusted-frozen-reverse-native.yml (PR #20).
+# Admin: protect default main, require independent review, and restrict native
+# runner groups to specifically approved workflows before enabling runners.
+name: Legacy Native Oreslang Proxy Contracts (retired, fail closed)
 on:
-  pull_request:
   workflow_dispatch:
-permissions:
-  contents: read
+permissions: {}
 jobs:
-  native-contracts:
-    # Never execute untrusted fork code on the organization's self-hosted runner.
-    # Reserve the trusted runner only for the immutable approved repository.
+  legacy-disabled:
     if: >-
-      (github.event_name == 'pull_request' &&
-       github.event.repository.id == 1429954649 &&
-       github.event.pull_request.head.repo.id == 1429954649 &&
-       github.event.pull_request.base.repo.id == 1429954649 &&
-       github.event.pull_request.head.repo.full_name == github.repository) ||
-      (github.event_name == 'workflow_dispatch' &&
-       github.event.repository.id == 1429954649 &&
-       github.ref == 'refs/heads/main')
-    runs-on: [self-hosted, linux, x64, oreslang-jdk25]
-    timeout-minutes: 20
+      github.event_name == 'workflow_dispatch' &&
+      github.repository_id == '1429954649' &&
+      github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
     steps:
-      - name: Checkout exact PR tree
-        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-        with:
-          persist-credentials: false
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-      - name: Set up JDK 25
-        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
-        with:
-          distribution: temurin
-          java-version: '25'
-      - name: Fail closed on exact source and approved native runner provenance
-        shell: bash
-        env:
-          APPROVED_REPOSITORY_ID: '1429954649'
-          EVENT_REPOSITORY_ID: ${{ github.event.repository.id }}
-          EVENT_PR_HEAD_REPO_ID: ${{ github.event.pull_request.head.repo.id }}
-          EVENT_PR_BASE_REPO_ID: ${{ github.event.pull_request.base.repo.id }}
-          EVENT_NAME: ${{ github.event_name }}
-          EXPECTED_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          APPROVED_ORESLANG_SHA256: ${{ vars.ORESLANG_APPROVED_SHA256 }}
-        run: |
-          set -euo pipefail
-          test "$EVENT_REPOSITORY_ID" = "$APPROVED_REPOSITORY_ID" || { echo 'unapproved event repository ID' >&2; exit 1; }
-          if [[ "$EVENT_NAME" == pull_request ]]; then
-            test "$EVENT_PR_HEAD_REPO_ID" = "$APPROVED_REPOSITORY_ID" || { echo 'unapproved PR head repository ID' >&2; exit 1; }
-            test "$EVENT_PR_BASE_REPO_ID" = "$APPROVED_REPOSITORY_ID" || { echo 'unapproved PR base repository ID' >&2; exit 1; }
-          fi
-          test "${RUNNER_OS:-}" = Linux && test "${RUNNER_ARCH:-}" = X64 && test "$(uname -m)" = x86_64
-          test -n "${RUNNER_NAME:-}" || { echo 'missing assigned runner name' >&2; exit 1; }
-          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA" || { echo 'exact-head checkout mismatch' >&2; exit 1; }
-          printf 'runner_name=%s\nrepository_id=%s\nsource_head=%s\nsource_tree=%s\n' "$RUNNER_NAME" "$EVENT_REPOSITORY_ID" "$EXPECTED_SHA" "$(git rev-parse HEAD^{tree})"
-          java -version
-          jdk_spec="$(java -XshowSettings:properties -version 2>&1 | sed -nE 's/^[[:space:]]*java\.specification\.version[[:space:]]*=[[:space:]]*([^[:space:]]+).*$/\1/p' | head -n 1)"
-          test "$jdk_spec" = 25 || { echo 'JDK 25 required' >&2; exit 1; }
-          launcher="$(type -P oreslang || true)"
-          test -n "$launcher" || { echo 'Oreslang launcher missing' >&2; exit 1; }
-          launcher="$(readlink -f -- "$launcher")"
-          test -f "$launcher" && test -x "$launcher" || { echo 'invalid Oreslang launcher path' >&2; exit 1; }
-          if [[ ! "${APPROVED_ORESLANG_SHA256:-}" =~ ^[0-9a-fA-F]{64}$ ]]; then
-            echo 'missing administrator-approved Oreslang launcher SHA-256' >&2
-            exit 1
-          fi
-          actual_sha="$(sha256sum -- "$launcher" | cut -d ' ' -f 1)"
-          printf 'oreslang_path=%s\noreslang_sha256=%s\n' "$launcher" "$actual_sha"
-          test "$actual_sha" = "${APPROVED_ORESLANG_SHA256,,}" || { echo 'unapproved Oreslang launcher' >&2; exit 1; }
-          echo 'oreslang_approved_digest=true'
-          # Every later invocation rechecks the approved binary; PATH is not authority.
-          test -n "${RUNNER_TEMP:-}" && test -n "${GITHUB_RUN_ID:-}" && test -n "${GITHUB_RUN_ATTEMPT:-}"
-          wrapper_dir="${RUNNER_TEMP}/oreslang-verified-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-          mkdir -m 700 -- "$wrapper_dir" || { echo 'verified wrapper directory already exists' >&2; exit 1; }
-          wrapper="$wrapper_dir/oreslang"
-          printf '%s\n' '#!/bin/bash' 'set -euo pipefail' > "$wrapper"
-          printf 'launcher=%q\n' "$launcher" >> "$wrapper"
-          printf 'expected_sha=%q\n' "${APPROVED_ORESLANG_SHA256,,}" >> "$wrapper"
-          printf '%s\n' \
-            'test -f "$launcher" && test -x "$launcher" || exit 1' \
-            'actual_sha="$(/usr/bin/sha256sum -- "$launcher" | /usr/bin/cut -d " " -f 1)"' \
-            'test "$actual_sha" = "$expected_sha" || { echo "approved Oreslang launcher changed" >&2; exit 1; }' \
-            'exec "$launcher" "$@"' >> "$wrapper"
-          chmod 700 "$wrapper"
-          if timeout 15s "$wrapper" --build-info; then
-            echo 'oreslang_probe=--build-info'
-          elif timeout 15s "$wrapper" --version; then
-            echo 'oreslang_probe=--version'
-          elif timeout 15s "$wrapper" --help; then
-            echo 'oreslang_probe=--help'
-          else
-            echo 'bounded Oreslang launcher probes failed' >&2
-            exit 1
-          fi
-      - name: Fail closed on missing or unreviewed Oreslang files
+      - name: Refuse legacy native admission
         shell: bash
         run: |
-          set -euo pipefail
-          find src tests -type f -name '*.ores' -print | LC_ALL=C sort > "$RUNNER_TEMP/oreslang-files.txt"
-          diff -u ci/oreslang-files.txt "$RUNNER_TEMP/oreslang-files.txt"
-          find tests -maxdepth 1 -type f -name '*_contract.ores' -print | LC_ALL=C sort > "$RUNNER_TEMP/pure-contracts.txt"
-          diff -u ci/pure-contracts.txt "$RUNNER_TEMP/pure-contracts.txt"
-          test -z "$(find src tests -type l -name '*.ores' -print -quit)"
-      - name: Compiler-check all reviewed Oreslang files
-        shell: bash
-        run: |
-          set -euo pipefail
-          wrapper="$RUNNER_TEMP/oreslang-verified-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/oreslang"
-          test -x "$wrapper"
-          while IFS= read -r file; do
-            test -n "$file" || continue
-            "$wrapper" --check "$file"
-          done < ci/oreslang-files.txt
-      - name: Run every reviewed standalone pure contract
-        shell: bash
-        run: |
-          set -euo pipefail
-          wrapper="$RUNNER_TEMP/oreslang-verified-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/oreslang"
-          test -x "$wrapper"
-          count=0
-          while IFS= read -r file; do
-            test -n "$file" || continue
-            "$wrapper" "$file"
-            count=$((count + 1))
-          done < ci/pure-contracts.txt
-          test "$count" -gt 0
-      - name: Compiler-check entrypoint
-        run: '"$RUNNER_TEMP/oreslang-verified-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/oreslang" --check src/main.ores'
-      - name: Compiler-check configuration path admission
-        run: '"$RUNNER_TEMP/oreslang-verified-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/oreslang" --check src/config_path.ores'
-      - name: Compiler-check YAML parser
-        run: '"$RUNNER_TEMP/oreslang-verified-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/oreslang" --check src/proxy_yaml.ores'
-      - name: Compiler-check routing policy
-        run: '"$RUNNER_TEMP/oreslang-verified-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/oreslang" --check src/route_policy.ores'
-      - name: Compiler-check middleware policy
-        run: '"$RUNNER_TEMP/oreslang-verified-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/oreslang" --check src/middleware_policy.ores'
-      - name: Compiler-check generation coordinator
-        run: '"$RUNNER_TEMP/oreslang-verified-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/oreslang" --check src/generation.ores'
-      - name: Compiler-check native YAML contract
-        run: '"$RUNNER_TEMP/oreslang-verified-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/oreslang" --check tests/yaml_policy_contract.ores'
-      - name: Compiler-check native generation contract
-        run: '"$RUNNER_TEMP/oreslang-verified-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/oreslang" --check tests/generation_contract.ores'
-      - name: Compiler-check native middleware contract
-        run: '"$RUNNER_TEMP/oreslang-verified-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/oreslang" --check tests/middleware_generation_contract.ores'
-      - name: Compiler-check canonical path contract
-        run: '"$RUNNER_TEMP/oreslang-verified-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/oreslang" --check tests/path_admission_contract.ores'
-      - name: Execute canonical configuration path contract
-        run: '"$RUNNER_TEMP/oreslang-verified-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/oreslang" tests/path_admission_contract.ores'
-      - name: Execute YAML / routing / policy contract
-        run: '"$RUNNER_TEMP/oreslang-verified-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/oreslang" tests/yaml_policy_contract.ores'
-      - name: Execute generation epoch / rollback contract
-        run: '"$RUNNER_TEMP/oreslang-verified-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/oreslang" tests/generation_contract.ores'
-      - name: Execute independent middleware snapshot contract
-        run: '"$RUNNER_TEMP/oreslang-verified-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/oreslang" tests/middleware_generation_contract.ores'
-
-      - name: Compiler-check HTTP metadata admission and header filtering
-        run: |
-          "$RUNNER_TEMP/oreslang-verified-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/oreslang" --check src/proxy_wire.ores
-          "$RUNNER_TEMP/oreslang-verified-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/oreslang" --check src/header_policy.ores
-      - name: Compiler-check native slot lifecycle, middleware manifest and data layouts
-        run: |
-          "$RUNNER_TEMP/oreslang-verified-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/oreslang" --check src/slot_lifecycle.ores
-          "$RUNNER_TEMP/oreslang-verified-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/oreslang" --check src/slot_pool.ores
-          "$RUNNER_TEMP/oreslang-verified-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/oreslang" --check src/middleware_manifest.ores
-          "$RUNNER_TEMP/oreslang-verified-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/oreslang" --check src/data_layout.ores
-      - name: Compiler-check all security and slot regression vectors
-        run: |
-          "$RUNNER_TEMP/oreslang-verified-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/oreslang" --check tests/security_admission_contract.ores
-          "$RUNNER_TEMP/oreslang-verified-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/oreslang" --check tests/wire_contract.ores
-          "$RUNNER_TEMP/oreslang-verified-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/oreslang" --check tests/header_policy_contract.ores
-          "$RUNNER_TEMP/oreslang-verified-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/oreslang" --check tests/middleware_manifest_contract.ores
-          "$RUNNER_TEMP/oreslang-verified-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/oreslang" --check tests/data_layout_contract.ores
-          "$RUNNER_TEMP/oreslang-verified-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/oreslang" --check tests/slot_lifecycle_contract.ores
-          "$RUNNER_TEMP/oreslang-verified-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/oreslang" --check tests/slot_pool_contract.ores
-      - name: Compiler-check opt-in reverse ingress and TCP smoke
-        run: |
-          "$RUNNER_TEMP/oreslang-verified-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/oreslang" --check src/serve_reverse.ores
-          "$RUNNER_TEMP/oreslang-verified-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/oreslang" --check tests/ingress_tcp_smoke.ores
-      - name: Execute complete Oreslang safety contracts
-        run: |
-          "$RUNNER_TEMP/oreslang-verified-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/oreslang" tests/security_admission_contract.ores
-          "$RUNNER_TEMP/oreslang-verified-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/oreslang" tests/wire_contract.ores
-          "$RUNNER_TEMP/oreslang-verified-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/oreslang" tests/header_policy_contract.ores
-          "$RUNNER_TEMP/oreslang-verified-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/oreslang" tests/middleware_manifest_contract.ores
-          "$RUNNER_TEMP/oreslang-verified-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/oreslang" tests/data_layout_contract.ores
-          "$RUNNER_TEMP/oreslang-verified-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/oreslang" tests/slot_lifecycle_contract.ores
-          "$RUNNER_TEMP/oreslang-verified-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/oreslang" tests/slot_pool_contract.ores
-
-      - name: Compiler-check actor service, LB, rate and circuit modules
-        run: |
-          "$RUNNER_TEMP/oreslang-verified-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/oreslang" --check src/service_bindings.ores
-          "$RUNNER_TEMP/oreslang-verified-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/oreslang" --check src/load_balancer.ores
-          "$RUNNER_TEMP/oreslang-verified-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/oreslang" --check src/traffic_controls.ores
-          "$RUNNER_TEMP/oreslang-verified-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/oreslang" --check src/network_admission.ores
-          "$RUNNER_TEMP/oreslang-verified-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/oreslang" --check tests/service_bindings_contract.ores
-          "$RUNNER_TEMP/oreslang-verified-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/oreslang" --check tests/load_balancer_contract.ores
-          "$RUNNER_TEMP/oreslang-verified-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/oreslang" --check tests/traffic_controls_contract.ores
-          "$RUNNER_TEMP/oreslang-verified-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/oreslang" --check tests/network_admission_contract.ores
-      - name: Execute actor service, LB, rate and circuit contracts
-        run: |
-          "$RUNNER_TEMP/oreslang-verified-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/oreslang" tests/service_bindings_contract.ores
-          "$RUNNER_TEMP/oreslang-verified-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/oreslang" tests/load_balancer_contract.ores
-          "$RUNNER_TEMP/oreslang-verified-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/oreslang" tests/traffic_controls_contract.ores
-          "$RUNNER_TEMP/oreslang-verified-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/oreslang" tests/network_admission_contract.ores
-      - name: Compiler-check opt-in local actor-service real TCP client
-        run: '"$RUNNER_TEMP/oreslang-verified-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/oreslang" --check tests/actor_ingress_tcp_smoke.ores'
-
-      - name: Compiler-check YAML backend pool compiler
-        run: |
-          "$RUNNER_TEMP/oreslang-verified-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/oreslang" --check src/backend_pools.ores
-          "$RUNNER_TEMP/oreslang-verified-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/oreslang" --check tests/backend_pools_contract.ores
-      - name: Execute native YAML weighted backend pool contract
-        run: '"$RUNNER_TEMP/oreslang-verified-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/oreslang" tests/backend_pools_contract.ores'
+          echo 'ERROR: legacy PR-head native workflow retired; not an Oreslang test result' >&2
+          echo 'Use protected-main trusted-frozen-reverse-native workflow after independent review' >&2
+          exit 1
