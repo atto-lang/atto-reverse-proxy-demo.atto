@@ -4,12 +4,13 @@ on:
     branches:
       - feat/worker-service-bindings-20261023
       - feat/yaml-backend-pools-20261023
-      - feat/yaml-backend-pools-20261023
       - feat/executable-actor-ingress-gate-20261023
+      - ci/runner-execution-receipt-gate-20261031
   pull_request:
     branches:
       - audit/strict-proxy-boundaries-20261022
       - feat/worker-service-bindings-20261023
+      - feat/executable-actor-ingress-gate-20261023
 permissions:
   contents: read
 concurrency:
