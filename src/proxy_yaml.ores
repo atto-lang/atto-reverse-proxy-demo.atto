@@ -221,7 +221,9 @@ define module proxy_yaml as
     if !prefix.starts_with("/") || prefix.starts_with("//") ||
       prefix.contains_literal("?") || prefix.contains_literal("//") ||
       prefix.contains_literal("%") || prefix.contains_literal(";") ||
-      prefix.contains_literal("/./") || prefix.contains_literal("/../") ||
+      // HTTP strict_path denies any '..', including dot-sequences embedded
+      // inside a path segment. Never accept an unreachable config prefix.
+      prefix.contains_literal("..") || prefix.contains_literal("/./") ||
       prefix.ends_with("/.") || prefix.ends_with("/..") ||
       (prefix != "/" && prefix.ends_with("/")); then
       return Err("route path_prefix must be a canonical absolute path");
@@ -614,7 +616,19 @@ define module proxy_yaml as
         if !bound; then return Err("unbound actor service route"); fi
       fi
       if route.middleware != ""; then
+        let Array<String> seen_ids = new Array<String>();
         for (const id of route.middleware.split_literal(",")) {
+          // Repeating a policy step must not cause two different consumers
+          // to interpret the same route with different effective authority.
+          if !valid_identifier(id); then
+            return Err("invalid middleware identifier in route");
+          fi
+          for (const earlier of seen_ids) {
+            if earlier == id; then
+              return Err("duplicate middleware identifier in route");
+            fi
+          }
+          seen_ids.add(id);
           let bool present = false;
           for (const definition of middlewares) {
             if definition.name == id; then present = true; fi
