@@ -1,49 +1,94 @@
-# Native compiler / contract validation
+# Oreslang proxy native qualification — review/CI handoff
 
-The proposed network data plane is **not** implemented. This document describes the actual executable verification gate without using a replacement parser or mocked Oreslang compiler.
+Updated 2026-10-31. **This is a test plan, not executable CI evidence.**
 
-## CI
+## Security admission
 
-`.github/workflows/native-contracts.yml` checks all six Oreslang source modules and runs four native Oreslang test entrypoints:
+The legacy `.github/workflows/native-contracts.yml` on these audit branches is
+**retired and fail-closed**. It does not accept pull-request triggers, does not
+reserve a self-hosted runner and returns exit 78 (`NOT_EXECUTED`) on manual
+dispatch. Excluding forks alone was not enough: same-repository PR authors
+could still control guest code on a privileged self-hosted runner.
 
-- `tests/path_admission_contract.ores`: canonical absolute POSIX YAML path admission, traversal/symlink-shaped lexical rejection and control characters (not race-free access).
-- `tests/yaml_policy_contract.ores`: strict YAML admission, malicious scalar/comment inputs, domain validation, and complexity bounds.
-- `tests/generation_contract.ores`: pure prepare/publish/abort semantics, stale epoch rejection, prior-snapshot identity.
-- `tests/middleware_generation_contract.ores`: old/new policy isolation and unsupported middleware rejection.
+Real native acceptance requires independently reviewed protected-default-main
+control-plane workflows, a locked `oreslang-trusted-native` runner group,
+an administrator-owned complete runtime directory/manifest and exact-head
+frozen-source attestation. See forward security PR #19 and reverse #20.
+Do not activate, bypass or merge these controls through an audit branch.
 
-The workflow deliberately requires the self-hosted `oreslang-jdk25` runner label, `actions/setup-java` JDK 25, and an **approved and installed** `oreslang` executable in `PATH`. It uses only `contents: read`, does not check out the private compiler repository, and rejects fork-origin PR execution on this runner. The runner should be an ephemeral, unprivileged, dedicated validation environment with no deployment credentials and no untrusted co-tenants.
+The source-only `.github/workflows/source-contract-inventory.yml` verifies
+tracked source bytes and coverage, but **does not compile or execute Oreslang**.
 
-A **queued** workflow run is not a passing test. If there is no runner with this label, no guest code has executed. Before marking the PR ready, capture a green run on the exact PR head with actual individual steps, the Oreslang binary provenance, and the JDK 25 version.
+## Exact immutable source snapshots for this audit
 
-## Local checks on an authorized runtime
+Record both full 40-character source commit SHAs and rooted Git-tree SHAs
+from the reviewed source branches. Source execution is only valid if the
+guest checkout matches the entire independently approved source tree:
+paths, modes, blob SHAs, submodule/symlink policy and content, not merely
+a few selected files. The working directory must have no modifications.
+Any mirrored source must use a separately approved PRIVATE carrier with
+recorded numeric destination ID, retention, least-privilege permissions,
+runner separation and cleanup limitations. A copied loose blob is not a
+complete validated mirror.
 
-With JDK 25 and the real Java/Graal `oreslang` launcher installed:
+## Native compiler requirements (currently unmet for these snapshots)
 
-```text
-oreslang --check src/main.ores
-oreslang --check src/config_path.ores
-oreslang --check src/proxy_yaml.ores
-oreslang --check src/route_policy.ores
-oreslang --check src/middleware_policy.ores
-oreslang --check src/generation.ores
-oreslang --check tests/path_admission_contract.ores
-oreslang --check tests/yaml_policy_contract.ores
-oreslang --check tests/generation_contract.ores
-oreslang --check tests/middleware_generation_contract.ores
-oreslang tests/path_admission_contract.ores
-oreslang tests/yaml_policy_contract.ores
-oreslang tests/generation_contract.ores
-oreslang tests/middleware_generation_contract.ores
-```
+Provide an independently attested **real** Oreslang Java/Graal runtime,
+complete dependency/JDK25 manifest and exact compiler executable SHA-256.
+A host JDK or Native Image binary alone is NOT an `oreslang` compiler.
+The trusted runner must confirm the immutable approved runtime before
+and between native guest invocations and enforce bounded time/resources.
+No mock parser or synthetic Oreslang executable may satisfy this gate.
 
-Do **not** silently skip missing executables or replace commands with grep-only/mocked checks. `src/main.ores` intentionally exits with status 78 on valid configuration because no listening/forwarding data plane is certified; a successful parsing check cannot stand in for a healthy proxy.
+## Exhaustive native contract entrypoints
 
-## Gates after source compilation
+Check **every** tracked `src/*.ores` and `tests/*.ores` with the real
+compiler, including `src/http_framing.ores`, `src/header_policy.ores`,
+`src/proxy_wire.ores`, and their import closure. Do NOT run `src/main.ores`
+as a ready server; it is intentionally not a production data plane.
 
-Real HTTP/1.1 wire tests, correct reverse proxy response status/header/trailer streaming, forward CONNECT, TLS and destination IP pinning, request-smuggling/SSRF adversarial inputs, generation-pinned in-flight requests, actor cancellation/drain and bounded mailbox backpressure must pass before any release. LLVM, Graal AOT and hybrid must independently report verified support or explicit unsupported behavior.
+Execute these 11 standalone native contract entrypoints for EACH source
+snapshot, preserving nonzero exits and actual output:
 
-## Runtime dependency and policy limitations
+- `tests/data_layout_contract.ores`
+- `tests/generation_contract.ores`
+- `tests/header_policy_contract.ores`
+- `tests/http_framing_contract.ores`
+- `tests/middleware_generation_contract.ores`
+- `tests/middleware_manifest_contract.ores`
+- `tests/path_admission_contract.ores`
+- `tests/slot_lifecycle_contract.ores`
+- `tests/slot_pool_contract.ores`
+- `tests/wire_contract.ores`
+- `tests/yaml_policy_contract.ores`
 
-The outbound HTTP/CONNECT transport required for a serving proxy is tracked in [Java backend issue #1942](https://github.com/ores-truffle-oreslang/oreslang-source.java/issues/1942). Route and CONNECT policy helpers make **syntactic and declarative decisions only**, not network access grants. Upstream numeric port/IP range checks, TLS identity, pinned DNS, egress restrictions and real HTTP smuggling defenses remain transport release gates.
+The shared framing test includes 45 native parser invocations covering
+canonical bodyless requests, duplicate Host and ordinary header rejection,
+CL/TE conflicts, malformed CRLF, pipelining, control bytes and CONNECT
+authority mismatch. **Counting source invocations is not test execution.**
 
-The `config_path` module enforces a canonical absolute POSIX spelling for `ores_proxy_conf_yaml`. It cannot prevent concurrent file replacement, ancestor symlinks or TOCTOU attacks; only a capability-based descriptor API can close that gap. Do not authorize hostile configuration paths based on this helper alone.
+On reverse only, `tests/ingress_tcp_smoke.ores` is a separate controlled
+loopback integration test. Record its exact configuration and listen
+address, assert denied/unmatched/501 paths and bounded shutdown, and
+do not classify it as upstream forwarding success. Never run network
+smoke with unexpected host networking, ingress or egress capabilities.
+
+## Evidence and honest verdicts
+
+For every job: record immutable source head/tree, validated source-file
+inventory, compiler source and launcher SHA-256, approved runtime
+manifest, Java/native-image version where applicable, runner ID, run
+attempt, individual executed step list, each command's exit status,
+stdout/stderr (redacted, without source or secrets) and test summary.
+For each tested backend, distinguish `PASS`, `FAIL`, `NOT_EXECUTED`,
+`SKIPPED` and `UNSUPPORTED` explicitly. No step or assigned runner
+means `NOT_EXECUTED`, not a source failure or a pass.
+
+## Remaining production release boundaries
+
+Neither proxy has a production-safe forwarding data plane. Real raw-byte
+framing, correct response/status/trailer streaming, authenticated ingress,
+pinned DNS and destination IP checks, TLS identity, SSRF and smuggling
+controls, generation fencing, bounded actor mailboxes and cancellation
+must be independently verified before any network serving release.
+A strict text-frame parser alone does not prove raw wire safety.
