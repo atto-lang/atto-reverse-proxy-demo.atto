@@ -1,38 +1,62 @@
-name: Native actor ingress real-wire gate
+# This integration test must never run unreviewed PR-head source on a
+# self-hosted native runner. Manual execution is permitted only from an
+# independently reviewed, protected main, after the approved runner group is
+# restricted to this specific workflow. Source-only PR gates remain separate.
+name: Native actor ingress real-wire gate (protected main only)
 on:
-  pull_request:
-    paths:
-      # Any transitive admission/policy change can alter actor wire behavior.
-      - 'src/**'
-      - 'config/**'
-      - 'tests/actor_ingress_tcp_smoke.ores'
-      - '.github/workflows/actor-ingress-wire.yml'
   workflow_dispatch:
-permissions:
-  contents: read
+permissions: {}
 concurrency:
-  group: reverse-wire-${{ github.repository }}
+  group: reverse-wire-${{ github.repository }}-${{ github.ref }}
   cancel-in-progress: false
 jobs:
-  actor-ingress:
-    # Do not schedule unapproved repository or fork source on the trusted runner.
+  hosted-preflight:
     if: >-
-      (github.event_name == 'pull_request' &&
-       github.event.repository.id == 1429954649 &&
-       github.event.pull_request.head.repo.id == 1429954649 &&
-       github.event.pull_request.base.repo.id == 1429954649 &&
-       github.event.pull_request.head.repo.full_name == github.repository) ||
-      (github.event_name == 'workflow_dispatch' &&
-       github.event.repository.id == 1429954649 &&
-       github.ref == 'refs/heads/main')
-    runs-on: [self-hosted, linux, x64, oreslang-jdk25]
-    timeout-minutes: 10
+      github.event_name == 'workflow_dispatch' &&
+      github.repository_id == '1429954649' &&
+      github.ref == 'refs/heads/main' &&
+      github.ref_protected == true
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    permissions:
+      contents: read
     steps:
-      - name: Checkout exact PR head
+      - name: Verify protected main without checkout or guest code
+        shell: bash
+        env:
+          GH_READ_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = 'ores-truffle-oreslang/oreslang-reverse-proxy-demo.ores'
+          test "$GITHUB_REF" = 'refs/heads/main'
+          test "${GITHUB_REF_PROTECTED:-}" = true
+          test "$GITHUB_REPOSITORY_ID" = '1429954649'
+          test -n "${GH_READ_TOKEN:-}"
+          response="$(/usr/bin/curl -q --fail --silent --show-error --retry 0 --proto '=https' --noproxy '*' --proxy '' --connect-timeout 5 --max-time 15 -H "Authorization: Bearer $GH_READ_TOKEN" -H 'Accept: application/vnd.github+json' 'https://api.github.com/repos/ores-truffle-oreslang/oreslang-reverse-proxy-demo.ores/branches/main')"
+          /usr/bin/jq -e --arg sha "$GITHUB_SHA" '(.protected == true) and (.commit.sha == $sha)' <<<"$response" >/dev/null
+          echo 'ACTOR_WIRE_HOSTED_PROTECTED_MAIN_PREFLIGHT_PASS; NO_GUEST_EXECUTED'
+  actor-ingress:
+    needs: hosted-preflight
+    # No pull_request or pull_request_target path can allocate a native runner.
+    # The runner group must ALSO be restricted by an independent administrator.
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      github.repository_id == '1429954649' &&
+      github.ref == 'refs/heads/main' &&
+      github.ref_protected == true
+    runs-on:
+      group: oreslang-trusted-native
+      labels: [self-hosted, linux, x64, oreslang-jdk25]
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout exact protected-main commit
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           persist-credentials: false
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          submodules: false
+          ref: ${{ github.sha }}
       - name: JDK 25
         uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
         with:
@@ -43,18 +67,16 @@ jobs:
         env:
           APPROVED_REPOSITORY_ID: '1429954649'
           EVENT_REPOSITORY_ID: ${{ github.event.repository.id }}
-          EVENT_PR_HEAD_REPO_ID: ${{ github.event.pull_request.head.repo.id }}
-          EVENT_PR_BASE_REPO_ID: ${{ github.event.pull_request.base.repo.id }}
           EVENT_NAME: ${{ github.event_name }}
-          EXPECTED_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          EXPECTED_SHA: ${{ github.sha }}
+          EXPECTED_PROTECTED_REF: ${{ github.ref_protected }}
           APPROVED_ORESLANG_SHA256: ${{ vars.ORESLANG_APPROVED_SHA256 }}
         run: |
           set -euo pipefail
           test "$EVENT_REPOSITORY_ID" = "$APPROVED_REPOSITORY_ID" || { echo 'unapproved repository ID' >&2; exit 1; }
-          if [[ "$EVENT_NAME" == pull_request ]]; then
-            test "$EVENT_PR_HEAD_REPO_ID" = "$APPROVED_REPOSITORY_ID" || { echo 'unapproved PR head repository ID' >&2; exit 1; }
-            test "$EVENT_PR_BASE_REPO_ID" = "$APPROVED_REPOSITORY_ID" || { echo 'unapproved PR base repository ID' >&2; exit 1; }
-          fi
+          test "$EVENT_NAME" = workflow_dispatch || { echo 'native PR-head execution prohibited' >&2; exit 1; }
+          test "$GITHUB_REF" = 'refs/heads/main' || { echo 'native non-main execution prohibited' >&2; exit 1; }
+          test "$EXPECTED_PROTECTED_REF" = true || { echo 'native main not protected' >&2; exit 1; }
           test "${RUNNER_OS:-}" = Linux && test "${RUNNER_ARCH:-}" = X64 && test "$(uname -m)" = x86_64
           test -n "${RUNNER_NAME:-}" || { echo 'runner not assigned' >&2; exit 1; }
           test "$(git rev-parse HEAD)" = "$EXPECTED_SHA" || { echo 'exact source HEAD mismatch' >&2; exit 1; }
