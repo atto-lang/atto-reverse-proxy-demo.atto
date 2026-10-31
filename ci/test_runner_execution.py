@@ -130,6 +130,30 @@ class AdmissionEvidence(unittest.TestCase):
         with self.assertRaises(gate.Unexecuted):
             self.verify(run, jobs)
 
+    def test_missing_pr_snapshot_fails_closed(self):
+        run, jobs = good()
+        with self.assertRaises(gate.Unexecuted):
+            gate.check_execution(run, jobs, profile="wire", expected_head=HEAD,
+                                 expected_run_id=RUN_ID, pr=None)
+
+    def test_malformed_pr_snapshot_fails_closed(self):
+        run, jobs = good()
+        with self.assertRaises(gate.Unexecuted):
+            gate.check_execution(run, jobs, profile="wire", expected_head=HEAD,
+                                 expected_run_id=RUN_ID, pr=["not a PR"])
+
+    def test_malformed_step_is_clean_rejection(self):
+        run, jobs = good()
+        jobs["jobs"][0]["steps"][0] = None
+        with self.assertRaises(gate.Unexecuted):
+            self.verify(run, jobs)
+
+    def test_malformed_labels_are_clean_rejection(self):
+        run, jobs = good()
+        jobs["jobs"][0]["labels"].append(["unhashable"])
+        with self.assertRaises(gate.Unexecuted):
+            self.verify(run, jobs)
+
     def test_no_jobs(self):
         run, jobs = good()
         jobs["jobs"] = []
