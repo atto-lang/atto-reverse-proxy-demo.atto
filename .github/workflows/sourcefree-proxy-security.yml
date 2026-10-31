@@ -2,6 +2,12 @@
 # Same-repository PRs may run Bash on GitHub-hosted workers, without secrets.
 name: Source-free reverse proxy security audit
 on:
+  # The current actor stack is a PR against another development branch.
+  # A hosted-only push trigger permits checking the exact current branch HEAD
+  # before its target branch adopts this new workflow definition.
+  push:
+    branches:
+      - feat/actor-dispatch-receipts-2238
   pull_request:
   workflow_dispatch:
 permissions:
@@ -15,8 +21,9 @@ jobs:
       github.event.repository.id == 1429954649 &&
       ((github.event_name == 'pull_request' &&
         github.event.pull_request.head.repo.id == 1429954649 &&
-        github.event.pull_request.base.repo.id == 1429954649 &&
-        github.event.pull_request.base.ref == 'main') ||
+        github.event.pull_request.base.repo.id == 1429954649) ||
+       (github.event_name == 'push' &&
+        github.ref == 'refs/heads/feat/actor-dispatch-receipts-2238') ||
        (github.event_name == 'workflow_dispatch' &&
         github.ref == 'refs/heads/main'))
     runs-on: ubuntu-24.04
