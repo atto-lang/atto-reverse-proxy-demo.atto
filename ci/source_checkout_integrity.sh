@@ -58,6 +58,18 @@ trap '/usr/bin/rm -f -- "$tracked"' EXIT
 git_exact ls-files -z > "$tracked" || {
   echo 'CHECKOUT_FAIL: tracked file listing failed' >&2; exit 1;
 }
+# A reused checkout can hide modified tracked bytes with assume-unchanged
+# or skip-worktree index flags. Require ordinary, non-sparse index entries.
+index_flags="$(/usr/bin/mktemp)"
+trap '/usr/bin/rm -f -- "$tracked" "$index_flags"' EXIT
+git_exact ls-files -v -z > "$index_flags" || {
+  echo 'CHECKOUT_FAIL: index flag listing failed' >&2; exit 1;
+}
+while IFS= read -r -d '' entry; do
+  [[ "${entry:0:1}" == H ]] || {
+    echo 'CHECKOUT_FAIL: skip-worktree or assume-unchanged index entry' >&2; exit 1;
+  }
+done < "$index_flags"
 while IFS= read -r -d '' path; do
   case "$path" in
     *.[Pp][Yy]|*.[Pp][Yy][Ii]|*.[Ii][Pp][Yy][Nn][Bb])
