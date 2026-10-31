@@ -1,6 +1,14 @@
 import module proxy_wire from "../src/proxy_wire";
+import module http_framing from "../src/http_framing";
 import module proxy_yaml from "../src/proxy_yaml";
 pub routine main(): int {
+  // Existing wire-contract runner also exercises shared strict framing.
+  if http_framing.parse(
+    "GET /api HTTP/1.1\r\nHost: app.example.test\r\n\r\n", "reverse").is_err() ||
+    http_framing.parse(
+    "GET /api HTTP/1.1\r\nHost: app.example.test\r\nhost: evil.example.test\r\n\r\n", "reverse").is_ok(); then
+    stdio.println("FAIL bodyless HTTP/1.1 framed admission smoke"); return 1;
+  fi
   val good = proxy_wire.reverse("GET /api/v1 HTTP/1.1", "app.example.test");
   if good.is_err(); then stdio.println("FAIL reverse origin"); return 1; fi
   if good.unwrap().path != "/api/v1"; then return 1; fi
