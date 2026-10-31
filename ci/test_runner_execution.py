@@ -60,7 +60,7 @@ class AdmissionEvidence(unittest.TestCase):
 
     def test_synthetic_native_metadata(self):
         run, jobs = good("native")
-        self.assertEqual(self.verify(run, jobs, "native")["steps"], 5)
+        self.assertEqual(self.verify(run, jobs, "native")["steps"], 30)
 
     def test_pr_snapshot_head_must_match(self):
         run, jobs = good()
@@ -219,6 +219,19 @@ class AdmissionEvidence(unittest.TestCase):
     def test_wrong_job_head(self):
         run, jobs = good()
         jobs["jobs"][0]["head_sha"] = "b" * 40
+        with self.assertRaises(gate.Unexecuted):
+            self.verify(run, jobs)
+
+    def test_missing_noncritical_native_workflow_step_fails(self):
+        run, jobs = good("native")
+        steps = jobs["jobs"][0]["steps"]
+        steps[:] = [s for s in steps if s["name"] != "Set up JDK 25"]
+        with self.assertRaises(gate.Unexecuted):
+            self.verify(run, jobs, "native")
+
+    def test_missing_wire_java_step_fails(self):
+        run, jobs = good("wire")
+        jobs["jobs"][0]["steps"].pop(1)
         with self.assertRaises(gate.Unexecuted):
             self.verify(run, jobs)
 
