@@ -74,6 +74,27 @@ pub routine main(): int {
       "header: X-Token"), "reverse").is_ok(); then
     stdio.println("FAIL reverse proxy origin/path/header admission"); return 1;
   fi
+  // Source parser and HTTP request-path guard must agree: a configured
+  // path containing any '..' cannot ever be a runtime-dispatchable prefix.
+  // Reject both a traversal-like prefix and dots embedded in one segment.
+  if proxy_yaml.parse(document.replace_literal("path_prefix: /api",
+      "path_prefix: /api/..x"), "reverse").is_ok() ||
+    proxy_yaml.parse(document.replace_literal("path_prefix: /api",
+      "path_prefix: /api..v2"), "reverse").is_ok(); then
+    stdio.println("FAIL configured prefix escaped strict request-path grammar");
+    return 1;
+  fi
+  // Repeated middleware identifiers are ambiguous across policy consumers;
+  // parser admission rejects duplicate steps rather than normalizing them.
+  if proxy_yaml.parse(document.replace_literal("middleware: guard",
+      "middleware: guard,guard"), "reverse").is_ok() ||
+    proxy_yaml.parse(document.replace_literal("middleware: guard",
+      "middleware: guard,missing"), "reverse").is_ok() ||
+    proxy_yaml.parse(document.replace_literal("middleware: guard",
+      "middleware: guard,,guard"), "reverse").is_ok(); then
+    stdio.println("FAIL duplicate or malformed middleware route chain");
+    return 1;
+  fi
   // Most-specific prefix must win even when the broad route appears first.
   val String admin = "  - name: admin\n    host: app.example.test\n    path_prefix: /api/admin\n    upstream: http://127.0.0.1:9001\n    middleware: guard\n";
   val first_broad = proxy_yaml.parse(document + admin, "reverse");
