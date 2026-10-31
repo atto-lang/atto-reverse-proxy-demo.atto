@@ -145,4 +145,12 @@ pass 'all three actor service routes are middleware-free'
 has tests/actor_ingress_tcp_smoke.ores 'HEAD /actor HTTP/1.1' 'actor HEAD refusal fixture'
 has tests/actor_ingress_tcp_smoke.ores 'HEAD /stream HTTP/1.1' 'stream HEAD refusal fixture'
 has tests/actor_ingress_tcp_smoke.ores 'starts_with("HTTP/1.1 405")' 'actor HEAD 405 verdict'
+# Integration review contract: config and HTTP path grammars must agree,
+# and no duplicate middleware step can be admitted as a canonical route.
+has src/proxy_yaml.ores 'prefix.contains_literal("..")' 'no unreachable dot-sequence config prefix'
+has src/proxy_yaml.ores 'duplicate middleware identifier in route' 'repeated middleware route IDs rejected'
+has src/proxy_yaml.ores 'invalid middleware identifier in route' 'malformed middleware route IDs rejected'
+has tests/yaml_policy_contract.ores 'FAIL configured prefix escaped strict request-path grammar' 'prefix parity negative fixture'
+has tests/yaml_policy_contract.ores 'FAIL duplicate or malformed middleware route chain' 'middleware chain negative fixture'
+has tests/header_policy_contract.ores 'FAIL untrusted connection nominations or C0/DEL headers' 'header nomination and C0/DEL negative fixture'
 printf 'SOURCEFREE_PROXY_AUDIT_PASS checks=%s host_only=true; NATIVE_NOT_EXECUTED\n' "$count"
