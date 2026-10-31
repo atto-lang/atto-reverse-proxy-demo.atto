@@ -71,4 +71,25 @@ checkout_root="$(/usr/bin/realpath -e -- "$GITHUB_WORKSPACE")"
   (( (8#$current_mode & 8#6022) == 0 )) || exit 1
   case "$expected_mode" in 100644) (( (8#$current_mode & 8#111) == 0 )) || exit 1 ;; 100755) (( (8#$current_mode & 8#100) != 0 )) || exit 1 ;; *) exit 1 ;; esac
 done
-exec /usr/bin/env -u GITHUB_ENV -u GITHUB_PATH -u GITHUB_OUTPUT -u GITHUB_STATE -u GITHUB_STEP_SUMMARY -u GH_READ_TOKEN -u GITHUB_TOKEN -u GH_TOKEN -u ACTIONS_RUNTIME_TOKEN -u ACTIONS_ID_TOKEN_REQUEST_TOKEN -u ACTIONS_ID_TOKEN_REQUEST_URL -u GIT_ASKPASS -u SSH_AUTH_SOCK /usr/bin/timeout --signal=TERM --kill-after=2s 120s "$launcher" "$@"
+# Pass a minimal explicit guest environment. Runner/provider credentials,
+# dynamic-loader hooks, Git configuration and unexpected variables stay outside
+# the untrusted Oreslang process, including previously unknown secret names.
+guest_env=(
+  "JAVA_HOME=$java_root"
+  "PATH=$java_root/bin:/usr/bin:/bin"
+  "LANG=C.UTF-8"
+  "HOME=/nonexistent"
+  "TMPDIR=/tmp"
+)
+# Preserve only the two reviewed reverse ingress configuration cases:
+# tracked example.yaml and the deliberately absent configuration fixture.
+if [[ "${ores_proxy_conf_yaml+x}" == x ]]; then
+  example_cfg="$(/usr/bin/realpath -e -- "$GITHUB_WORKSPACE/config/example.yaml")" || exit 1
+  missing_cfg="$RUNNER_TEMP/ores-proxy-missing-config.yaml"
+  if [[ "$ores_proxy_conf_yaml" != "$example_cfg" && "$ores_proxy_conf_yaml" != "$missing_cfg" ]]; then
+    echo "unapproved reverse ingress configuration environment path" >&2
+    exit 1
+  fi
+  guest_env+=("ores_proxy_conf_yaml=$ores_proxy_conf_yaml")
+fi
+exec /usr/bin/env -i "${guest_env[@]}" /usr/bin/timeout --signal=TERM --kill-after=2s 120s "$launcher" "$@"

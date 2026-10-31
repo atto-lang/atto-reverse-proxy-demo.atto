@@ -355,7 +355,7 @@ jobs:
             echo 'root-owned manifest pin disagrees with independently approved Actions variable' >&2; exit 1;
           }
           verifier_blob="$(/usr/bin/env -u GIT_DIR -u GIT_WORK_TREE -u GIT_COMMON_DIR -u GIT_INDEX_FILE -u GIT_OBJECT_DIRECTORY -u GIT_ALTERNATE_OBJECT_DIRECTORIES -u GIT_NAMESPACE -u GIT_CONFIG -u GIT_CONFIG_COUNT -u GIT_CONFIG_PARAMETERS GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null /usr/bin/git hash-object --no-filters -- "$verifier")"
-          test "$verifier_blob" = 'd0404b52eb0e0ddc4d48703a338b427ae28c8c04' || {
+          test "$verifier_blob" = '1ad7d3ab4a6f2faa4c30aebde30e855fd4a61af6' || {
             echo 'root-owned verifier does not match reviewed Git blob' >&2; exit 1;
           }
           /usr/bin/timeout 15s "$verifier" --version || /usr/bin/timeout 15s "$verifier" --build-info || /usr/bin/timeout 15s "$verifier" --help
