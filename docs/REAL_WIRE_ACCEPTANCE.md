@@ -119,3 +119,35 @@ compile, or on-wire proxy receipt.
 - Security: stale actor receipts, true cancellation/retirement, DNS-to-dial
   integrity, off-host upstream forwarding and CONNECT remain **not proven**
   by this local actor test.
+
+## Source-free Bash audit and CI integration
+
+This draft now replaces the obsolete Python source-only checker and legacy
+native-workflow provenance tests with `ci/sourcefree_proxy_audit.sh` and
+`ci/test_workflow_admission.sh`. The former defines 62 authored static
+assertions plus complete reviewed source/contract inventory and lexical
+C0/DEL checks; the latter defines nine adverse workflow mutations. These
+assertions preserve critical actor-receipt, header, middleware, route, and
+loopback constraints, but are **not** byte-for-byte or semantic replacements
+for every historical Python assertion. Guest compiler and transport proof
+remain separate mandatory gates.
+
+`.github/workflows/sourcefree-proxy-security.yml` now uses Bash on a
+GitHub-hosted `ubuntu-24.04` runner only. Its same-repository PR, manual-main,
+and exact actor-branch push triggers require a pinned event checkout and
+no privileged native runner. The committed branch has no tracked `.py`,
+`.pyi`, or `.ipynb` files. This is compatible with the Python-source
+prohibition in reverse control-plane PR #20.
+
+PR #22 still targets the earlier actor-ingress feature branch rather than
+`main`. The current `.github/workflows/native-contracts.yml` Git blob is
+identical in #20 and #22 (`4f167ddefc97fcead03723f6b7f109663040942e`).
+The source-only Bash audit and the protected-main native workflow are
+complementary, but merging/rebasing stacked branches must preserve the
+exact source inventories and rerun all checks on the new resulting head.
+
+**Evidence:** source inspection and exact-tree/manifest comparisons only.
+GitHub run #41228083823 failed with no reported executed steps, so the new
+Bash suite is **NOT_EXECUTED** in Actions. No Oreslang compilation, HTTP
+wire verification, approval, or merge readiness follows from the static
+source-policy reconciliation.
