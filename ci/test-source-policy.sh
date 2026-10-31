@@ -246,4 +246,27 @@ git -C "$pinned_repo" config --unset core.filemode
 EXPECTED_DEMO_SHA="$pinned_sha" bash "$pinned_repo/ci/source-policy.sh" > /dev/null || {
   echo 'TEST_FAILURE: pinned checkout rejected after chmod fixture recovery' >&2; exit 1;
 }
-printf 'SOURCE_POLICY_NEGATIVE_TESTS_PASS scenarios=30\n'
+# A migration-only Python exception must never be accepted by SHA-pinned
+# production admission, even with a clean tracked Git tree and matching HEAD.
+legacy_repo="$test_repo/legacy-pinned-mode"
+mkdir -p "$legacy_repo/ci" "$legacy_repo/scripts"
+cp "$root/ci/source-policy.sh" "$legacy_repo/ci/source-policy.sh"
+printf 'print(1)\n' > "$legacy_repo/scripts/benchmark.py"
+git init -q "$legacy_repo"
+git -C "$legacy_repo" config user.name 'Legacy policy test'
+git -C "$legacy_repo" config user.email 'policy@example.invalid'
+git -C "$legacy_repo" add .
+git -C "$legacy_repo" commit -q -m 'legacy allowlisted source'
+legacy_sha="$(git -C "$legacy_repo" rev-parse HEAD)"
+SOURCE_POLICY_MODE=rest-legacy bash "$legacy_repo/ci/source-policy.sh" >/dev/null || {
+  echo 'TEST_FAILURE: unpinned legacy fixture compatibility regressed' >&2; exit 1
+}
+if SOURCE_POLICY_MODE=rest-legacy EXPECTED_DEMO_SHA="$legacy_sha" \
+  bash "$legacy_repo/ci/source-policy.sh" > "$legacy_repo/rejection.log" 2>&1; then
+  echo 'TEST_FAILURE: SHA-pinned audit accepted migration-only Python exemption' >&2
+  exit 1
+fi
+grep -Fq 'POLICY_FAILURE: SHA-pinned source policy requires strict mode' "$legacy_repo/rejection.log" || {
+  echo 'TEST_FAILURE: pinned legacy exemption failed for wrong reason' >&2; exit 1
+}
+printf 'SOURCE_POLICY_NEGATIVE_TESTS_PASS scenarios=31\n'
