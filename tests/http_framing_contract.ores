@@ -28,6 +28,9 @@ pub routine main(): int {
   // transfer and body framing must never reach routing/CONNECT metadata.
   if http_framing.parse(base + "Host: other.example.test\r\n\r\n", "reverse").is_ok() ||
     http_framing.parse(base + "host: other.example.test\r\n\r\n", "reverse").is_ok() ||
+    http_framing.parse(base + "x-internal-token: one\r\nx-internal-token: two\r\n\r\n", "reverse").is_ok() ||
+    http_framing.parse(base + "x-forwarded-for: one\r\nx-forwarded-for: two\r\n\r\n", "reverse").is_ok() ||
+    http_framing.parse("CONNECT api.example.test:443 HTTP/1.1\r\nHost: api.example.test:443\r\nx-proof: a\r\nx-proof: b\r\n\r\n", "forward").is_ok() ||
     http_framing.parse(base + "content-length: 0\r\n\r\n", "reverse").is_ok() ||
     http_framing.parse(base + "content-length: 5\r\n\r\nhello", "reverse").is_ok() ||
     http_framing.parse(base + "transfer-encoding: chunked\r\n\r\n", "reverse").is_ok() ||
