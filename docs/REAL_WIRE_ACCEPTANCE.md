@@ -7,8 +7,13 @@ Use the native Oreslang launcher supplied by the trusted isolated
 
 The candidate workflow is **manual-dispatch only from protected main**;
 it does not accept PR-head source on a trusted self-hosted runner. A
-source-free hosted preflight validates live `main` protection and current
-commit before the native job may be allocated. An independent administrator
+source-free hosted preflight validates the live private repository
+identity, current protected-`main` commit, and effective GitHub rules:
+independent approval, stale-review dismissal, last-push approval,
+resolved conversations, at least one required status check, and protections
+against force-pushes and branch deletion. The native job repeats those live
+checks before running guest code, because the protected branch's settings
+may change after the hosted job passes. An independent administrator
 must also restrict `oreslang-trusted-native` to this specifically approved
 workflow, verify review/no-bypass settings, and approve the root-owned
 `/opt/oreslang-approved/oreslang-runtime` runtime manifest. Neither
@@ -57,9 +62,14 @@ The previous actor-ingress workflow admitted same-repository `pull_request`
 events on a generic self-hosted runner, even though the source remained
 unreviewed and `main` was not protected. This is **not** an acceptable native
 runner boundary for private source. The current PR removes that admission path,
-requires `workflow_dispatch` on protected main, checks a live GitHub branch
-response before allocating a privileged runner, and uses the approved
-`oreslang-trusted-native` runner group rather than the default pool.
+requires `workflow_dispatch` on protected main, checks live private-repository identity, effective review/status/branch
+integrity rules and the exact default-branch SHA before allocating a native
+runner, and uses the approved `oreslang-trusted-native` runner group rather
+than the default pool. A second live governance check on the native job
+detects configuration drift before invoking any Oreslang guest code. The
+effective-rules API does **not** prove the absence of administrator or
+organization bypass exceptions; an independent administrator must verify
+those privileges and the selected-workflow runner-group restriction.
 
 The native step requires an unprivileged runner, root-owned and
 non-group/world-writable runtime files, no symlinks or special objects, a
