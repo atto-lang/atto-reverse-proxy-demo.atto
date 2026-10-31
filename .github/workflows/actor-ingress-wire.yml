@@ -75,9 +75,10 @@ jobs:
         with:
           persist-credentials: false
           submodules: false
+          set-safe-directory: false
           ref: ${{ github.sha }}
       - name: Verify trusted exact source and approved native runtime
-        shell: bash
+        shell: /bin/bash --noprofile --norc -p -e -o pipefail {0}
         env:
           APPROVED_REPOSITORY_ID: '1429954649'
           EVENT_REPOSITORY_ID: ${{ github.event.repository.id }}
@@ -143,11 +144,16 @@ jobs:
           wrapper="$wrapper_dir/oreslang"
           printf '%s\n' '#!/bin/bash' 'set -euo pipefail' > "$wrapper"
           printf 'launcher=%q\n' "$launcher" >> "$wrapper"
+          printf 'runtime_root=%q\n' "$runtime_root" >> "$wrapper"
           printf 'expected_sha=%q\n' "${APPROVED_ORESLANG_SHA256,,}" >> "$wrapper"
+          printf 'expected_manifest=%q\n' "${APPROVED_ORESLANG_RUNTIME_MANIFEST_SHA256,,}" >> "$wrapper"
           printf '%s\n' \
-            'test -f "$launcher" && test -x "$launcher" || exit 1' \
+            'test -f "$launcher" && test -x "$launcher" && test ! -L "$launcher" || exit 1' \
+            'test "$(/usr/bin/stat -c %u -- "$launcher")" = 0 || exit 1' \
             'actual_sha="$(/usr/bin/sha256sum -- "$launcher" | /usr/bin/cut -d " " -f 1)"' \
             'test "$actual_sha" = "$expected_sha" || { echo "approved Oreslang launcher changed" >&2; exit 1; }' \
+            'actual_manifest="$(cd "$runtime_root" && /usr/bin/find . -xdev -type f -print0 | LC_ALL=C /usr/bin/sort -z | /usr/bin/xargs -0 -r /usr/bin/sha256sum | /usr/bin/sha256sum | /usr/bin/cut -d " " -f 1)"' \
+            'test "$actual_manifest" = "$expected_manifest" || { echo "approved runtime manifest changed" >&2; exit 1; }' \
             'exec "$launcher" "$@"' >> "$wrapper"
           chmod 700 "$wrapper"
           if timeout 15s "$wrapper" --build-info; then
@@ -163,17 +169,28 @@ jobs:
           "$wrapper" --check src/serve_reverse.ores
           "$wrapper" --check tests/actor_ingress_tcp_smoke.ores
       - name: Real native Oreslang actor HTTP exchange over loopback
-        shell: bash
+        shell: /bin/bash --noprofile --norc -p -e -o pipefail {0}
         env:
           APPROVED_ORESLANG_SHA256: ${{ vars.ORESLANG_APPROVED_SHA256 }}
+          APPROVED_ORESLANG_RUNTIME_MANIFEST_SHA256: ${{ vars.ORESLANG_APPROVED_RUNTIME_MANIFEST_SHA256 }}
         run: |
           set -euo pipefail
           # Revalidate the executable in the same step as real-wire execution.
           # An earlier step's PATH lookup cannot authorize later invocations.
-          launcher="$(type -P oreslang || true)"
-          test -n "$launcher" || { echo 'missing Oreslang launcher' >&2; exit 1; }
-          launcher="$(readlink -f -- "$launcher")"
-          test -f "$launcher" && test -x "$launcher" || { echo 'invalid Oreslang launcher' >&2; exit 1; }
+          # The approved binary is never taken from PATH, even in a trusted job.
+          runtime_root='/opt/oreslang-approved/oreslang-runtime'
+          launcher="$runtime_root/bin/oreslang"
+          test -f "$launcher" && test -x "$launcher" && test ! -L "$launcher" || { echo 'invalid approved Oreslang launcher' >&2; exit 1; }
+          test "$(/usr/bin/stat -c %u -- "$launcher")" = 0
+          [[ "${APPROVED_ORESLANG_RUNTIME_MANIFEST_SHA256:-}" =~ ^[0-9a-fA-F]{64}$ ]] || { echo 'missing approved runtime manifest' >&2; exit 1; }
+          actual_manifest="$(
+            cd "$runtime_root"
+            /usr/bin/find . -xdev -type f -print0 |
+              LC_ALL=C /usr/bin/sort -z |
+              /usr/bin/xargs -0 -r /usr/bin/sha256sum |
+              /usr/bin/sha256sum | /usr/bin/cut -d ' ' -f 1
+          )"
+          test "$actual_manifest" = "${APPROVED_ORESLANG_RUNTIME_MANIFEST_SHA256,,}" || { echo 'runtime manifest drift before wire exchange' >&2; exit 1; }
           if [[ ! "${APPROVED_ORESLANG_SHA256:-}" =~ ^[0-9a-fA-F]{64}$ ]]; then
             echo 'missing administrator-approved Oreslang SHA-256' >&2
             exit 1
