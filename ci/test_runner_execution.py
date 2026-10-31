@@ -117,6 +117,19 @@ class AdmissionEvidence(unittest.TestCase):
         with self.assertRaises(gate.Unexecuted):
             self.verify(run, jobs)
 
+    def test_unexpected_other_job_fails(self):
+        run, jobs = good()
+        jobs["jobs"].append(dict(jobs["jobs"][0], id=999, name="unreviewed"))
+        jobs["total_count"] = 2
+        with self.assertRaises(gate.Unexecuted):
+            self.verify(run, jobs)
+
+    def test_duplicate_step_numbers_fail(self):
+        run, jobs = good()
+        jobs["jobs"][0]["steps"][1]["number"] = 1
+        with self.assertRaises(gate.Unexecuted):
+            self.verify(run, jobs)
+
     def test_no_jobs(self):
         run, jobs = good()
         jobs["jobs"] = []
