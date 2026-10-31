@@ -3,6 +3,7 @@
 // Always responds 501 to admitted routes, so it cannot masquerade as a proxy.
 // This is NOT src/main.ores and is intentionally NOT a production entrypoint.
 import module proxy_yaml from "./proxy_yaml";
+import module config_path from "./config_path";
 import module proxy_wire from "./proxy_wire";
 import module route_policy from "./route_policy";
 
@@ -25,6 +26,13 @@ pub async routine main(): int {
   fi
   val String path = selected.unwrap();
   if path == ""; then return 64; fi
+  // Mirror the fail-closed main entrypoint. The optional ingress proof must
+  // not accept relative, dot-segmented, control-bearing or noncanonical paths.
+  // Lexical validation alone does not eliminate filesystem TOCTOU races.
+  if !config_path.valid(path); then
+    stdio.println("ERROR: noncanonical ingress configuration path");
+    return 65;
+  fi
   if fs.is_symlink(path) || !fs.exists(path) || fs.is_dir(path); then
     stdio.println("ERROR: nonregular configuration");
     return 65;
