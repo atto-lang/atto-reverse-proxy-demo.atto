@@ -84,6 +84,17 @@ pub routine main(): int {
     stdio.println("FAIL configured prefix escaped strict request-path grammar");
     return 1;
   fi
+  // Distinct middleware stages remain admissible; the duplicate rule is
+  // not a blanket ban on legitimate multi-stage routes.
+  val String two_steps = document
+    .replace_literal("routes:\n",
+      "  - name: audit\n    kind: trace\nroutes:\n")
+    .replace_literal("middleware: guard\n",
+      "middleware: guard,audit\n");
+  if proxy_yaml.parse(two_steps, "reverse").is_err(); then
+    stdio.println("FAIL distinct middleware pipeline rejected");
+    return 1;
+  fi
   // Repeated middleware identifiers are ambiguous across policy consumers;
   // parser admission rejects duplicate steps rather than normalizing them.
   if proxy_yaml.parse(document.replace_literal("middleware: guard",
