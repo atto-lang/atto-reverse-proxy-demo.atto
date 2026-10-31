@@ -54,6 +54,12 @@ if [[ -e SOURCE_REF || -L SOURCE_REF ]] || git_safe ls-files --error-unmatch -- 
 fi
 mode="${SOURCE_POLICY_MODE:-strict}"
 [[ "$mode" == strict || "$mode" == rest-legacy ]] || { echo "POLICY_FAILURE: unknown mode" >&2; exit 2; }
+# Rest-legacy is a migration-only fixture mode: never relax Python admission
+# when a workflow claims an exact pinned production source identity.
+if [[ -n "${EXPECTED_DEMO_SHA:-}" && "$mode" != strict ]]; then
+  echo 'POLICY_FAILURE: SHA-pinned source policy requires strict mode' >&2
+  exit 2
+fi
 count=0
 # Process substitution hides a failed producer's exit status. Materialize the
 # exact index inventory first and reject an empty or unreadable index.
