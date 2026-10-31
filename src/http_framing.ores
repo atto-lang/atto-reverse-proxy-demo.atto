@@ -37,7 +37,7 @@ define module http_framing as
     let String host = "";
     for (let i = 1; i < lines.size; i++) {
       val String line = lines.get(i);
-      // LF-only separators, bare CR/LF, obs-fold and non-ASCII controls
+      // LF-only separators, bare CR/LF, obs-fold, C0 controls and DEL
       // never enter the admitted field-name/value metadata subset.
       if !header_policy.value_safe(line) || line.starts_with(" ") ||
         line == ""; then
