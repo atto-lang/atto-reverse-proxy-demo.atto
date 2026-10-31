@@ -1,0 +1,91 @@
+// Shared forward/reverse textual HTTP/1.1 framing negative matrix.
+// Native contract only. Actual adapters MUST validate unmodified wire bytes,
+// reject duplicate fields before normalization and enforce a pre-read byte cap.
+import module http_framing from "../src/http_framing";
+
+pub routine main(): int {
+  val reverse_good = http_framing.parse(
+    "GET /api HTTP/1.1\r\nHost: api.example.test\r\nConnection: close\r\nx-internal-token: demo\r\n\r\n",
+    "reverse");
+  val reverse_head = http_framing.parse(
+    "HEAD /api HTTP/1.1\r\nhost: api.example.test\r\n\r\n", "reverse");
+  val forward_good = http_framing.parse(
+    "CONNECT api.example.test:443 HTTP/1.1\r\nHost: api.example.test:443\r\n\r\n",
+    "forward");
+  if reverse_good.is_err() || reverse_head.is_err() || forward_good.is_err(); then
+    stdio.println("FAIL canonical HTTP/1.1 frames");
+    return 1;
+  fi
+  if reverse_good.unwrap().path != "/api" ||
+    reverse_head.unwrap().method != "HEAD" ||
+    !forward_good.unwrap().tunnel; then
+    stdio.println("FAIL framed target fields");
+    return 1;
+  fi
+
+  val String base = "GET /api HTTP/1.1\r\nHost: api.example.test\r\n";
+  // Duplicate Host in either canonical spelling, CL/TE variants, ambiguous
+  // transfer and body framing must never reach routing/CONNECT metadata.
+  if http_framing.parse(base + "Host: other.example.test\r\n\r\n", "reverse").is_ok() ||
+    http_framing.parse(base + "host: other.example.test\r\n\r\n", "reverse").is_ok() ||
+    http_framing.parse(base + "content-length: 0\r\n\r\n", "reverse").is_ok() ||
+    http_framing.parse(base + "content-length: 5\r\n\r\nhello", "reverse").is_ok() ||
+    http_framing.parse(base + "transfer-encoding: chunked\r\n\r\n", "reverse").is_ok() ||
+    http_framing.parse(base + "content-length: 5\r\ntransfer-encoding: chunked\r\n\r\n", "reverse").is_ok() ||
+    http_framing.parse(base + "Transfer-Encoding: chunked\r\n\r\n", "reverse").is_ok() ||
+    http_framing.parse(base + "te: trailers\r\n\r\n", "reverse").is_ok() ||
+    http_framing.parse(base + "trailer: x-proof\r\n\r\n", "reverse").is_ok() ||
+    http_framing.parse(base + "upgrade: websocket\r\n\r\n", "reverse").is_ok() ||
+    http_framing.parse(base + "expect: 100-continue\r\n\r\n", "reverse").is_ok() ||
+    http_framing.parse(base + "Connection: close\r\nconnection: close\r\n\r\n", "reverse").is_ok() ||
+    http_framing.parse(base + "Connection: keep-alive\r\n\r\n", "reverse").is_ok(); then
+    stdio.println("FAIL duplicate Host or body/framing admission");
+    return 1;
+  fi
+
+  // Empty lines, premature terminators, request pipelining, bare LF/CR, folded
+  // headers, spacing ambiguities and control bytes are all rejected.
+  if http_framing.parse("GET /api HTTP/1.1\r\n\r\n", "reverse").is_ok() ||
+    http_framing.parse("GET /api HTTP/1.1\nHost: api.example.test\n\n", "reverse").is_ok() ||
+    http_framing.parse(base + "\r\nbody", "reverse").is_ok() ||
+    http_framing.parse(base + "\r\nGET /evil HTTP/1.1\r\nHost: bad.example.test\r\n\r\n", "reverse").is_ok() ||
+    http_framing.parse(base + "\r\n\r\n", "reverse").is_ok() ||
+    http_framing.parse(base + " x-folded: bad\r\n\r\n", "reverse").is_ok() ||
+    http_framing.parse(base + "x-proof:\tbad\r\n\r\n", "reverse").is_ok() ||
+    http_framing.parse(base + "x-proof: good\nbad\r\n\r\n", "reverse").is_ok() ||
+    http_framing.parse(base + "x-proof: good\rbad\r\n\r\n", "reverse").is_ok() ||
+    http_framing.parse(base + "x-proof : bad\r\n\r\n", "reverse").is_ok() ||
+    http_framing.parse(base + "x-proof:  bad\r\n\r\n", "reverse").is_ok() ||
+    http_framing.parse(base + "x-proof: good \r\n\r\n", "reverse").is_ok() ||
+    http_framing.parse(base + "x-proof: bad\u0000x\r\n\r\n", "reverse").is_ok() ||
+    http_framing.parse(base + "x-proof: bad\u000bX\r\n\r\n", "reverse").is_ok() ||
+    http_framing.parse(base + "x-proof: bad\u007fX\r\n\r\n", "reverse").is_ok() ||
+    http_framing.parse(base + "x-proof: good\r\n", "reverse").is_ok(); then
+    stdio.println("FAIL invalid HTTP delimiter/header/controls admitted");
+    return 1;
+  fi
+
+  if http_framing.parse("GET /api HTTP/1.1\r\n\r\nHost: api.example.test\r\n\r\n", "reverse").is_ok() ||
+    http_framing.parse("GET /api HTTP/1.0\r\nHost: api.example.test\r\n\r\n", "reverse").is_ok() ||
+    http_framing.parse("POST /api HTTP/1.1\r\nHost: api.example.test\r\n\r\n", "reverse").is_ok() ||
+    http_framing.parse("GET http://evil.test/ HTTP/1.1\r\nHost: api.example.test\r\n\r\n", "reverse").is_ok() ||
+    http_framing.parse("GET /api HTTP/1.1\r\nHost: api.example.test\r\n\r\n", "forward").is_ok() ||
+    http_framing.parse("CONNECT api.example.test:443 HTTP/1.1\r\nHost: other.example.test:443\r\n\r\n", "forward").is_ok() ||
+    http_framing.parse("CONNECT api.example.test:80 HTTP/1.1\r\nHost: api.example.test:80\r\n\r\n", "forward").is_ok() ||
+    http_framing.parse("CONNECT api.example.test:443 HTTP/1.1\r\nHost: api.example.test:443\r\ncontent-length: 0\r\n\r\n", "forward").is_ok() ||
+    http_framing.parse("CONNECT api.example.test:443 HTTP/1.1\r\nHost: api.example.test:443\r\n\r\n", "other").is_ok(); then
+    stdio.println("FAIL method, host/target, mode or version admission");
+    return 1;
+  fi
+
+  let String oversized = base;
+  for (let i = 0; i < 33; i++) {
+    oversized = oversized + "x-test: ok\r\n";
+  }
+  if http_framing.parse(oversized + "\r\n", "reverse").is_ok(); then
+    stdio.println("FAIL HTTP header-count budget");
+    return 1;
+  fi
+  stdio.println("PASS shared bodyless HTTP/1.1 text-frame admission (not raw wire)");
+  return 0;
+}
