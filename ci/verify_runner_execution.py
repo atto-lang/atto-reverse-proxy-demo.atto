@@ -58,27 +58,25 @@ def positive_int(value: object) -> bool:
 
 def check_execution(run: dict, jobs_payload: dict, *, profile: str,
                     expected_head: str, expected_run_id: int,
-                    pr: dict | None = None) -> dict:
+                    pr: dict) -> dict:
     """Return verified step metadata; never claim guest or wire acceptance."""
     require(profile in PROFILES, "unknown workflow profile")
     require(bool(re.fullmatch(r"[0-9a-f]{40}", expected_head)), "expected SHA invalid")
     config = PROFILES[profile]
-    if pr is not None:
-        require(isinstance(pr, dict), "PR snapshot malformed")
-        require(pr.get("state") == "open" and pr.get("number") == 11,
-                "not the target open PR")
-        require(isinstance(pr.get("head"), dict)
-                and pr["head"].get("sha") == expected_head
-                and isinstance(pr["head"].get("repo"), dict)
-                and pr["head"]["repo"].get("id") == SOURCE_REPO_ID,
-                "stale PR head or foreign head repository")
-        require(isinstance(pr.get("base"), dict)
-                and isinstance(pr["base"].get("repo"), dict)
-                and pr["base"]["repo"].get("id") == SOURCE_REPO_ID,
-                "foreign base repository")
+    require(isinstance(pr, dict), "PR snapshot malformed")
+    require(pr.get("state") == "open" and pr.get("number") == 11,
+            "not the target open PR")
+    require(isinstance(pr.get("head"), dict)
+            and pr["head"].get("sha") == expected_head
+            and isinstance(pr["head"].get("repo"), dict)
+            and pr["head"]["repo"].get("id") == SOURCE_REPO_ID,
+            "stale PR head or foreign head repository")
+    require(isinstance(pr.get("base"), dict)
+            and isinstance(pr["base"].get("repo"), dict)
+            and pr["base"]["repo"].get("id") == SOURCE_REPO_ID,
+            "foreign base repository")
     require(isinstance(run, dict) and isinstance(jobs_payload, dict), "malformed JSON")
     # Bind the run to the fresh PR identity, not merely a caller-supplied SHA.
-    require(pr is not None, "fresh PR snapshot required")
     require(run.get("path") == config["path"], "wrong workflow path")
     require(run.get("head_branch") == pr["head"].get("ref"), "run head branch differs from PR")
     prs = run.get("pull_requests")
@@ -130,13 +128,15 @@ def check_execution(run: dict, jobs_payload: dict, *, profile: str,
     require(positive_int(job.get("runner_id")), "no assigned runner")
     require(isinstance(job.get("runner_name"), str)
             and bool(job["runner_name"].strip()), "runner name missing")
-    require(isinstance(job.get("labels"), list)
-            and REQUIRED_LABELS.issubset(set(job["labels"])), "required runner labels missing")
+    labels = job.get("labels")
+    require(isinstance(labels, list) and all(isinstance(label, str) for label in labels)
+            and REQUIRED_LABELS.issubset(set(labels)), "required runner labels missing")
 
     steps = job.get("steps")
     require(isinstance(steps, list) and bool(steps), "zero executed steps")
-    names = [s.get("name") for s in steps if isinstance(s, dict)]
-    require(len(names) == len(steps) and all(isinstance(n, str) and n for n in names)
+    require(all(isinstance(s, dict) for s in steps), "malformed step object")
+    names = [s.get("name") for s in steps]
+    require(all(isinstance(n, str) and n for n in names)
             and len(names) == len(set(names)),
             "missing, malformed or duplicate step names")
     require(all(s.get("status") == "completed" and s.get("conclusion") == "success"
