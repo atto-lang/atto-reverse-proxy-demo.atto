@@ -166,4 +166,28 @@ git -C "$test_repo" add src/disguised.txt
 check_ok
 git -C "$test_repo" rm -q -f -- src/disguised.txt
 check_ok
-printf 'SOURCE_POLICY_NEGATIVE_TESTS_PASS scenarios=24\n'
+# A SHA-pinned production audit must not be redirected to a clean sibling
+# checkout. Both clones have identical HEAD but the invoking tree is dirty.
+redirect_case="$test_repo/sha-override"
+git init -q "$redirect_case/clean"
+git -C "$redirect_case/clean" config user.name "Policy test"
+git -C "$redirect_case/clean" config user.email "policy@example.invalid"
+mkdir -p "$redirect_case/clean/src"
+printf 'safe\n' > "$redirect_case/clean/src/hello.ores"
+git -C "$redirect_case/clean" add .
+git -C "$redirect_case/clean" commit -q -m 'clean baseline'
+git clone -q "$redirect_case/clean" "$redirect_case/dirty"
+mkdir -p "$redirect_case/dirty/ci"
+cp "$root/ci/source-policy.sh" "$redirect_case/dirty/ci/source-policy.sh"
+printf '#!/usr/bin/env python3\n' > "$redirect_case/dirty/src/hello.ores"
+redirect_sha="$(git -C "$redirect_case/dirty" rev-parse HEAD)"
+if SOURCE_POLICY_ROOT="$redirect_case/clean" EXPECTED_DEMO_SHA="$redirect_sha" \
+  bash "$redirect_case/dirty/ci/source-policy.sh" > "$redirect_case/result.log" 2>&1; then
+  echo "TEST_FAILURE: SHA-pinned policy accepted redirected clean checkout" >&2
+  exit 1
+fi
+grep -Fq 'POLICY_FAILURE: SHA-pinned audit cannot redirect SOURCE_POLICY_ROOT' "$redirect_case/result.log" || {
+  echo "TEST_FAILURE: redirected SHA-pinned audit did not fail at root binding" >&2
+  exit 1
+}
+printf 'SOURCE_POLICY_NEGATIVE_TESTS_PASS scenarios=25\n'
