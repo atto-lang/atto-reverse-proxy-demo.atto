@@ -61,6 +61,8 @@ verify_index() {
   recorded="${entry%%$'\t'*}"
   read -r mode object stage <<< "$recorded"
   [[ "$mode" == 100644 && "$stage" == 0 && "$object" =~ ^[0-9a-f]{40}$ ]] || return 1
+  # Staged index must be byte-for-byte the pinned HEAD path, not a replacement.
+  /usr/bin/git -C "$root" -c core.fsmonitor=false -c core.filemode=true diff --no-ext-diff --cached --quiet HEAD -- "$path" || return 1
   [[ "$(/usr/bin/git -C "$root" -c core.fsmonitor=false -c core.filemode=true hash-object --no-filters -- "$path")" == "$object" ]]
 }
 
@@ -95,7 +97,26 @@ self_test() {
   chmod +x "$test_dir/config/example.yaml"
   if canonical_file "$test_dir/config/example.yaml" "$fixtures/config" "$test_dir/config/example.yaml"; then return 1; fi
   chmod -x "$test_dir/config/example.yaml"
-  echo 'REVERSE_SAFE_DEFAULTS_ADVERSARIAL_PASS cases=7 host_only=true'
+  # A staged canonical file must not override a noncanonical pinned HEAD.
+  local root="$fixtures/pinned-repo"
+  mkdir -p "$root/config"
+  cp "$fixtures/config" "$root/config/example.yaml"
+  /usr/bin/git -C "$root" init -q
+  /usr/bin/git -C "$root" config user.name 'Source policy test'
+  /usr/bin/git -C "$root" config user.email 'policy@example.invalid'
+  /usr/bin/git -C "$root" add .
+  /usr/bin/git -C "$root" commit -qm 'clean'
+  verify_index config/example.yaml || return 1
+  printf '\nmode: forward\n' >> "$root/config/example.yaml"
+  /usr/bin/git -C "$root" add config/example.yaml
+  /usr/bin/git -C "$root" commit -qm 'dirty pinned HEAD'
+  cp "$fixtures/config" "$root/config/example.yaml"
+  /usr/bin/git -C "$root" add config/example.yaml
+  if verify_index config/example.yaml; then return 1; fi
+  /usr/bin/git -C "$root" reset --hard -q HEAD
+  /usr/bin/git -C "$root" update-index --chmod=+x config/example.yaml
+  if verify_index config/example.yaml; then return 1; fi
+  echo 'REVERSE_SAFE_DEFAULTS_ADVERSARIAL_PASS cases=9 host_only=true'
 }
 
 main() {
