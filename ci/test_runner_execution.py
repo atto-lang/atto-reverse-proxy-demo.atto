@@ -17,7 +17,7 @@ RUN_ID = 8001
 
 def good_pr():
     return {"state": "open", "number": 11,
-            "head": {"sha": HEAD, "repo": {"id": gate.SOURCE_REPO_ID}},
+            "head": {"sha": HEAD, "ref": "feat/executable-actor-ingress-gate-20261023", "repo": {"id": gate.SOURCE_REPO_ID}},
             "base": {"repo": {"id": gate.SOURCE_REPO_ID}}}
 
 
@@ -28,6 +28,11 @@ def good(profile="wire"):
              for i, name in enumerate(cfg["steps"], 1)]
     run = {
         "id": RUN_ID, "workflow_id": cfg["workflow_id"],
+        "path": cfg["path"],
+        "head_branch": "feat/executable-actor-ingress-gate-20261023",
+        "pull_requests": [{"number": 11,
+                           "head": {"sha": HEAD, "repo": {"id": gate.SOURCE_REPO_ID}},
+                           "base": {"repo": {"id": gate.SOURCE_REPO_ID}}}],
         "head_sha": HEAD, "event": "pull_request",
         "repository": {"id": gate.SOURCE_REPO_ID},
         "head_repository": {"id": gate.SOURCE_REPO_ID},
@@ -40,7 +45,7 @@ def good(profile="wire"):
         "labels": ["self-hosted", "linux", "x64", "oreslang-jdk25"],
         "steps": steps,
     }
-    return run, {"jobs": [job]}
+    return run, {"total_count": 1, "jobs": [job]}
 
 
 class AdmissionEvidence(unittest.TestCase):
@@ -72,6 +77,45 @@ class AdmissionEvidence(unittest.TestCase):
         with self.assertRaises(gate.Unexecuted):
             gate.check_execution(run, jobs, profile="wire", expected_head=HEAD,
                                  expected_run_id=RUN_ID, pr=pr)
+
+    def test_workflow_path_replacement(self):
+        run, jobs = good()
+        run["path"] = ".github/workflows/fake.yml"
+        with self.assertRaises(gate.Unexecuted):
+            self.verify(run, jobs)
+
+    def test_mismatched_run_branch(self):
+        run, jobs = good()
+        run["head_branch"] = "another-branch"
+        with self.assertRaises(gate.Unexecuted):
+            self.verify(run, jobs)
+
+    def test_wrong_pr_linkage(self):
+        for change in ("missing", "another_pr", "stale_sha", "foreign_repo"):
+            with self.subTest(change=change):
+                run, jobs = good()
+                if change == "missing":
+                    run["pull_requests"] = []
+                elif change == "another_pr":
+                    run["pull_requests"][0]["number"] = 33
+                elif change == "stale_sha":
+                    run["pull_requests"][0]["head"]["sha"] = "b" * 40
+                else:
+                    run["pull_requests"][0]["base"]["repo"]["id"] = 0
+                with self.assertRaises(gate.Unexecuted):
+                    self.verify(run, jobs)
+
+    def test_incomplete_job_pagination(self):
+        run, jobs = good()
+        jobs["total_count"] = 2
+        with self.assertRaises(gate.Unexecuted):
+            self.verify(run, jobs)
+
+    def test_missing_run_head_repo(self):
+        run, jobs = good()
+        run["head_repository"] = None
+        with self.assertRaises(gate.Unexecuted):
+            self.verify(run, jobs)
 
     def test_no_jobs(self):
         run, jobs = good()
