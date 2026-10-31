@@ -6,6 +6,25 @@ name: Native actor ingress real-wire gate (protected main only)
 on:
   workflow_dispatch:
 permissions: {}
+# No inherited hook should affect the checkout action or the first native shell.
+env:
+  LD_PRELOAD: ''
+  LD_LIBRARY_PATH: ''
+  LD_AUDIT: ''
+  BASH_ENV: ''
+  ENV: ''
+  NODE_OPTIONS: ''
+  NODE_PATH: ''
+  NODE_EXTRA_CA_CERTS: ''
+  NODE_TLS_REJECT_UNAUTHORIZED: '1'
+  JAVA_TOOL_OPTIONS: ''
+  JDK_JAVA_OPTIONS: ''
+  _JAVA_OPTIONS: ''
+  CLASSPATH: ''
+  GIT_CONFIG_COUNT: '0'
+  GIT_CONFIG_PARAMETERS: ''
+  GIT_CONFIG_GLOBAL: /dev/null
+  GIT_CONFIG_SYSTEM: /dev/null
 concurrency:
   group: reverse-wire-${{ github.repository }}-${{ github.ref }}
   cancel-in-progress: false
@@ -57,11 +76,6 @@ jobs:
           persist-credentials: false
           submodules: false
           ref: ${{ github.sha }}
-      - name: JDK 25
-        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
-        with:
-          distribution: temurin
-          java-version: '25'
       - name: Verify trusted exact source and approved native runtime
         shell: bash
         env:
@@ -71,6 +85,7 @@ jobs:
           EXPECTED_SHA: ${{ github.sha }}
           EXPECTED_PROTECTED_REF: ${{ github.ref_protected }}
           APPROVED_ORESLANG_SHA256: ${{ vars.ORESLANG_APPROVED_SHA256 }}
+          APPROVED_ORESLANG_RUNTIME_MANIFEST_SHA256: ${{ vars.ORESLANG_APPROVED_RUNTIME_MANIFEST_SHA256 }}
         run: |
           set -euo pipefail
           test "$EVENT_REPOSITORY_ID" = "$APPROVED_REPOSITORY_ID" || { echo 'unapproved repository ID' >&2; exit 1; }
@@ -81,13 +96,38 @@ jobs:
           test -n "${RUNNER_NAME:-}" || { echo 'runner not assigned' >&2; exit 1; }
           test "$(git rev-parse HEAD)" = "$EXPECTED_SHA" || { echo 'exact source HEAD mismatch' >&2; exit 1; }
           printf 'runner_name=%s\nsource_head=%s\nsource_tree=%s\n' "$RUNNER_NAME" "$EXPECTED_SHA" "$(git rev-parse HEAD^{tree})"
-          java -version
-          jdk_spec="$(java -XshowSettings:properties -version 2>&1 | sed -nE 's/^[[:space:]]*java\.specification\.version[[:space:]]*=[[:space:]]*([^[:space:]]+).*$/\1/p' | head -n 1)"
-          test "$jdk_spec" = 25 || { echo 'JDK 25 required' >&2; exit 1; }
-          launcher="$(type -P oreslang || true)"
-          test -n "$launcher" || { echo 'missing Oreslang launcher' >&2; exit 1; }
-          launcher="$(readlink -f -- "$launcher")"
-          test -f "$launcher" && test -x "$launcher"
+          # The compiler and JDK are supplied by a separately approved
+          # root-owned runtime; no mutable PATH lookup or setup-java download.
+          test "$(/usr/bin/id -u)" != 0 || { echo 'runner must be unprivileged' >&2; exit 1; }
+          runtime_root='/opt/oreslang-approved/oreslang-runtime'
+          java_exe="$runtime_root/jdk/bin/java"
+          launcher="$runtime_root/bin/oreslang"
+          test -x "$java_exe" && test -f "$java_exe"
+          test -x "$launcher" && test -f "$launcher"
+          for path in /opt /opt/oreslang-approved "$runtime_root" "$runtime_root/bin" "$runtime_root/jdk" "$runtime_root/jdk/bin" "$launcher" "$java_exe"; do
+            test ! -L "$path" || { echo 'runtime path is linked' >&2; exit 1; }
+            test "$(/usr/bin/stat -c %u -- "$path")" = 0 || { echo 'runtime path is not root-owned' >&2; exit 1; }
+            mode="$("/usr/bin/stat" -c %a -- "$path")"
+            (( (8#$mode & 022) == 0 )) || { echo 'runtime path is writable by non-root' >&2; exit 1; }
+          done
+          test -z "$(/usr/bin/find "$runtime_root" -xdev -type l -print -quit)" || { echo 'runtime symlink' >&2; exit 1; }
+          test -z "$(/usr/bin/find "$runtime_root" -xdev ! -type d ! -type f -print -quit)" || { echo 'runtime special object' >&2; exit 1; }
+          test -z "$(/usr/bin/find "$runtime_root" -xdev \( ! -uid 0 -o -perm /022 -o -perm /6000 \) -print -quit)" || { echo 'mutable or privileged runtime tree' >&2; exit 1; }
+          test -x /usr/sbin/getcap
+          test -z "$(/usr/sbin/getcap -r "$runtime_root")" || { echo 'runtime carries file capabilities' >&2; exit 1; }
+          [[ "${APPROVED_ORESLANG_RUNTIME_MANIFEST_SHA256:-}" =~ ^[0-9a-fA-F]{64}$ ]] || { echo 'approved manifest digest missing' >&2; exit 1; }
+          actual_manifest="$(
+            cd "$runtime_root"
+            /usr/bin/find . -xdev -type f -print0 |
+              LC_ALL=C /usr/bin/sort -z |
+              /usr/bin/xargs -0 -r /usr/bin/sha256sum |
+              /usr/bin/sha256sum | /usr/bin/cut -d ' ' -f 1
+          )"
+          test "$actual_manifest" = "${APPROVED_ORESLANG_RUNTIME_MANIFEST_SHA256,,}" || { echo 'unapproved runtime manifest' >&2; exit 1; }
+          printf 'approved_runtime_manifest=%s\n' "$actual_manifest"
+          "$java_exe" -version
+          jdk_spec="$("$java_exe" -XshowSettings:properties -version 2>&1 | /usr/bin/sed -nE 's/^[[:space:]]*java\.specification\.version[[:space:]]*=[[:space:]]*([^[:space:]]+).*$/\1/p' | /usr/bin/head -n 1)"
+          test "$jdk_spec" = 25 || { echo 'approved JDK 25 required' >&2; exit 1; }
           if [[ ! "${APPROVED_ORESLANG_SHA256:-}" =~ ^[0-9a-fA-F]{64}$ ]]; then
             echo 'missing administrator-approved Oreslang SHA-256' >&2
             exit 1
