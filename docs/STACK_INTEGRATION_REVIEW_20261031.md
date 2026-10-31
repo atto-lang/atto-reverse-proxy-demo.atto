@@ -104,3 +104,83 @@ migration. Current `define isoactor` syntax is still unverified.
    cancellation, stream framing and actor generation fences separately.
 
 **Release gate: BLOCKED. Keep this candidate in draft.**
+
+## October 31 semantic reconciliation patch
+
+The audit of the integrated application/header/YAML sources found two
+config-admission inconsistencies that can be fixed without granting transport
+authority:
+
+1. `src/proxy_yaml.ores::validate_route` previously permitted route prefixes
+   containing `..` within a segment (for example `/api..v2`) even though
+   `src/proxy_wire.ores::strict_path` rejects **any** `..` sequence in an
+   incoming request path. The configured route could never be selected via the
+   admitted HTTP request path. The parser now rejects such prefixes.
+2. `src/proxy_yaml.ores::parse` previously allowed a duplicated name in the
+   same route middleware chain (for example `guard,guard`) while
+   `middleware_manifest.bind` rejects duplicate pipeline entries. The parser
+   now requires each route middleware identifier to be canonical, unique,
+   and resolvable to a snapshot middleware definition.
+
+`tests/yaml_policy_contract.ores` now includes negative probes for
+embedded-dot prefixes, repeated/malformed middleware lists, and a positive
+`guard,audit` pipeline with distinct valid stages.
+`tests/header_policy_contract.ores` now checks malformed
+`Connection` nominations, Unicode whitespace, and C0/DEL values.
+`ci/sourcefree_proxy_audit.sh` records six additional structural
+assertions about these guards and guest test verdicts. The existing
+`src/header_policy.ores` implementation did not require a source change.
+
+**Evidence classes:** source diffs and static assertions are reviewable;
+there is **no executed Oreslang guest parser, JDK25 compiler, or TCP receipt**
+for these new cases. A text-match guard is not a semantic test pass.
+
+### Actor runtime ABI and ownership migration — still blocked
+
+The integration's `src/serve_reverse.ores` still contains the legacy actor
+definitions `define isoactor UpstreamUnavailable/HelloV1/StreamV1`,
+`receive(ActorMail<String> mail)`, and `http.claim(mail.value)`. This is
+**not yet compiler-verified** against the current language direction:
+`define isolated actor Name as ... end`, explicit actor-owned `state`,
+`handle_state`, `critical` state mutation and structured cancellation.
+
+The runtime's `http.handler(...).scoped(...).pooled(...).dispatch(...)`
+adapter must be checked for the **exact native guest ABI**, including:
+
+- Whether a typed, generation-fenced message can be received by a
+  `handle_state` handler without violating actor non-reentrancy.
+- Who exclusively owns the single-use `HttpExchange` and TCP FD before
+  `http.claim`, after `dispatch`, and after completion or cancellation.
+- Whether a stale, wrong-service, wrong-image, or wrong-generation receipt
+  is rejected **before** any actor response, including after suspension.
+- Whether an abandoned streaming client releases all credits, leases,
+  continuations and actor ownership without reusing a stale receipt.
+- Whether actor state uses `critical` for every mutation; no synchronous
+  blocking I/O should be introduced on the actor carrier.
+
+Do **not** mechanically rename `isoactor` to `isolated actor` or replace
+`receive` with `handle_state` without checking the actual compiled
+runtime adapter and ensuring negative receipts compile/execute. Keep the
+legacy guest syntax and this integration draft as **unqualified** until
+an independently approved native execution produces exact-source compiler
+and HTTP/TCP receipts.
+
+This work does not repair the pre-read configuration byte cap or symlink/
+TOCTOU race in `fs.read_text`; those still need a verified bounded
+file-open API and actor-owned descriptor lifetime.
+
+### Revalidation after this source patch
+
+- Recompute root tree and both inventories (38 .ores files and 17 pure
+  contracts unless intentionally updated).
+- Run Bash syntax, the source-free audit and source-policy/safe-defaults
+  negative fixtures on a **stepful, exact-head hosted runner**.
+- Compile `src/proxy_yaml.ores`, `tests/yaml_policy_contract.ores`,
+  `tests/header_policy_contract.ores`, `src/serve_reverse.ores` and
+  `tests/actor_ingress_tcp_smoke.ores` using an approved source-pinned
+  runtime. Execute valid and negative guest fixtures, then bounded TCP tests.
+- Obtain nonauthor approval *after* the final commit, require protected
+  `main` and independently reviewed native runner authorization.
+
+No release promotion or self-hosted native execution is authorized by this
+source-only change.
