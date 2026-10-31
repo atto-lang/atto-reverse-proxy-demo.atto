@@ -93,3 +93,34 @@ different organization.
 Do not perform a cross-org private-source mirror until destination
 authorization is independently established. Continue only source-free
 canaries and static local/offline tests meanwhile. Keep PR #11 draft.
+
+## 2026-10-31 hardened exact-PR proof update
+
+The proof verifier now requires the run to identify the immutable workflow path,
+a fresh GitHub REST PR #11 snapshot, the same head branch, exactly one PR #11
+association with the matching head SHA and source/base repository identity,
+and the complete jobs page set (`total_count == len(jobs)`). Incomplete
+pagination, a missing head-repository identity, unrelated PR runs, ambiguous
+job names, and skipped or unassigned jobs all fail closed. The verifier does
+not generate a release-approval receipt; it only reports API-level step
+execution metadata, and a live JDK25 compiler digest/tree check still requires
+independent job-log inspection.
+
+`ci/test_runner_execution.py` contains **25 synthetic unittest methods**.
+Local verification on the reviewed branch passed 25/25, and tested Git
+blob SHA readback matched:
+- `ci/verify_runner_execution.py`: `097f275bc3f78b1215d6e7418878351f62982cb6`.
+- `ci/test_runner_execution.py`: `228b95426c0083f2fa2c891a763c375ad5c663b7`.
+
+The source-free workflow's pull-request and push filters now include the
+actor-ingress base and the review branch, so the tests are eligible for CI.
+However, the first new source-free execution [run 41234501457](https://github.com/ores-truffle-oreslang/oreslang-reverse-proxy-demo.ores/actions/runs/41234501457)
+was **failure with zero executed steps and `runner_id=0`**. Workflow
+eligibility is not a running runner. Leave the CI gate blocked.
+
+Both this repository and `oreslang-source.java` currently report
+`main.protected=false`; the Java V3 mirroring policy therefore denies
+source-bearing export, and **no proxy-specific approved private source
+carrier exists**. Do not weaken the original repository-ID guard in
+`native-contracts.yml` or `actor-ingress-wire.yml` to force an
+unapproved cross-org execution.
