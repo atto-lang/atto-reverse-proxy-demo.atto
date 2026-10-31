@@ -15,6 +15,12 @@ HEAD = "a" * 40
 RUN_ID = 8001
 
 
+def good_pr():
+    return {"state": "open", "number": 11,
+            "head": {"sha": HEAD, "repo": {"id": gate.SOURCE_REPO_ID}},
+            "base": {"repo": {"id": gate.SOURCE_REPO_ID}}}
+
+
 def good(profile="wire"):
     cfg = gate.PROFILES[profile]
     steps = [{"name": name, "number": i, "status": "completed",
@@ -40,7 +46,7 @@ def good(profile="wire"):
 class AdmissionEvidence(unittest.TestCase):
     def verify(self, run, jobs, profile="wire"):
         return gate.check_execution(run, jobs, profile=profile,
-                                    expected_head=HEAD, expected_run_id=RUN_ID)
+                                    expected_head=HEAD, expected_run_id=RUN_ID, pr=good_pr())
 
     def test_synthetic_wire_metadata(self):
         run, jobs = good()
@@ -50,6 +56,22 @@ class AdmissionEvidence(unittest.TestCase):
     def test_synthetic_native_metadata(self):
         run, jobs = good("native")
         self.assertEqual(self.verify(run, jobs, "native")["steps"], 5)
+
+    def test_pr_snapshot_head_must_match(self):
+        run, jobs = good()
+        pr = good_pr()
+        pr["head"]["sha"] = "b" * 40
+        with self.assertRaises(gate.Unexecuted):
+            gate.check_execution(run, jobs, profile="wire", expected_head=HEAD,
+                                 expected_run_id=RUN_ID, pr=pr)
+
+    def test_pr_foreign_head_repository(self):
+        run, jobs = good()
+        pr = good_pr()
+        pr["head"]["repo"]["id"] = 999
+        with self.assertRaises(gate.Unexecuted):
+            gate.check_execution(run, jobs, profile="wire", expected_head=HEAD,
+                                 expected_run_id=RUN_ID, pr=pr)
 
     def test_no_jobs(self):
         run, jobs = good()
