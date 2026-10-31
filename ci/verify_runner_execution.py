@@ -116,6 +116,7 @@ def check_execution(run: dict, jobs_payload: dict, *, profile: str,
     require(type(jobs_payload.get("total_count")) is int
             and jobs_payload["total_count"] == len(jobs),
             "incomplete or inconsistent paginated jobs payload")
+    require(len(jobs) == 1, "unexpected job present or required job missing")
     matching = [j for j in jobs if isinstance(j, dict)
                 and j.get("name") == config["job"]]
     require(len(matching) == 1, "required job missing or ambiguous")
@@ -141,6 +142,9 @@ def check_execution(run: dict, jobs_payload: dict, *, profile: str,
     require(all(s.get("status") == "completed" and s.get("conclusion") == "success"
                 and positive_int(s.get("number")) for s in steps),
             "incomplete, skipped, or failed step")
+    step_numbers = [s["number"] for s in steps]
+    require(step_numbers == sorted(set(step_numbers)),
+            "duplicate or out-of-order step numbers")
     require(all(n in names for n in config["steps"]), "required execution step absent")
     indices = [names.index(n) for n in config["steps"]]
     require(indices == sorted(indices), "required execution steps out of order")
