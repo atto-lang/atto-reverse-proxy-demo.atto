@@ -21,6 +21,12 @@ check_bad() {
   fi
 }
 check_ok
+# SOURCE_REF provenance must be inert (100644), not executable even if
+# its 40-hex contents and the worktree are otherwise valid.
+git -C "$test_repo" update-index --chmod=+x -- SOURCE_REF
+check_bad
+git -C "$test_repo" update-index --chmod=-x -- SOURCE_REF
+check_ok
 mkdir -p "$test_repo/nested space"
 printf 'placeholder\n' > "$test_repo/nested space/unsafe.PY"
 git -C "$test_repo" add .
@@ -240,4 +246,4 @@ git -C "$pinned_repo" config --unset core.filemode
 EXPECTED_DEMO_SHA="$pinned_sha" bash "$pinned_repo/ci/source-policy.sh" > /dev/null || {
   echo 'TEST_FAILURE: pinned checkout rejected after chmod fixture recovery' >&2; exit 1;
 }
-printf 'SOURCE_POLICY_NEGATIVE_TESTS_PASS scenarios=29\n'
+printf 'SOURCE_POLICY_NEGATIVE_TESTS_PASS scenarios=30\n'
