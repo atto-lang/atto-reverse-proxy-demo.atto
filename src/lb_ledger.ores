@@ -1,0 +1,197 @@
+// Actor-owned, pure reference ledger: a selection is atomically paired with
+// a bounded reservation in one immutable single-writer state transition.
+// NOT a multi-thread-safe allocator or a network dial authorization.
+// No live health probes are performed here; all backends start unhealthy.
+import module proxy_yaml from "./proxy_yaml";
+import module lb_policy from "./lb_policy";
+
+define module lb_ledger as
+  pub define class Ticket as
+    pub val int epoch;
+    pub val int slot;
+    pub val int nonce;
+    pub val int backend;
+  end
+
+  pub define class Admission as
+    pub val Ledger state;
+    pub val Ticket ticket;
+    pub val String origin;
+  end
+
+  pub define class Ledger as
+    pub val int epoch;
+    pub val int sequence;
+    pub val int next_nonce;
+    val proxy_yaml.UpstreamPool pool;
+    val Array<bool> healthy;
+    val Array<int> active;
+    val Array<Ticket> tickets;
+    val Array<bool> live;
+
+    pub constructor(int epoch, int sequence, int next_nonce,
+                    proxy_yaml.UpstreamPool pool,
+                    Array<bool> healthy, Array<int> active,
+                    Array<Ticket> tickets, Array<bool> live) {
+      self.epoch = epoch;
+      self.sequence = sequence;
+      self.next_nonce = next_nonce;
+      self.pool = pool;
+      self.healthy = healthy;
+      self.active = active;
+      self.tickets = tickets;
+      self.live = live;
+    }
+
+    pub fnc active_at(int index): Result<int, String> {
+      if index < 0 || index >= self.active.size; then
+        return Err("invalid backend index");
+      fi
+      return Ok(self.active.get(index));
+    }
+
+    pub fnc healthy_at(int index): Result<bool, String> {
+      if index < 0 || index >= self.healthy.size; then
+        return Err("invalid backend index");
+      fi
+      return Ok(self.healthy.get(index));
+    }
+
+    pub fnc live_count(): int {
+      let int count = 0;
+      for (const held of self.live) {
+        if held; then count = count + 1; fi
+      }
+      return count;
+    }
+
+    // A trusted supervisor publishes a health change. Real transport must
+    // first validate a generation-pinned health probe completion receipt.
+    pub fnc set_health(int epoch, int expected_sequence,
+                       int index, bool value): Result<Ledger, String> {
+      if epoch != self.epoch || expected_sequence != self.sequence ||
+        self.sequence >= 2147483646 ||
+        index < 0 || index >= self.healthy.size; then
+        return Err("stale health update or bad backend index");
+      fi
+      let Array<bool> next_health = new Array<bool>();
+      for (let i = 0; i < self.healthy.size; i++) {
+        if i == index; then next_health.add(value);
+        else next_health.add(self.healthy.get(i)); fi
+      }
+      return Ok(new Ledger(self.epoch, self.sequence + 1,
+        self.next_nonce, self.pool, next_health, self.active,
+        self.tickets, self.live));
+    }
+
+    // Atomic in a single actor turn. No caller gets a reusable permit merely
+    // from lb_policy.choose: reserve commits a distinct slot and nonce.
+    pub fnc reserve(int epoch, int expected_sequence, int ordinal):
+        Result<Admission, String> {
+      if epoch != self.epoch || expected_sequence != self.sequence ||
+        self.sequence >= 2147483646 ||
+        self.next_nonce >= 2147483646 ||
+        self.live_count() >= 1024; then
+        return Err("stale ledger, nonce exhaustion or global pool capacity");
+      fi
+      val choice = lb_policy.choose(rt borrow self.pool, self.epoch,
+          rt borrow self.healthy, rt borrow self.active, ordinal);
+      if choice.is_err(); then return Err("no eligible backend"); fi
+      val picked = choice.unwrap();
+      let int slot = -1;
+      for (let i = 0; i < self.live.size; i++) {
+        if !self.live.get(i) && slot == -1; then slot = i; fi
+      }
+      if slot == -1; then slot = self.live.size; fi
+      if slot >= 1024; then return Err("global reservation ledger exhausted"); fi
+      val Ticket token = new Ticket(self.epoch, slot,
+        self.next_nonce, picked.index);
+      let Array<int> counts = new Array<int>();
+      for (let i = 0; i < self.active.size; i++) {
+        if i == picked.index; then
+          counts.add(self.active.get(i) + 1);
+        else counts.add(self.active.get(i)); fi
+      }
+      let Array<Ticket> tickets = new Array<Ticket>();
+      let Array<bool> live = new Array<bool>();
+      for (let i = 0; i < self.live.size; i++) {
+        if i == slot; then
+          tickets.add(token); live.add(true);
+        else
+          tickets.add(self.tickets.get(i));
+          live.add(self.live.get(i));
+        fi
+      }
+      if slot == self.live.size; then tickets.add(token); live.add(true); fi
+      val updated = new Ledger(self.epoch, self.sequence + 1,
+        self.next_nonce + 1, self.pool, self.healthy,
+        counts, tickets, live);
+      return Ok(new Admission(updated, token, picked.origin));
+    }
+
+    // Release is bound to the exact slot/incarnation and backend. No stale,
+    // forged, duplicated or cross-epoch completion may free active capacity.
+    pub fnc release(int epoch, int expected_sequence,
+                    borrow Ticket ticket): Result<Ledger, String> {
+      if epoch != self.epoch || expected_sequence != self.sequence ||
+        self.sequence >= 2147483646 ||
+        ticket.epoch != self.epoch ||
+        ticket.slot < 0 || ticket.slot >= self.live.size ||
+        ticket.backend < 0 || ticket.backend >= self.active.size ||
+        !self.live.get(ticket.slot); then
+        return Err("stale release or invalid reservation ticket");
+      fi
+      val owned = self.tickets.get(ticket.slot);
+      if owned.epoch != ticket.epoch || owned.nonce != ticket.nonce ||
+        owned.backend != ticket.backend ||
+        self.active.get(ticket.backend) <= 0; then
+        return Err("forged, recycled or cross-backend lease");
+      fi
+      let Array<int> counts = new Array<int>();
+      for (let i = 0; i < self.active.size; i++) {
+        if i == ticket.backend; then
+          counts.add(self.active.get(i) - 1);
+        else counts.add(self.active.get(i)); fi
+      }
+      let Array<bool> live = new Array<bool>();
+      for (let i = 0; i < self.live.size; i++) {
+        if i == ticket.slot; then live.add(false);
+        else live.add(self.live.get(i)); fi
+      }
+      return Ok(new Ledger(self.epoch, self.sequence + 1,
+        self.next_nonce, self.pool, self.healthy, counts,
+        self.tickets, live));
+    }
+  end
+
+  pub fnc start(proxy_yaml.UpstreamPool pool, int epoch):
+      Result<Ledger, String> {
+    if epoch <= 0 || epoch >= 2147483646 ||
+      pool.origins.size == 0 || pool.origins.size > 16; then
+      return Err("invalid initial pool/epoch");
+    fi
+    let Array<bool> healthy = new Array<bool>();
+    let Array<int> active = new Array<int>();
+    for (const origin of pool.origins) {
+      healthy.add(false);
+      active.add(0);
+    }
+    // Pure lb_policy validation fails closed for programmatic pool objects.
+    // Temporarily use a single eligible probe bitmap solely to validate
+    // the pool shape, not to publish a healthy backend.
+    healthy = new Array<bool>();
+    let int first = 0;
+    for (const origin of pool.origins) {
+      healthy.add(first == 0);
+      first = first + 1;
+    }
+    if lb_policy.choose(rt borrow pool, epoch,
+       rt borrow healthy, rt borrow active, 0).is_err(); then
+      return Err("invalid programmatic pool");
+    fi
+    healthy = new Array<bool>();
+    for (const origin of pool.origins) { healthy.add(false); }
+    return Ok(new Ledger(epoch, 1, 1, pool, healthy, active,
+      new Array<Ticket>(), new Array<bool>()));
+  }
+end
