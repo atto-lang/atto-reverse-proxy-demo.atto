@@ -15,7 +15,8 @@ define module lb_policy as
   // instead of trusting only proxy_yaml.parse() to have admitted values.
   fnc valid_pool(borrow proxy_yaml.UpstreamPool pool): bool {
     if !proxy_yaml.valid_header_name(pool.name) ||
-      (pool.algorithm != "weighted_round_robin" &&
+      (pool.algorithm != "round_robin" &&
+       pool.algorithm != "weighted_round_robin" &&
        pool.algorithm != "least_conn") ||
       pool.max_connections <= 0 || pool.max_connections > 1024 ||
       pool.origins.size == 0 || pool.origins.size > 16 ||
@@ -24,7 +25,8 @@ define module lb_policy as
     fi
     for (let i = 0; i < pool.origins.size; i++) {
       if !proxy_yaml.valid_upstream_origin(pool.origins.get(i)) ||
-        pool.weights.get(i) < 1 || pool.weights.get(i) > 16; then
+        pool.weights.get(i) < 1 || pool.weights.get(i) > 16 ||
+        (pool.algorithm == "round_robin" && pool.weights.get(i) != 1); then
         return false;
       fi
       for (let j = 0; j < i; j++) {
@@ -68,7 +70,8 @@ define module lb_policy as
     }
     if eligible_weight == 0; then return Err("no healthy unsaturated backend"); fi
 
-    if pool.algorithm == "weighted_round_robin"; then
+    if pool.algorithm == "round_robin" ||
+      pool.algorithm == "weighted_round_robin"; then
       if ordinal >= eligible_weight; then
         return Err("weighted-round-robin ordinal out of range");
       fi
