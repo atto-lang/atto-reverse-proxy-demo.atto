@@ -14,7 +14,7 @@ define module middleware_policy as
           found = true;
           if rule.kind == "deny"; then return Ok(false); fi
           if rule.kind == "require_header"; then
-            if supplied_header != rule.header || supplied_value == "" ||
+            if supplied_header != rule.header || supplied_value.trim() == "" ||
               !header_policy.canonical_name(supplied_header) ||
               !header_policy.value_safe(supplied_value); then
               return Ok(false);
