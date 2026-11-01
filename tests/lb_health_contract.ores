@@ -1,0 +1,50 @@
+// Pure fail-closed health state transitions; no real timers or DNS probes.
+import module lb_health from "../src/lb_health";
+
+pub routine main(): int {
+  if lb_health.start(0).is_ok(); then
+    stdio.println("FAIL zero generation"); return 1;
+  fi
+  val started = lb_health.start(11).unwrap();
+  if !lb_health.can_serve(rt borrow started) || started.sequence != 1; then
+    stdio.println("FAIL initial healthy state"); return 1;
+  fi
+  val f1 = lb_health.fail(rt borrow started, 11, 1, 100).unwrap();
+  val f2 = lb_health.fail(rt borrow f1, 11, 2, 101).unwrap();
+  if !lb_health.can_serve(rt borrow f2) || f2.failures != 2; then
+    stdio.println("FAIL bounded consecutive failure count"); return 1;
+  fi
+  val open = lb_health.fail(rt borrow f2, 11, 3, 102).unwrap();
+  if lb_health.can_serve(rt borrow open) || open.phase != 1 ||
+     open.next_probe_ms != 5102; then
+    stdio.println("FAIL open after third failure"); return 1;
+  fi
+  if lb_health.fail(rt borrow open, 11, 4, 103).is_ok() ||
+     lb_health.succeed(rt borrow open, 11, 4, 103).is_ok() ||
+     lb_health.begin_probe(rt borrow open, 11, 4, 5101).is_ok() ||
+     lb_health.begin_probe(rt borrow open, 12, 4, 5102).is_ok() ||
+     lb_health.begin_probe(rt borrow open, 11, 3, 5102).is_ok(); then
+    stdio.println("FAIL cooldown, epoch or ticket fencing"); return 1;
+  fi
+  val probe = lb_health.begin_probe(rt borrow open, 11, 4, 5102).unwrap();
+  if lb_health.can_serve(rt borrow probe) ||
+     lb_health.begin_probe(rt borrow probe, 11, 5, 5102).is_ok(); then
+    stdio.println("FAIL half-open is single-probe only"); return 1;
+  fi
+  val recovered = lb_health.succeed(rt borrow probe, 11, 5, 5103).unwrap();
+  if !lb_health.can_serve(rt borrow recovered) ||
+     recovered.failures != 0 || recovered.sequence != 6; then
+    stdio.println("FAIL probe closes breaker"); return 1;
+  fi
+  val re_open = lb_health.fail(rt borrow probe, 11, 5, 5103).unwrap();
+  if lb_health.can_serve(rt borrow re_open) ||
+     re_open.phase != 1 || re_open.next_probe_ms != 10103; then
+    stdio.println("FAIL failed probe must restart cooldown"); return 1;
+  fi
+  if lb_health.fail(rt borrow recovered, 11, 5, 5104).is_ok() ||
+     lb_health.fail(rt borrow recovered, 11, 6, 2147478648).is_ok(); then
+    stdio.println("FAIL stale receipt or time overflow"); return 1;
+  fi
+  stdio.println("PASS circuit-breaker health generation and cooldown contract");
+  return 0;
+}
