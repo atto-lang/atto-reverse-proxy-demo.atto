@@ -34,6 +34,7 @@ jobs:
             src/header_policy.ores \
             src/http_framing.ores \
             src/lb_health.ores \
+            src/lb_ledger.ores \
             src/lb_policy.ores \
             src/slot_pool.ores \
             src/serve_reverse.ores \
@@ -41,6 +42,7 @@ jobs:
             tests/header_policy_contract.ores \
             tests/http_framing_contract.ores \
             tests/lb_health_contract.ores \
+            tests/lb_ledger_contract.ores \
             tests/lb_policy_contract.ores \
             tests/slot_pool_contract.ores \
             tests/ingress_tcp_smoke.ores \
@@ -71,7 +73,7 @@ jobs:
                 ;;
             esac
           done < <(git ls-files -z -- src tests)
-          test "$checked" -ge 30
+          test "$checked" -ge 32
           printf 'ORESLANG_SOURCE_INVENTORY_ONLY files=%s native=NOT_EXECUTED\\n' "$checked"
       - name: Preserve non-production verdict
         run: echo 'SOURCE_INVENTORY_ONLY; native compile/execute, upstream forwarding and network proof NOT_EXECUTED.'
