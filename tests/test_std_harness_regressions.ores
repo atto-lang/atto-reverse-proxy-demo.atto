@@ -5,9 +5,15 @@ fnc dotdot_config_path_denied(): TestOutcome {
   return expect_false(config_path.valid("/etc/proxy/../secret.toml"),
     "lexical parent traversal must be rejected before filesystem access");
 }
+fnc absolute_config_path_normalized(): TestOutcome {
+  return expect_true(config_path.valid("/etc/proxy/config.toml") &&
+    !config_path.valid("/etc//proxy/config.toml"),
+    "safe absolute path accepted and doubled separator denied");
+}
 pub routine main(): void {
   val TestSuite suite = new TestSuite("reverse-proxy", arr[
-    new TestCase("dotdot_config_path_denied", dotdot_config_path_denied, false, "")
+    new TestCase("dotdot_config_path_denied", dotdot_config_path_denied, false, ""),
+    new TestCase("absolute_config_path_normalized", absolute_config_path_normalized, false, "")
   ]);
   val TestOptions options = new TestOptions("", false, true);
   val RunSummary summary = run_suite(rt borrow suite, rt borrow options);
