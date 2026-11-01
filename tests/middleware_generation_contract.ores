@@ -26,6 +26,29 @@ pub routine main(): int {
   if proxy_yaml.parse(config.replace_literal("kind: trace", "kind: unsupported"), "reverse").is_ok(); then
     stdio.println("FAIL unsupported middleware candidate admitted"); return 1;
   fi
+
+  // Pure middleware evaluator and pinned manifest must agree on rejecting
+  // unsafe header values. This is NOT a raw HTTP framing test.
+  val String guarded_yaml = config.replace_literal(
+    "kind: trace\n", "kind: require_header\n    header: x-auth-token\n");
+  val guarded_result = proxy_yaml.parse(guarded_yaml, "forward");
+  if guarded_result.is_err(); then stdio.println("FAIL guarded parser"); return 1; fi
+  val guarded_config = guarded_result.unwrap();
+  if !middleware_policy.evaluate(rt borrow guarded_config, "gate",
+      "x-auth-token", "valid-token").unwrap() ||
+    middleware_policy.evaluate(rt borrow guarded_config, "gate",
+      "x-auth-token", "ok\r\nx-admin: yes").unwrap() ||
+    middleware_policy.evaluate(rt borrow guarded_config, "gate",
+      "x-auth-token", "ok\u0000bad").unwrap() ||
+    middleware_policy.evaluate(rt borrow guarded_config, "gate",
+      "x-auth-token", "ok\tbad").unwrap() ||
+    middleware_policy.evaluate(rt borrow guarded_config, "gate",
+      "X-AUTH-TOKEN", "valid-token").unwrap() ||
+    middleware_policy.evaluate(rt borrow guarded_config, "gate",
+      "x-auth-token", "").unwrap(); then
+    stdio.println("FAIL unsafe require_header admitted by evaluator");
+    return 1;
+  fi
   stdio.println("PASS reverse independent middleware generations (pure policy)");
   return 0;
 }
