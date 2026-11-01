@@ -1,0 +1,69 @@
+// Pure passive health/circuit-breaker state contract; no timers or probes run.
+// A single supervisor actor must serialize updates and atomically publish
+// each returned value; stale sequence numbers fail rather than mutate state.
+// Phases: 0 healthy/closed, 1 open/ejected, 2 single probe in flight.
+define module lb_health as
+  pub define class State as
+    pub val int epoch;
+    pub val int phase;
+    pub val int failures;
+    pub val int next_probe_ms;
+    pub val int sequence;
+  end
+
+  pub fnc start(int epoch): Result<State, String> {
+    if epoch <= 0; then return Err("invalid health generation"); fi
+    return Ok(new State(epoch, 0, 0, 0, 1));
+  }
+
+  // Only fully closed circuits may serve traffic. Half-open is probe-only.
+  pub fnc can_serve(borrow State state): bool {
+    return state.epoch > 0 && state.phase == 0 &&
+      state.sequence > 0 && state.failures >= 0;
+  }
+
+  fnc valid_event(borrow State state, int epoch, int expected_sequence,
+                  int now_ms): bool {
+    return epoch == state.epoch && epoch > 0 &&
+      state.sequence == expected_sequence && expected_sequence > 0 &&
+      expected_sequence < 2147483647 &&
+      now_ms >= 0 && now_ms <= 2147478647 &&
+      state.phase >= 0 && state.phase <= 2;
+  }
+
+  // Three consecutive failures open the breaker for 5000ms. Values are
+  // bounded to prevent timer arithmetic overflow and zero-delay retry storms.
+  pub fnc fail(borrow State state, int epoch, int expected_sequence,
+               int now_ms): Result<State, String> {
+    if !valid_event(rt borrow state, epoch, expected_sequence, now_ms) ||
+      state.phase == 1; then
+      return Err("stale or inadmissible health failure event");
+    fi
+    let int failures = state.failures + 1;
+    if failures < 3 && state.phase == 0; then
+      return Ok(new State(epoch, 0, failures, 0, state.sequence + 1));
+    fi
+    return Ok(new State(epoch, 1, 3, now_ms + 5000, state.sequence + 1));
+  }
+
+  pub fnc succeed(borrow State state, int epoch, int expected_sequence,
+                  int now_ms): Result<State, String> {
+    if !valid_event(rt borrow state, epoch, expected_sequence, now_ms) ||
+      state.phase == 1; then
+      return Err("stale or inadmissible health success event");
+    fi
+    return Ok(new State(epoch, 0, 0, 0, state.sequence + 1));
+  }
+
+  // Only one transition from OPEN to HALF_OPEN can be published per
+  // sequence. A concrete probe lease is still a transport/actor dependency.
+  pub fnc begin_probe(borrow State state, int epoch, int expected_sequence,
+                      int now_ms): Result<State, String> {
+    if !valid_event(rt borrow state, epoch, expected_sequence, now_ms) ||
+      state.phase != 1 || now_ms < state.next_probe_ms; then
+      return Err("cooldown pending or stale health probe");
+    fi
+    return Ok(new State(epoch, 2, 3, state.next_probe_ms,
+                        state.sequence + 1));
+  }
+end
