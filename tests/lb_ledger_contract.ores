@@ -7,6 +7,24 @@ pub routine main(): int {
   val parsed = proxy_yaml.parse(yaml, "reverse");
   if parsed.is_err(); then stdio.println("FAIL parsed LB fixture"); return 1; fi
   val pool = parsed.unwrap().upstreams.get(0);
+  // The public constructor is not a trusted authority: mismatched active
+  // totals and a fabricated live ticket must not manufacture capacity.
+  let Array<bool> bad_health = new Array<bool>();
+  bad_health.add(true); bad_health.add(true);
+  let Array<int> bad_counts = new Array<int>();
+  bad_counts.add(0); bad_counts.add(0);
+  let Array<lb_ledger.Ticket> forged_tickets =
+    new Array<lb_ledger.Ticket>();
+  forged_tickets.add(new lb_ledger.Ticket(7, 0, 1, 0));
+  let Array<bool> forged_liveness = new Array<bool>();
+  forged_liveness.add(true);
+  val forged_ledger = new lb_ledger.Ledger(7, 1, 2, pool,
+    bad_health, bad_counts, forged_tickets, forged_liveness);
+  if forged_ledger.reserve(7, 1, 0).is_ok() ||
+     forged_ledger.set_health(7, 1, 0, true).is_ok(); then
+    stdio.println("FAIL forged inconsistent ledger admitted"); return 1;
+  fi
+
   val initialized = lb_ledger.start(pool, 7);
   if initialized.is_err(); then stdio.println("FAIL ledger create"); return 1; fi
   val zero = initialized.unwrap();
