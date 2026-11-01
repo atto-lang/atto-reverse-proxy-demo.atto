@@ -10,7 +10,14 @@ define module middleware_policy as
       let bool found = false;
       for (const rule of snapshot.middleware) {
         if rule.name == id; then
+          if found; then return Err("duplicate middleware identifier in snapshot"); fi
           found = true;
+          // Config is publicly constructible; never treat unknown or
+          // duplicated policy entries as implicit allow.
+          if !(rule.kind == "deny" || rule.kind == "trace" ||
+            rule.kind == "require_header"); then
+            return Err("unknown middleware kind in snapshot");
+          fi
           if rule.kind == "deny"; then return Ok(false); fi
           if rule.kind == "require_header" &&
             (supplied_header != rule.header || supplied_value == ""); then
