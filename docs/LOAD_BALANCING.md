@@ -33,7 +33,7 @@ For the first contract, only `round_robin`, `weighted_round_robin` and `least_co
 
 | Capability | Current contract | Needed for production |
 | --- | --- | --- |
-| Weighted round-robin | Pure bounded selection | Smooth concurrent scheduling and atomic leases |
+| Weighted round-robin | Pure bounded selection and single-owner reservation oracle | Smooth concurrent scheduling and runtime-integrated atomic leases |
 | Least connections | Pure normalized selection | Actor-owned, generation-safe counters and releases |
 | Health & failover | Pure generation-fenced passive 3-failure/5000ms breaker, half-open probe state and external health bitmap | Actor-owned counters, timer/probes, atomic probe lease, configurable cooldown and slow-start |
 | Backend pools & routes | Fail-closed v2 pooled YAML and legacy v1 direct origins | Atomic generation publication, live reload and graceful drain |
@@ -48,6 +48,8 @@ For the first contract, only `round_robin`, `weighted_round_robin` and `least_co
 | Static content/cache | None | Separate explicit scope and cache correctness/security policies |
 
 This is an architecture target inspired by official HAProxy and NGINX documentation, **not a claim of performance or feature parity**.
+
+The `lb_ledger` module is a **single-owner immutable reservation oracle**, not a concurrent runtime allocator. It combines a healthy/saturation filter with a unique generation/nonce/slot ticket on each accepted request, rejects stale sequence claims and duplicate or recycled releases, and begins with every backend unprobed/unhealthy. The actor supervisor must replace the published ledger atomically and must not allow clients to inject health state. The pure model globally caps tracked reservations at 1024 even when the sum of backend capacities would be higher; this is a conservative test profile, not HAProxy/NGINX scaling parity.
 
 The `lb_health` module is a **single-owner immutable state oracle** (closed → open → half-open → closed/open) with sequence/epoch fencing; it does not schedule health checks, acquire a probe lease, publish a shared health table or guarantee concurrency-safe execution. The production scheduler must combine it with atomic actor-owned reservations and fully verified outbound transport.
 
