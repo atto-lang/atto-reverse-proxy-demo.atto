@@ -18,6 +18,16 @@ define module proxy_yaml as
     pub val String middleware;
   end
 
+  // Declarative backend pool. All origins are syntax-admitted only; the
+  // transport must separately authorize and pin destinations and TLS peers.
+  pub define class UpstreamPool as
+    pub val String name;
+    pub val String algorithm;
+    pub val Array<String> origins;
+    pub val Array<int> weights;
+    pub val int max_connections;
+  end
+
   pub define class Config as
     pub val String mode;
     pub val String listen_host;
@@ -30,6 +40,7 @@ define module proxy_yaml as
     pub val String connect_ports;
     pub val Array<Middleware> middleware;
     pub val Array<Route> routes;
+    pub val Array<UpstreamPool> upstreams;
   end
 
   fnc decimal(String candidate): bool {
@@ -173,8 +184,11 @@ define module proxy_yaml as
       (prefix != "/" && prefix.ends_with("/")); then
       return Err("route path_prefix must be a canonical absolute path");
     fi
-    if !valid_upstream_origin(upstream); then
-      return Err("upstream must be an explicit HTTP(S) origin without credentials/query");
+    if !valid_upstream_origin(upstream) &&
+      !(upstream.starts_with("pool:") &&
+        valid_header_name(upstream.replace_literal("pool:", "")) &&
+        upstream.split_literal(":").size == 2); then
+      return Err("upstream must be an HTTP(S) origin or canonical pool:name");
     fi
     if chain != "" && !safe_scalar(chain); then
       return Err("invalid middleware reference");
@@ -198,6 +212,73 @@ define module proxy_yaml as
     return Ok(new Middleware(name, kind, header));
   }
 
+  // v1 weights are deliberately limited to 1..16: no integer parsing,
+  // implicit YAML typing, negative values or arithmetic overflow inputs.
+  pub fnc pool_weight(String value): int {
+    if value == "1"; then return 1; fi
+    if value == "2"; then return 2; fi
+    if value == "3"; then return 3; fi
+    if value == "4"; then return 4; fi
+    if value == "5"; then return 5; fi
+    if value == "6"; then return 6; fi
+    if value == "7"; then return 7; fi
+    if value == "8"; then return 8; fi
+    if value == "9"; then return 9; fi
+    if value == "10"; then return 10; fi
+    if value == "11"; then return 11; fi
+    if value == "12"; then return 12; fi
+    if value == "13"; then return 13; fi
+    if value == "14"; then return 14; fi
+    if value == "15"; then return 15; fi
+    if value == "16"; then return 16; fi
+    return 0;
+  }
+
+  fnc pool_capacity(String value): int {
+    if value == "16"; then return 16; fi
+    if value == "32"; then return 32; fi
+    if value == "64"; then return 64; fi
+    if value == "128"; then return 128; fi
+    if value == "256"; then return 256; fi
+    if value == "512"; then return 512; fi
+    if value == "1024"; then return 1024; fi
+    return 0;
+  }
+
+  fnc validate_pool(String name, String algorithm, String origins,
+                    String weights, String max_connections):
+      Result<UpstreamPool, String> {
+    if !valid_header_name(name) ||
+      (algorithm != "weighted_round_robin" && algorithm != "least_conn") ||
+      !safe_scalar(origins) || !safe_scalar(weights); then
+      return Err("pool requires canonical name, algorithm, origins and weights");
+    fi
+    val raw_origins = origins.split_literal(",");
+    val raw_weights = weights.split_literal(",");
+    if raw_origins.size == 0 || raw_origins.size > 16 ||
+      raw_origins.size != raw_weights.size; then
+      return Err("pool needs 1..16 backend origins and matching weights");
+    fi
+    let Array<String> destinations = new Array<String>();
+    let Array<int> numeric_weights = new Array<int>();
+    for (let i = 0; i < raw_origins.size; i++) {
+      val String origin = raw_origins.get(i);
+      val int weight = pool_weight(raw_weights.get(i));
+      if !valid_upstream_origin(origin) || weight <= 0; then
+        return Err("invalid pool backend origin/weight");
+      fi
+      for (const previous of destinations) {
+        if previous == origin; then return Err("duplicate pool backend origin"); fi
+      }
+      destinations.add(origin);
+      numeric_weights.add(weight);
+    }
+    val int capacity = pool_capacity(max_connections);
+    if capacity == 0; then return Err("unsupported pool max_connections"); fi
+    return Ok(new UpstreamPool(name, algorithm, destinations,
+                               numeric_weights, capacity));
+  }
+
   // Exact duplicates are fatal, including repeated sections and list properties.
   // The YAML list spelling is exactly two-space '  - name: ...' followed by
   // four-space fields; maps have exactly two-space fields.
@@ -218,6 +299,13 @@ define module proxy_yaml as
     let bool seen_policy = false;
     let bool seen_routes = false;
     let bool seen_middleware = false;
+    let bool seen_upstreams = false;
+    let Array<UpstreamPool> upstreams = new Array<UpstreamPool>();
+    let String pn = "";
+    let String pa = "";
+    let String po = "";
+    let String pw = "";
+    let String pc = "";
     let Array<Route> routes = new Array<Route>();
     let Array<Middleware> middlewares = new Array<Middleware>();
     let String rn = "";
@@ -265,15 +353,27 @@ define module proxy_yaml as
             middlewares.add(previous.unwrap());
           fi
           mn = ""; mk = ""; mh = "";
+        elif section == "upstreams"; then
+          if pn != ""; then
+            val previous = validate_pool(pn, pa, po, pw, pc);
+            if previous.is_err(); then return Err("invalid previous pool"); fi
+            for (const existing of upstreams) {
+              if existing.name == pn; then return Err("duplicate pool"); fi
+            }
+            upstreams.add(previous.unwrap());
+          fi
+          pn = ""; pa = ""; po = ""; pw = ""; pc = "";
         else
-          return Err("list item outside routes/middleware");
+          return Err("list item outside routes/middleware/upstreams");
         fi
         val pair = line.split_literal(": ");
         if pair.size != 2 || pair.get(0) != "- name" ||
           !safe_scalar(pair.get(1)); then
           return Err("list items must begin with '- name: VALUE'");
         fi
-        if section == "routes"; then rn = pair.get(1); else mn = pair.get(1); fi
+        if section == "routes"; then rn = pair.get(1);
+        elif section == "middleware"; then mn = pair.get(1);
+        else pn = pair.get(1); fi
         continue;
       fi
 
@@ -297,6 +397,12 @@ define module proxy_yaml as
           if key == "kind" && mk == ""; then mk = value;
           elif key == "header" && mh == ""; then mh = value;
           else return Err("unknown or duplicate middleware field"); fi
+        elif section == "upstreams" && pn != ""; then
+          if key == "algorithm" && pa == ""; then pa = value;
+          elif key == "origins" && po == ""; then po = value;
+          elif key == "weights" && pw == ""; then pw = value;
+          elif key == "max_connections" && pc == ""; then pc = value;
+          else return Err("unknown or duplicate pool field"); fi
         else
           return Err("list field without list item");
         fi
@@ -354,6 +460,15 @@ define module proxy_yaml as
         middlewares.add(previous.unwrap());
         mn = ""; mk = ""; mh = "";
       fi
+      if pn != ""; then
+        val previous = validate_pool(pn, pa, po, pw, pc);
+        if previous.is_err(); then return Err("invalid pool"); fi
+        for (const existing of upstreams) {
+          if existing.name == pn; then return Err("duplicate pool"); fi
+        }
+        upstreams.add(previous.unwrap());
+        pn = ""; pa = ""; po = ""; pw = ""; pc = "";
+      fi
       if line == "listen:"; then
         if seen_listen; then return Err("duplicate listen section"); fi
         seen_listen = true; section = "listen";
@@ -369,6 +484,9 @@ define module proxy_yaml as
       elif line == "middleware:"; then
         if seen_middleware; then return Err("duplicate middleware section"); fi
         seen_middleware = true; section = "middleware";
+      elif line == "upstreams:"; then
+        if seen_upstreams; then return Err("duplicate upstreams section"); fi
+        seen_upstreams = true; section = "upstreams";
       else
         val pair = line.split_literal(": ");
         if pair.size != 2 || !safe_scalar(pair.get(1)); then
@@ -402,6 +520,17 @@ define module proxy_yaml as
       }
       middlewares.add(last.unwrap());
     fi
+    if pn != ""; then
+      val last = validate_pool(pn, pa, po, pw, pc);
+      if last.is_err(); then return Err("invalid final pool"); fi
+      for (const existing of upstreams) {
+        if existing.name == pn; then return Err("duplicate final pool"); fi
+      }
+      upstreams.add(last.unwrap());
+    fi
+    if upstreams.size > 64; then
+      return Err("upstream pool count exceeds 64");
+    fi
     if middlewares.size > 128; then
       return Err("middleware definition budget exceeded");
     fi
@@ -423,7 +552,7 @@ define module proxy_yaml as
       fi
       if seen_policy; then return Err("reverse policy section is not supported in v1"); fi
     else
-      if seen_routes || !seen_policy || deny_private != "true" ||
+      if seen_routes || seen_upstreams || !seen_policy || deny_private != "true" ||
         !safe_scalar(allowed) || connect != "443"; then
         return Err("forward mode requires deny_private=true, allow_domains and connect_ports=443");
       fi
@@ -440,6 +569,14 @@ define module proxy_yaml as
     fi
 
     for (const route of routes) {
+      if route.upstream.starts_with("pool:"); then
+        val String pool_id = route.upstream.replace_literal("pool:", "");
+        let bool found_pool = false;
+        for (const pool of upstreams) {
+          if pool.name == pool_id; then found_pool = true; fi
+        }
+        if !found_pool; then return Err("route references missing pool"); fi
+      fi
       if route.middleware != ""; then
         for (const id of route.middleware.split_literal(",")) {
           let bool present = false;
@@ -451,6 +588,6 @@ define module proxy_yaml as
       fi
     }
     return Ok(new Config(mode, host, port, carriers, actors, inflight,
-      deny_private, allowed, connect, middlewares, routes));
+      deny_private, allowed, connect, middlewares, routes, upstreams));
   }
 end
