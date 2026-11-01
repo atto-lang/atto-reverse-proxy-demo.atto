@@ -34,13 +34,17 @@ jobs:
             src/header_policy.ores \
             src/http_framing.ores \
             src/slot_pool.ores \
+            src/lb_policy.ores \
+            src/lb_yaml.ores \
             src/serve_reverse.ores \
             tests/wire_contract.ores \
             tests/header_policy_contract.ores \
             tests/http_framing_contract.ores \
             tests/slot_pool_contract.ores \
+            tests/lb_policy_contract.ores \
             tests/ingress_tcp_smoke.ores \
             config/example.yaml \
+            config/load_balancer.example.yaml \
             .cli-flags.toml
           do
             test -f "$file"
