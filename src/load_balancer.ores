@@ -19,6 +19,24 @@ define module load_balancer as
     pub val int next_cursor;
   end
 
+  // Portable nonnegative remainder without a modulo operator. Cursor is
+  // bounded to 1,000,000 and period to 12,800 by choose(), so 20
+  // binary-subtraction passes suffice even for period == 1.
+  fnc bounded_cycle(int cursor, int period): int {
+    let int remaining = cursor;
+    for (let outer = 0; outer < 20; outer++) {
+      if remaining < period; then return remaining; fi
+      let int chunk = period;
+      for (let inner = 0; inner < 20; inner++) {
+        if chunk <= remaining - chunk; then
+          chunk = chunk + chunk;
+        fi
+      }
+      remaining = remaining - chunk;
+    }
+    return remaining;
+  }
+
   // Algorithms: "weighted-round-robin" (block-weighted cycle),
   // "least-active" (active requests / configured weight).
   // No sticky hashing yet; input is a snapshot owned by a single actor.
@@ -42,14 +60,19 @@ define module load_balancer as
     }
     if total == 0; then return Err("no healthy backend"); fi
     if algorithm == "weighted-round-robin"; then
-      val int step = cursor % total;
+      val int step = bounded_cycle(cursor, total);
+      if step < 0 || step >= total; then
+        return Err("bounded cycle invariant violated");
+      fi
       let int running = 0;
       for (let i = 0; i < backends.size; i++) {
         val b = backends.get(i);
         if b.healthy && !b.draining; then
           running = running + b.weight;
           if step < running; then
-            return Ok(new Choice(b.name, b.origin, i, (step + 1) % total));
+            let int next_cursor = step + 1;
+            if next_cursor == total; then next_cursor = 0; fi
+            return Ok(new Choice(b.name, b.origin, i, next_cursor));
           fi
         fi
       }
