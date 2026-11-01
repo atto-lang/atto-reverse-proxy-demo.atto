@@ -1,0 +1,16 @@
+import class TestCase, TestSuite, TestOptions, TestOutcome, RunSummary from "std/testing";
+import fnc expect_true, expect_false, expect_equal_int, expect_equal_string, run_suite, require_success, fail from "std/testing";
+import module config_path from "../src/config_path";
+fnc dotdot_config_path_denied(): TestOutcome {
+  return expect_false(config_path.valid("/etc/proxy/../secret.toml"),
+    "lexical parent traversal must be rejected before filesystem access");
+}
+pub routine main(): void {
+  val TestSuite suite = new TestSuite("reverse-proxy", arr[
+    new TestCase("dotdot_config_path_denied", dotdot_config_path_denied, false, "")
+  ]);
+  val TestOptions options = new TestOptions("", false, true);
+  val RunSummary summary = run_suite(rt borrow suite, rt borrow options);
+  require_success(rt borrow summary);
+  return;
+}
