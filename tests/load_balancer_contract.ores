@@ -47,8 +47,44 @@ pub routine main(): int {
     return 1;
   fi
   val least = load_balancer.choose(nodes, "least-active", 0);
-  if least.is_err() || least.unwrap().name != "b"; then
+  // Result extraction is intentionally separated from the error guard:
+  // Oreslang boolean expressions are eager, not short-circuit guards.
+  if least.is_err(); then
+    stdio.println("FAIL weighted least-active result"); return 1;
+  fi
+  val least_choice = least.unwrap();
+  if least_choice.name != "b"; then
     stdio.println("FAIL weighted least-active"); return 1;
+  fi
+  // Non-power-of-two total weight (5+10): exercise binary subtraction
+  // rather than accidentally relying on powers of two.
+  let Array<load_balancer.Backend> mixed = new Array<load_balancer.Backend>();
+  mixed.add(new load_balancer.Backend("x", "https://x.example.test:443",
+    5, 0, true, false));
+  mixed.add(new load_balancer.Backend("y", "https://y.example.test:443",
+    10, 0, true, false));
+  val mixed_nine = load_balancer.choose(mixed, "weighted-round-robin", 999999);
+  val mixed_ten = load_balancer.choose(mixed, "weighted-round-robin", 1000000);
+  val mixed_last = load_balancer.choose(mixed, "weighted-round-robin", 14);
+  val mixed_reset = load_balancer.choose(mixed, "weighted-round-robin", 15);
+  val mixed_first = load_balancer.choose(mixed, "weighted-round-robin", 17);
+  if mixed_nine.is_err() || mixed_ten.is_err() ||
+    mixed_last.is_err() || mixed_reset.is_err() || mixed_first.is_err(); then
+    stdio.println("FAIL non-power-of-two weighted rotation");
+    return 1;
+  fi
+  val p9 = mixed_nine.unwrap();
+  val p10 = mixed_ten.unwrap();
+  val plast = mixed_last.unwrap();
+  val preset = mixed_reset.unwrap();
+  val pfirst = mixed_first.unwrap();
+  if p9.name != "y" || p9.next_cursor != 10 ||
+    p10.name != "y" || p10.next_cursor != 11 ||
+    plast.name != "y" || plast.next_cursor != 0 ||
+    preset.name != "x" || preset.next_cursor != 1 ||
+    pfirst.name != "x" || pfirst.next_cursor != 3; then
+    stdio.println("FAIL non-power-of-two weighted choice or cursor");
+    return 1;
   fi
   let Array<load_balancer.Backend> only_b = new Array<load_balancer.Backend>();
   only_b.add(new load_balancer.Backend("a", "https://a.example.test:443",
