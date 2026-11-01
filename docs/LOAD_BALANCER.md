@@ -15,7 +15,7 @@ Use a **strict declarative YAML format**, not a second programming language. Ups
 ## Implemented pure rules
 
 - weighted_round_robin: deterministic weighted distribution across **currently eligible** targets (does not implement smooth weighted RR).
-- least_connections: minimum active-connections-to-weight ratio among eligible backends; deterministic lowest-index tie. Requests must be atomically reserved by the owning actor after this advisory selection.
+- least_connections: minimum active-connections-to-weight ratio among eligible backends; deterministic tie rotation among eligible servers. Requests must be atomically reserved by the owning actor after this advisory selection.
 - source_hash: deterministic weighted bucket chosen by a trusted nonnegative hash; **not** rendezvous/consistent hashing. Adding/removing or ejection of a backend may remap client affinity. Do not use raw unauthenticated Forwarded/XFF headers.
 - A server is ineligible if unhealthy, draining, ejected, or at its individual connection limit. All state observations are supplied by a caller, NOT discovered by this module.
 - Backups receive traffic only if there are **zero usable primaries**. If no backend capacity remains, fail closed (no hidden queue, fallback to unchecked origin, or overcommit).
