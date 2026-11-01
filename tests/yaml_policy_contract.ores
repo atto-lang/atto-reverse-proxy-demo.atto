@@ -103,6 +103,24 @@ pub routine main(): int {
   if reversed.is_err() || reversed.unwrap().name != "admin"; then
     stdio.println("FAIL order-independent longest prefix"); return 1;
   fi
+  // Publicly constructed Config must never permit unknown/duplicate rules.
+  let Array<proxy_yaml.Middleware> unknown_rules = new Array<proxy_yaml.Middleware>();
+  unknown_rules.add(new proxy_yaml.Middleware("guard", "allow_everything", ""));
+  val forged_unknown = new proxy_yaml.Config("reverse", "127.0.0.1",
+    "8080", "20", "100", "1024", "true", "example.test", "443",
+    unknown_rules, new Array<proxy_yaml.Route>());
+  if middleware_policy.evaluate(rt borrow forged_unknown, "guard", "", "").is_ok(); then
+    stdio.println("FAIL unknown runtime middleware kind"); return 1;
+  fi
+  let Array<proxy_yaml.Middleware> repeated_rules = new Array<proxy_yaml.Middleware>();
+  repeated_rules.add(new proxy_yaml.Middleware("guard", "trace", ""));
+  repeated_rules.add(new proxy_yaml.Middleware("guard", "trace", ""));
+  val forged_repeat = new proxy_yaml.Config("reverse", "127.0.0.1",
+    "8080", "20", "100", "1024", "true", "example.test", "443",
+    repeated_rules, new Array<proxy_yaml.Route>());
+  if middleware_policy.evaluate(rt borrow forged_repeat, "guard", "", "").is_ok(); then
+    stdio.println("FAIL duplicate runtime middleware kind"); return 1;
+  fi
   stdio.println("PASS native reverse YAML/policy contract");
   return 0;
 }
