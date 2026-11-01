@@ -19,18 +19,9 @@ jobs:
   native-contracts:
     # Never execute untrusted fork code on the organization's self-hosted runner.
     # Only the approved repository and trusted same-repo PR heads may reserve this runner.
-    if: >-
-      (github.event_name == 'pull_request' &&
-       github.event.repository.id == 1429954649 &&
-       github.event.pull_request.head.repo.id == 1429954649 &&
-       github.event.pull_request.base.repo.id == 1429954649 &&
-       github.event.pull_request.head.repo.full_name == github.repository) ||
-      (github.event_name == 'workflow_dispatch' &&
-       github.event.repository.id == 1429954649 &&
-       github.ref == 'refs/heads/main') ||
-      (github.event_name == 'push' &&
-       github.event.repository.id == 1429954649 &&
-       github.ref == 'refs/heads/main')
+    # SECURITY HOLD: PR-head workflows must never allocate trusted native runners.
+    # Admit only immutable frozen source through independently reviewed protected-main controls.
+    if: ${{ false }}
     runs-on: [self-hosted, linux, x64, oreslang-jdk25]
     timeout-minutes: 25
     steps:
