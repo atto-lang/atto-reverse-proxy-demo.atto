@@ -13,6 +13,39 @@ pub routine main(): int {
       stdio.println("FAIL deterministic weighted rotation"); return 1;
     fi
   }
+  // Cross-backend golden rotation vectors: independent cursor positions,
+  // including the admission limit and exact wraparound. No network I/O.
+  let Array<int> cursors = new Array<int>();
+  let Array<String> expected_names = new Array<String>();
+  let Array<int> expected_next = new Array<int>();
+  cursors.add(0); expected_names.add("a"); expected_next.add(1);
+  cursors.add(1); expected_names.add("a"); expected_next.add(2);
+  cursors.add(2); expected_names.add("a"); expected_next.add(3);
+  cursors.add(3); expected_names.add("b"); expected_next.add(0);
+  cursors.add(4); expected_names.add("a"); expected_next.add(1);
+  cursors.add(5); expected_names.add("a"); expected_next.add(2);
+  cursors.add(7); expected_names.add("b"); expected_next.add(0);
+  cursors.add(8); expected_names.add("a"); expected_next.add(1);
+  cursors.add(999999); expected_names.add("b"); expected_next.add(0);
+  cursors.add(1000000); expected_names.add("a"); expected_next.add(1);
+  for (let i = 0; i < cursors.size; i++) {
+    val picked = load_balancer.choose(nodes, "weighted-round-robin",
+      cursors.get(i));
+    if picked.is_err(); then
+      stdio.println("FAIL portable weighted rotation vector");
+      return 1;
+    fi
+    val p = picked.unwrap();
+    if p.name != expected_names.get(i) ||
+      p.next_cursor != expected_next.get(i); then
+      stdio.println("FAIL portable choice or wraparound");
+      return 1;
+    fi
+  }
+  if load_balancer.choose(nodes, "weighted-round-robin", 1000001).is_ok(); then
+    stdio.println("FAIL cursor bound");
+    return 1;
+  fi
   val least = load_balancer.choose(nodes, "least-active", 0);
   if least.is_err() || least.unwrap().name != "b"; then
     stdio.println("FAIL weighted least-active"); return 1;
@@ -24,6 +57,17 @@ pub routine main(): int {
     1, 0, true, false));
   if load_balancer.choose(only_b, "weighted-round-robin", 123).unwrap().name != "b"; then
     stdio.println("FAIL passive health exclusion"); return 1;
+  fi
+  val single = load_balancer.choose(only_b,
+    "weighted-round-robin", 1000000);
+  if single.is_err(); then
+    stdio.println("FAIL single-healthy-node cursor");
+    return 1;
+  fi
+  val single_choice = single.unwrap();
+  if single_choice.name != "b" || single_choice.next_cursor != 0; then
+    stdio.println("FAIL period-one wraparound");
+    return 1;
   fi
   let Array<load_balancer.Backend> drained = new Array<load_balancer.Backend>();
   drained.add(new load_balancer.Backend("a", "https://a.example.test:443",
