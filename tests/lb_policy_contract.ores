@@ -1,0 +1,102 @@
+// Native pure control-plane contract: NOT a live upstream/HTTP test.
+import module lb_policy from "../src/lb_policy";
+import module lb_yaml from "../src/lb_yaml";
+
+pub routine main(): int {
+  val String yaml = "version: ores.lb/v1\npool: api-pool\nalgorithm: weighted_round_robin\nbackends:\n" +
+    "  - name: primary-a\n    origin: http://a.example.test:8080\n    weight: 3\n    max_connections: 4\n    backup: false\n" +
+    "  - name: primary-b\n    origin: http://b.example.test:8080\n    weight: 1\n    max_connections: 4\n    backup: false\n" +
+    "  - name: fallback\n    origin: https://backup.example.test:443\n    weight: 1\n    max_connections: 4\n    backup: true\n";
+  val parsed = lb_yaml.parse(yaml);
+  if parsed.is_err(); then stdio.println("FAIL valid LB YAML"); return 1; fi
+  val pool = parsed.unwrap();
+
+  let Array<lb_policy.Status> live = new Array<lb_policy.Status>();
+  live.add(new lb_policy.Status(true, false, false, 0));
+  live.add(new lb_policy.Status(true, false, false, 0));
+  live.add(new lb_policy.Status(true, false, false, 0));
+  for (let i = 0; i < 4; i++) {
+    val selected = lb_policy.choose(rt borrow pool, rt borrow live, i, 0);
+    if selected.is_err(); then stdio.println("FAIL weighted select"); return 1; fi
+    let int expected = 0;
+    if i == 3; then expected = 1; fi
+    if selected.unwrap().index != expected; then
+      stdio.println("FAIL weighted 3:1/backup isolation"); return 1;
+    fi
+  }
+
+  // Capacity exhaustion: no implicit overcommit, nor busy fallback while a
+  // primary is available. Backup becomes eligible only when all are unusable.
+  let Array<lb_policy.Status> saturated = new Array<lb_policy.Status>();
+  saturated.add(new lb_policy.Status(true, false, false, 4));
+  saturated.add(new lb_policy.Status(true, false, false, 4));
+  saturated.add(new lb_policy.Status(true, false, false, 0));
+  val failover = lb_policy.choose(rt borrow pool, rt borrow saturated, 0, 0);
+  if failover.is_err() || failover.unwrap().backend_name != "fallback" ||
+    !failover.unwrap().backup; then
+    stdio.println("FAIL backup failover"); return 1;
+  fi
+  let Array<lb_policy.Status> none = new Array<lb_policy.Status>();
+  none.add(new lb_policy.Status(false, false, false, 0));
+  none.add(new lb_policy.Status(true, true, false, 0));
+  none.add(new lb_policy.Status(true, false, true, 0));
+  if lb_policy.choose(rt borrow pool, rt borrow none, 0, 0).is_ok(); then
+    stdio.println("FAIL unhealthy/draining/ejected fail closed"); return 1;
+  fi
+  if lb_policy.choose(rt borrow pool, rt borrow live, -1, 0).is_ok() ||
+    lb_policy.choose(rt borrow pool, rt borrow live, 0, -1).is_ok(); then
+    stdio.println("FAIL selection key admission"); return 1;
+  fi
+  let Array<lb_policy.Status> incomplete = new Array<lb_policy.Status>();
+  incomplete.add(new lb_policy.Status(true, false, false, 0));
+  if lb_policy.choose(rt borrow pool, rt borrow incomplete, 0, 0).is_ok(); then
+    stdio.println("FAIL status cardinality mismatch"); return 1;
+  fi
+
+  val String source_doc = yaml.replace_literal("weighted_round_robin", "source_hash");
+  val sourced = lb_yaml.parse(source_doc).unwrap();
+  val hash_once = lb_policy.choose(rt borrow sourced, rt borrow live, 0, 3);
+  val hash_twice = lb_policy.choose(rt borrow sourced, rt borrow live, 99, 3);
+  if hash_once.is_err() || hash_twice.is_err() ||
+    hash_once.unwrap().backend_name != "primary-b" ||
+    hash_twice.unwrap().backend_name != "primary-b"; then
+    stdio.println("FAIL stable source key"); return 1;
+  fi
+  val lc = lb_yaml.parse(yaml.replace_literal("weighted_round_robin",
+    "least_connections")).unwrap();
+  let Array<lb_policy.Status> loads = new Array<lb_policy.Status>();
+  loads.add(new lb_policy.Status(true, false, false, 3));
+  loads.add(new lb_policy.Status(true, false, false, 0));
+  loads.add(new lb_policy.Status(true, false, false, 0));
+  val choice = lb_policy.choose(rt borrow lc, rt borrow loads, 0, 0);
+  if choice.is_err() || choice.unwrap().backend_name != "primary-b"; then
+    stdio.println("FAIL weighted least connections"); return 1;
+  fi
+
+  if lb_yaml.parse(yaml.replace_literal("algorithm: weighted_round_robin",
+      "algorithm: RANDOM")).is_ok() ||
+    lb_yaml.parse(yaml.replace_literal("weight: 3", "weight: 0")).is_ok() ||
+    lb_yaml.parse(yaml.replace_literal("max_connections: 4",
+      "max_connections: 999999")).is_ok() ||
+    lb_yaml.parse(yaml.replace_literal("backup: false", "backup: maybe")).is_ok() ||
+    lb_yaml.parse(yaml.replace_literal("origin: http://a.example.test:8080",
+      "origin: http://user@a.example.test")).is_ok() ||
+    lb_yaml.parse(yaml.replace_literal("pool: api-pool",
+      "pool: api-pool\npool: evil")).is_ok() ||
+    lb_yaml.parse(yaml.replace_literal("primary-b", "primary-a")).is_ok() ||
+    lb_yaml.parse(yaml.replace_literal("b.example.test", "a.example.test")).is_ok() ||
+    lb_yaml.parse(yaml.replace_literal("weight: 3",
+      "weight: 3\n    weight: 4")).is_ok() ||
+    lb_yaml.parse(yaml.replace_literal("weight: 3",
+      "weight: &anchor 3")).is_ok() ||
+    lb_yaml.parse(yaml.replace_literal("  - name: primary-a",
+      "    - name: primary-a")).is_ok() ||
+    lb_yaml.parse(yaml + "unknown: value\n").is_ok() ||
+    lb_yaml.parse(yaml.replace_literal("version: ores.lb/v1",
+      "version: ores.lb/v2")).is_ok(); then
+    stdio.println("FAIL unsafe or unknown YAML admission"); return 1;
+  fi
+
+  stdio.println("PASS native typed LB selection/backup/capacity/YAML contract");
+  return 0;
+}
