@@ -45,7 +45,9 @@ pub routine main(): int {
     middleware_policy.evaluate(rt borrow guarded_config, "gate",
       "X-AUTH-TOKEN", "valid-token").unwrap() ||
     middleware_policy.evaluate(rt borrow guarded_config, "gate",
-      "x-auth-token", "").unwrap(); then
+      "x-auth-token", "").unwrap() ||
+    middleware_policy.evaluate(rt borrow guarded_config, "gate",
+      "x-auth-token", "   ").unwrap(); then
     stdio.println("FAIL unsafe require_header admitted by evaluator");
     return 1;
   fi
