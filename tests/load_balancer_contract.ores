@@ -86,6 +86,36 @@ pub routine main(): int {
     stdio.println("FAIL non-power-of-two weighted choice or cursor");
     return 1;
   fi
+  // Maximum admitted pool: 128 healthy backends * weight 100 = period 12,800.
+  // These vectors exercise the full bounded-cycle range in the Oreslang guest,
+  // not merely in an external arithmetic reference model.
+  let Array<load_balancer.Backend> ceiling = new Array<load_balancer.Backend>();
+  for (let i = 0; i < 128; i++) {
+    ceiling.add(new load_balancer.Backend("bounded",
+      "https://bounded.example.test:443", 100, 1000000, true, false));
+  }
+  val ceiling_last = load_balancer.choose(ceiling,
+    "weighted-round-robin", 12799);
+  val ceiling_reset = load_balancer.choose(ceiling,
+    "weighted-round-robin", 998400);
+  val ceiling_max = load_balancer.choose(ceiling,
+    "weighted-round-robin", 1000000);
+  if ceiling_last.is_err() || ceiling_reset.is_err() || ceiling_max.is_err(); then
+    stdio.println("FAIL maximum-period weighted selection"); return 1;
+  fi
+  val clast = ceiling_last.unwrap();
+  val creset = ceiling_reset.unwrap();
+  val cmax = ceiling_max.unwrap();
+  if clast.index != 127 || clast.next_cursor != 0 ||
+    creset.index != 0 || creset.next_cursor != 1 ||
+    cmax.index != 16 || cmax.next_cursor != 1601; then
+    stdio.println("FAIL maximum-period wraparound or cursor"); return 1;
+  fi
+  ceiling.add(new load_balancer.Backend("over-limit",
+    "https://over-limit.example.test:443", 100, 0, true, false));
+  if load_balancer.choose(ceiling, "weighted-round-robin", 0).is_ok(); then
+    stdio.println("FAIL maximum backend count admission"); return 1;
+  fi
   let Array<load_balancer.Backend> only_b = new Array<load_balancer.Backend>();
   only_b.add(new load_balancer.Backend("a", "https://a.example.test:443",
     3, 0, false, false));
