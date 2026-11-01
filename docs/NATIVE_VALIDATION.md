@@ -48,7 +48,7 @@ compiler, including `src/http_framing.ores`, `src/header_policy.ores`,
 as a ready server; it is intentionally not a production data plane.
 
 Execute these standalone native contract entrypoints for EACH source
-snapshot, preserving nonzero exits and actual output (11 baseline; 13 on
+snapshot, preserving nonzero exits and actual output (11 baseline; 14 on
 this reverse-LB feature branch):
 
 - `tests/data_layout_contract.ores`
@@ -56,6 +56,7 @@ this reverse-LB feature branch):
 - `tests/header_policy_contract.ores`
 - `tests/http_framing_contract.ores`
 - `tests/lb_health_contract.ores` (reverse-LB branch)
+- `tests/lb_ledger_contract.ores` (reverse-LB branch)
 - `tests/lb_policy_contract.ores` (reverse-LB branch)
 - `tests/middleware_generation_contract.ores`
 - `tests/middleware_manifest_contract.ores`
