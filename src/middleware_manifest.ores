@@ -4,6 +4,7 @@
 import module proxy_yaml from "./proxy_yaml";
 import module generation from "./generation";
 import module route_policy from "./route_policy";
+import module header_policy from "./header_policy";
 
 define module middleware_manifest as
   pub define class Manifest as
@@ -32,7 +33,9 @@ define module middleware_manifest as
         if rule.kind == "trace"; then continue; fi
         if rule.kind == "deny"; then return false; fi
         if rule.kind == "require_header"; then
-          if rule.header != header || value == ""; then return false; fi
+          if rule.header != header || value == "" ||
+            !header_policy.canonical_name(header) ||
+            !header_policy.value_safe(value); then return false; fi
           continue;
         fi
         // Unexpected/forged policy kinds never pass through by default.
