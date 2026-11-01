@@ -121,7 +121,13 @@ pub routine main(): int {
     3, 0, false, false));
   only_b.add(new load_balancer.Backend("b", "https://b.example.test:443",
     1, 0, true, false));
-  if load_balancer.choose(only_b, "weighted-round-robin", 123).unwrap().name != "b"; then
+  val healthy_result = load_balancer.choose(only_b,
+    "weighted-round-robin", 123);
+  if healthy_result.is_err(); then
+    stdio.println("FAIL passive health result"); return 1;
+  fi
+  val healthy_choice = healthy_result.unwrap();
+  if healthy_choice.name != "b"; then
     stdio.println("FAIL passive health exclusion"); return 1;
   fi
   val single = load_balancer.choose(only_b,
@@ -142,6 +148,149 @@ pub routine main(): int {
     load_balancer.choose(nodes, "least-active", -1).is_ok() ||
     load_balancer.choose(nodes, "random", 0).is_ok(); then
     stdio.println("FAIL bounded backend admission"); return 1;
+  fi
+
+  // Portable differential oracle: total weights 2+1+3 = 6. The expected
+  // slot is advanced independently, without invoking the production cycle
+  // helper, to detect wrong rounding, overflow and cursor wrap on backends.
+  let Array<load_balancer.Backend> oracle_nodes = new Array<load_balancer.Backend>();
+  oracle_nodes.add(new load_balancer.Backend("first", "https://first.example.test:443",
+    2, 100, true, false));
+  oracle_nodes.add(new load_balancer.Backend("middle", "https://middle.example.test:443",
+    1, 0, true, false));
+  oracle_nodes.add(new load_balancer.Backend("last", "https://last.example.test:443",
+    3, 50, true, false));
+  let int oracle_slot = 0;
+  for (let cursor = 0; cursor < 127; cursor++) {
+    val oracle_result = load_balancer.choose(oracle_nodes,
+      "weighted-round-robin", cursor);
+    if oracle_result.is_err(); then
+      stdio.println("FAIL portable oracle result"); return 1;
+    fi
+    val oracle_choice = oracle_result.unwrap();
+    if oracle_slot < 2; then
+      if oracle_choice.name != "first" || oracle_choice.index != 0; then
+        stdio.println("FAIL portable first bucket"); return 1;
+      fi
+    else
+      if oracle_slot == 2; then
+        if oracle_choice.name != "middle" || oracle_choice.index != 1; then
+          stdio.println("FAIL portable middle bucket"); return 1;
+        fi
+      else
+        if oracle_choice.name != "last" || oracle_choice.index != 2; then
+          stdio.println("FAIL portable last bucket"); return 1;
+        fi
+      fi
+    fi
+    oracle_slot = oracle_slot + 1;
+    if oracle_slot == 6; then oracle_slot = 0; fi
+    if oracle_choice.next_cursor != oracle_slot; then
+      stdio.println("FAIL portable oracle next cursor"); return 1;
+    fi
+  }
+
+  // A strict equal ratio is broken by stable input order, not by a backend's
+  // host-runtime sort ordering. A smaller ratio must then win.
+  let Array<load_balancer.Backend> ties = new Array<load_balancer.Backend>();
+  ties.add(new load_balancer.Backend("first", "https://first.example.test:443",
+    10, 50, true, false));
+  ties.add(new load_balancer.Backend("second", "https://second.example.test:443",
+    1, 5, true, false));
+  val tied = load_balancer.choose(ties, "least-active", 9);
+  if tied.is_err(); then
+    stdio.println("FAIL least-active tie result"); return 1;
+  fi
+  val tied_choice = tied.unwrap();
+  if tied_choice.index != 0 || tied_choice.next_cursor != 9; then
+    stdio.println("FAIL least-active deterministic tie"); return 1;
+  fi
+  ties.add(new load_balancer.Backend("third", "https://third.example.test:443",
+    2, 9, true, false));
+  val lowest = load_balancer.choose(ties, "least-active", 9);
+  if lowest.is_err(); then
+    stdio.println("FAIL least-active lower ratio result"); return 1;
+  fi
+  val lowest_choice = lowest.unwrap();
+  if lowest_choice.index != 2 || lowest_choice.next_cursor != 9; then
+    stdio.println("FAIL least-active lower ratio"); return 1;
+  fi
+
+  // 1,000,000 * 100 remains within int32; cross-products must not coerce
+  // to floating point, wrap or choose the higher active-to-weight ratio.
+  let Array<load_balancer.Backend> extremes = new Array<load_balancer.Backend>();
+  extremes.add(new load_balancer.Backend("full", "https://full.example.test:443",
+    100, 1000000, true, false));
+  extremes.add(new load_balancer.Backend("less", "https://less.example.test:443",
+    100, 999999, true, false));
+  val extremal = load_balancer.choose(extremes, "least-active", 1000000);
+  if extremal.is_err(); then
+    stdio.println("FAIL extreme weighted ratio result"); return 1;
+  fi
+  val extreme_choice = extremal.unwrap();
+  if extreme_choice.index != 1 || extreme_choice.next_cursor != 1000000; then
+    stdio.println("FAIL bounded integer cross-product"); return 1;
+  fi
+
+  // Excluded draining or unhealthy entries must never be selected, even
+  // when they have zero active requests and the highest configured weight.
+  let Array<load_balancer.Backend> filtered = new Array<load_balancer.Backend>();
+  filtered.add(new load_balancer.Backend("draining",
+    "https://draining.example.test:443", 100, 0, true, true));
+  filtered.add(new load_balancer.Backend("unhealthy",
+    "https://unhealthy.example.test:443", 100, 0, false, false));
+  filtered.add(new load_balancer.Backend("eligible",
+    "https://eligible.example.test:443", 1, 900, true, false));
+  val filtered_w = load_balancer.choose(filtered,
+    "weighted-round-robin", 1000000);
+  val filtered_l = load_balancer.choose(filtered, "least-active", 1000000);
+  if filtered_w.is_err() || filtered_l.is_err(); then
+    stdio.println("FAIL eligible backend result"); return 1;
+  fi
+  val filtered_wc = filtered_w.unwrap();
+  val filtered_lc = filtered_l.unwrap();
+  if filtered_wc.index != 2 || filtered_wc.next_cursor != 0 ||
+    filtered_lc.index != 2 || filtered_lc.next_cursor != 1000000; then
+    stdio.println("FAIL healthy non-draining exclusion"); return 1;
+  fi
+
+  // Exact negative cases for type/value boundary parity.
+  let Array<load_balancer.Backend> invalid_weight = new Array<load_balancer.Backend>();
+  invalid_weight.add(new load_balancer.Backend("zero",
+    "https://zero.example.test:443", 0, 0, true, false));
+  if load_balancer.choose(invalid_weight, "weighted-round-robin", 0).is_ok(); then
+    stdio.println("FAIL zero weight rejection"); return 1;
+  fi
+  let Array<load_balancer.Backend> invalid_high_weight = new Array<load_balancer.Backend>();
+  invalid_high_weight.add(new load_balancer.Backend("heavy",
+    "https://heavy.example.test:443", 101, 0, true, false));
+  if load_balancer.choose(invalid_high_weight,
+    "weighted-round-robin", 0).is_ok(); then
+    stdio.println("FAIL weight upper limit rejection"); return 1;
+  fi
+  let Array<load_balancer.Backend> invalid_active = new Array<load_balancer.Backend>();
+  invalid_active.add(new load_balancer.Backend("negative",
+    "https://negative.example.test:443", 1, -1, true, false));
+  if load_balancer.choose(invalid_active, "least-active", 0).is_ok(); then
+    stdio.println("FAIL negative active rejection"); return 1;
+  fi
+  let Array<load_balancer.Backend> invalid_high_active = new Array<load_balancer.Backend>();
+  invalid_high_active.add(new load_balancer.Backend("high",
+    "https://high.example.test:443", 1, 1000001, true, false));
+  if load_balancer.choose(invalid_high_active, "least-active", 0).is_ok(); then
+    stdio.println("FAIL active upper limit rejection"); return 1;
+  fi
+  let Array<load_balancer.Backend> invalid_name = new Array<load_balancer.Backend>();
+  invalid_name.add(new load_balancer.Backend("",
+    "https://noname.example.test:443", 1, 0, true, false));
+  if load_balancer.choose(invalid_name, "weighted-round-robin", 0).is_ok(); then
+    stdio.println("FAIL blank name rejection"); return 1;
+  fi
+  let Array<load_balancer.Backend> invalid_origin = new Array<load_balancer.Backend>();
+  invalid_origin.add(new load_balancer.Backend("no-origin", "",
+    1, 0, true, false));
+  if load_balancer.choose(invalid_origin, "least-active", 0).is_ok(); then
+    stdio.println("FAIL blank origin rejection"); return 1;
   fi
   stdio.println("PASS native load-balancing policy contract");
   return 0;
