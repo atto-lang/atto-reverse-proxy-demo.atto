@@ -217,10 +217,19 @@ def source_guards() -> None:
           "disconnect recovery remains local loopback only")
     check(r'\\r\\n' not in smoke and r'\r\n' in smoke,
           "wire fixture contains encoded CRLF delimiters without double escaping")
+    # A same-repository PR head is not a trusted runner authority. Keep both
+    # legacy self-hosted workflows inert until protected-main native admission.
+    legacy_native = read(".github/workflows/native-contracts.yml")
+    check("if: ${{ false }}" in legacy_native,
+          "PR-head native contracts cannot allocate self-hosted runner")
+    check("    if: >-" not in legacy_native,
+          "legacy native workflow has no alternate conditional runner path")
     wire = read(".github/workflows/actor-ingress-wire.yml")
     check("actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09" in wire
           and "actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961" in wire,
           "real-wire workflow dependencies pinned to reviewed v5 commits")
+    check("if: ${{ false }}" in wire,
+          "PR-head actor wire cannot allocate self-hosted runner")
     check("- 'src/**'" in wire and "- 'config/**'" in wire,
           "wire workflow covers all transitive source and configuration changes")
     wire_exec = "\n".join(

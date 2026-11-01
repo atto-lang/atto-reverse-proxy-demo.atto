@@ -16,15 +16,9 @@ concurrency:
 jobs:
   actor-ingress:
     # Do not schedule unapproved repository or fork source on the trusted runner.
-    if: >-
-      (github.event_name == 'pull_request' &&
-       github.event.repository.id == 1429954649 &&
-       github.event.pull_request.head.repo.id == 1429954649 &&
-       github.event.pull_request.base.repo.id == 1429954649 &&
-       github.event.pull_request.head.repo.full_name == github.repository) ||
-      (github.event_name == 'workflow_dispatch' &&
-       github.event.repository.id == 1429954649 &&
-       github.ref == 'refs/heads/main')
+    # SECURITY HOLD: this PR-head workflow must not execute on a self-hosted runner.
+    # Native admission belongs to independently reviewed protected-main frozen-source controls.
+    if: ${{ false }}
     runs-on: [self-hosted, linux, x64, oreslang-jdk25]
     timeout-minutes: 10
     steps:
