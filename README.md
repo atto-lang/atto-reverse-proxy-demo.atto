@@ -17,7 +17,7 @@ A native, **pure control-plane** coordinator in `src/generation.ores` exercises 
 
 ## Declarative load balancing (pure contract, not network forwarding)
 
-The experimental v1 YAML subset now optionally supports bounded, named `upstreams:` backend pools and `upstream: pool:NAME` route targets. The source-only Oreslang contract supplies weighted round-robin, weighted least-connections, fail-closed health and capacity selection, and a generation-fenced pure passive circuit-breaker oracle. No real health probes, atomic backend reservations or outbound forwarding are implemented. See [the example YAML](config/lb-example.yaml), [feature/limitations](docs/LOAD_BALANCING.md), and the new `tests/lb_policy_contract.ores` / `tests/lb_health_contract.ores`. No native pass is claimed.
+The experimental v2 YAML subset now optionally supports bounded, named `upstreams:` backend pools and `upstream: pool:NAME` route targets. The source-only Oreslang contract supplies weighted round-robin, weighted least-connections, fail-closed health and capacity selection, and a generation-fenced pure passive circuit-breaker oracle. No real health probes, atomic backend reservations or outbound forwarding are implemented. See [the example YAML](config/lb-example.yaml), [feature/limitations](docs/LOAD_BALANCING.md), and the new `tests/lb_policy_contract.ores` / `tests/lb_health_contract.ores`. No native pass is claimed.
 
 ## Native verification gate
 
