@@ -534,7 +534,8 @@ define module proxy_yaml as
     if middlewares.size > 128; then
       return Err("middleware definition budget exceeded");
     fi
-    if version != "ores.proxy/v1" || mode != expected_mode; then
+    if (version != "ores.proxy/v1" && version != "ores.proxy/v2") ||
+      mode != expected_mode; then
       return Err("invalid schema version or proxy mode");
     fi
     if !seen_listen || !seen_runtime || !safe_scalar(host) || !decimal(port) ||
@@ -547,12 +548,20 @@ define module proxy_yaml as
       return Err("v1 profile requires carriers=20 actors=100 max_inflight=1024");
     fi
     if mode == "reverse"; then
+      // New pool syntax is an explicit schema version, never silently enabled
+      // for documents parsed by older v1 controllers during rolling upgrades.
+      if (version == "ores.proxy/v1" && seen_upstreams) ||
+        (version == "ores.proxy/v2" &&
+         (!seen_upstreams || upstreams.size == 0)); then
+        return Err("reverse upstream pools require ores.proxy/v2");
+      fi
       if !seen_routes || routes.size == 0 || routes.size > 128; then
         return Err("reverse mode needs 1..128 routes");
       fi
       if seen_policy; then return Err("reverse policy section is not supported in v1"); fi
     else
-      if seen_routes || seen_upstreams || !seen_policy || deny_private != "true" ||
+      if version != "ores.proxy/v1" || seen_routes ||
+        seen_upstreams || !seen_policy || deny_private != "true" ||
         !safe_scalar(allowed) || connect != "443"; then
         return Err("forward mode requires deny_private=true, allow_domains and connect_ports=443");
       fi
