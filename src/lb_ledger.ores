@@ -43,6 +43,49 @@ define module lb_ledger as
       self.live = live;
     }
 
+    // Programmatic states and external tests can forge a constructor value.
+    // Every effectful transition revalidates the complete single-writer
+    // ledger; do not treat a public Ticket value as a wire capability.
+    fnc valid_state(): bool {
+      if !lb_policy.valid_pool(rt borrow self.pool) ||
+        self.epoch <= 0 || self.sequence <= 0 ||
+        self.sequence >= 2147483647 ||
+        self.next_nonce <= 0 || self.next_nonce >= 2147483647 ||
+        self.healthy.size != self.pool.origins.size ||
+        self.active.size != self.pool.origins.size ||
+        self.tickets.size != self.live.size ||
+        self.live.size > 1024; then return false; fi
+      let Array<int> counts = new Array<int>();
+      for (let i = 0; i < self.active.size; i++) {
+        if self.active.get(i) < 0 ||
+          self.active.get(i) > self.pool.max_connections; then
+          return false;
+        fi
+        counts.add(0);
+      }
+      for (let i = 0; i < self.live.size; i++) {
+        if self.live.get(i); then
+          val Ticket ticket = self.tickets.get(i);
+          if ticket.epoch != self.epoch || ticket.slot != i ||
+            ticket.nonce <= 0 || ticket.nonce >= self.next_nonce ||
+            ticket.backend < 0 || ticket.backend >= counts.size; then
+            return false;
+          fi
+          // Cannot mutate the totals alias in-place in an immutable snapshot.
+          let Array<int> next = new Array<int>();
+          for (let j = 0; j < counts.size; j++) {
+            if j == ticket.backend; then next.add(counts.get(j) + 1);
+            else next.add(counts.get(j)); fi
+          }
+          counts = next;
+        fi
+      }
+      for (let i = 0; i < counts.size; i++) {
+        if counts.get(i) != self.active.get(i); then return false; fi
+      }
+      return true;
+    }
+
     pub fnc active_at(int index): Result<int, String> {
       if index < 0 || index >= self.active.size; then
         return Err("invalid backend index");
@@ -69,7 +112,8 @@ define module lb_ledger as
     // first validate a generation-pinned health probe completion receipt.
     pub fnc set_health(int epoch, int expected_sequence,
                        int index, bool value): Result<Ledger, String> {
-      if epoch != self.epoch || expected_sequence != self.sequence ||
+      if !self.valid_state() ||
+        epoch != self.epoch || expected_sequence != self.sequence ||
         self.sequence >= 2147483646 ||
         index < 0 || index >= self.healthy.size; then
         return Err("stale health update or bad backend index");
@@ -88,7 +132,8 @@ define module lb_ledger as
     // from lb_policy.choose: reserve commits a distinct slot and nonce.
     pub fnc reserve(int epoch, int expected_sequence, int ordinal):
         Result<Admission, String> {
-      if epoch != self.epoch || expected_sequence != self.sequence ||
+      if !self.valid_state() ||
+        epoch != self.epoch || expected_sequence != self.sequence ||
         self.sequence >= 2147483646 ||
         self.next_nonce >= 2147483646 ||
         self.live_count() >= 1024; then
@@ -133,7 +178,8 @@ define module lb_ledger as
     // forged, duplicated or cross-epoch completion may free active capacity.
     pub fnc release(int epoch, int expected_sequence,
                     borrow Ticket ticket): Result<Ledger, String> {
-      if epoch != self.epoch || expected_sequence != self.sequence ||
+      if !self.valid_state() ||
+        epoch != self.epoch || expected_sequence != self.sequence ||
         self.sequence >= 2147483646 ||
         ticket.epoch != self.epoch ||
         ticket.slot < 0 || ticket.slot >= self.live.size ||
