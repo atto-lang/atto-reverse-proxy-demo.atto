@@ -10,10 +10,22 @@ fnc absolute_config_path_normalized(): TestOutcome {
     !config_path.valid("/etc//proxy/config.toml"),
     "safe absolute path accepted and doubled separator denied");
 }
+fnc relative_config_path_is_denied(): TestOutcome {
+  return expect_false(config_path.valid("proxy/config.toml"),
+    "configuration authority requires absolute POSIX paths");
+}
+
+fnc backslash_config_path_is_denied(): TestOutcome {
+  return expect_false(config_path.valid("/etc/proxy\\secret.toml"),
+    "backslashes must not bypass POSIX lexical path admission");
+}
+
 pub routine main(): void {
   val TestSuite suite = new TestSuite("reverse-proxy", arr[
     new TestCase("dotdot_config_path_denied", dotdot_config_path_denied, false, ""),
-    new TestCase("absolute_config_path_normalized", absolute_config_path_normalized, false, "")
+    new TestCase("absolute_config_path_normalized", absolute_config_path_normalized, false, ""),
+    new TestCase("relative_config_path_is_denied", relative_config_path_is_denied, false, ""),
+    new TestCase("backslash_config_path_is_denied", backslash_config_path_is_denied, false, "")
   ]);
   val TestOptions options = new TestOptions("", false, true);
   val RunSummary summary = run_suite(rt borrow suite, rt borrow options);
