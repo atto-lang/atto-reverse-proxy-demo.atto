@@ -144,8 +144,10 @@ define module lb_policy as
       return Ok(new Choice(best, winner.name, winner.origin, winner.backup));
     fi
 
-    val int ticket = if pool.algorithm == "source_hash" then
-      stable_hash % total_weight else sequence % total_weight;
+    let int ticket = sequence % total_weight;
+    if pool.algorithm == "source_hash"; then
+      ticket = stable_hash % total_weight;
+    fi
     let int accumulated = 0;
     for (let i = 0; i < observations.size; i++) {
       val backend = pool.backends.get(i);
