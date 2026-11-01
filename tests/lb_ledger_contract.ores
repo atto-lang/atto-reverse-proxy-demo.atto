@@ -25,6 +25,21 @@ pub routine main(): int {
     stdio.println("FAIL forged inconsistent ledger admitted"); return 1;
   fi
 
+  let Array<lb_ledger.Ticket> duplicate_nonces =
+    new Array<lb_ledger.Ticket>();
+  duplicate_nonces.add(new lb_ledger.Ticket(7, 0, 1, 0));
+  duplicate_nonces.add(new lb_ledger.Ticket(7, 1, 1, 1));
+  let Array<bool> duplicate_live = new Array<bool>();
+  duplicate_live.add(true); duplicate_live.add(true);
+  let Array<int> matching_counts = new Array<int>();
+  matching_counts.add(1); matching_counts.add(1);
+  val duplicate_ledger = new lb_ledger.Ledger(7, 1, 2, pool,
+    bad_health, matching_counts, duplicate_nonces, duplicate_live);
+  if duplicate_ledger.reserve(7, 1, 0).is_ok() ||
+     duplicate_ledger.release(7, 1, rt borrow duplicate_nonces.get(0)).is_ok(); then
+    stdio.println("FAIL duplicate cross-backend global nonces admitted"); return 1;
+  fi
+
   val initialized = lb_ledger.start(pool, 7);
   if initialized.is_err(); then stdio.println("FAIL ledger create"); return 1; fi
   val zero = initialized.unwrap();
