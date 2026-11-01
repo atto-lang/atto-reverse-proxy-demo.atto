@@ -20,6 +20,21 @@ pub routine main(): int {
     stdio.println("FAIL health generation, sequence or index fencing"); return 1;
   fi
   val one = zero.set_health(7, 1, 0, true).unwrap();
+  // Per-backend admission is checked after selection and then committed
+  // to a single-writer reservation ledger, not a racing metric snapshot.
+  let lb_ledger.Ledger saturated_state = one;
+  for (let i = 0; i < 16; i++) {
+    val granted = saturated_state.reserve(7, saturated_state.sequence, 0);
+    if granted.is_err(); then
+      stdio.println("FAIL backend capacity admission before 16"); return 1;
+    fi
+    saturated_state = granted.unwrap().state;
+  }
+  if saturated_state.active_at(0).unwrap() != 16 ||
+     saturated_state.live_count() != 16 ||
+     saturated_state.reserve(7, saturated_state.sequence, 0).is_ok(); then
+    stdio.println("FAIL 16-slot per-backend saturation"); return 1;
+  fi
   val two = one.set_health(7, 2, 1, true).unwrap();
   if two.sequence != 3 ||
      two.reserve(7, 2, 0).is_ok() ||
