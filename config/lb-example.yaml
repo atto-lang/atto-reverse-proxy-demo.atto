@@ -1,6 +1,6 @@
 # Declarative reverse-LB control-plane example only: NO LIVE UPSTREAM FORWARDING.
 # Strict Oreslang YAML subset; no anchors, aliases, tags, quoted or nested maps.
-version: ores.proxy/v1
+version: ores.proxy/v2
 mode: reverse
 listen:
   host: 127.0.0.1
