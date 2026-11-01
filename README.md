@@ -15,9 +15,15 @@ Exact-head compiler/contract execution is not yet available; no passing PR CI ch
 
 A native, **pure control-plane** coordinator in `src/generation.ores` exercises prepare/publish/abort fencing and snapshot epochs (see `tests/generation_contract.ores`). This does not publish a listener/actor generation or serve requests.
 
+## Declarative load-balancer control-plane (experimental)
+
+New native Oreslang modules `src/lb_policy.ores` and `src/lb_yaml.ores` provide a typed, fail-closed backend pool reference: weighted round robin, weighted least connections, deterministic source hash, primary/backup eligibility, health/drain/ejection exclusions and per-backend connection caps. A strict YAML subset example lives at `config/load_balancer.example.yaml`. The new `tests/lb_policy_contract.ores` contract must be compiled/executed by a secure native runner before any PASS claim.
+
+**The YAML pool file is not loaded by `src/main.ores` or `src/serve_reverse.ores`; route-to-pool binding, probes, stateful capacity reservations and safe upstream streaming are pending.** Read [the load-balancer roadmap](docs/LOAD_BALANCER.md) for the full HAProxy/NGINX feature and security backlog.
+
 ## Native verification gate
 
-The exact-head native compiler/contract workflow is [`.github/workflows/native-contracts.yml`](.github/workflows/native-contracts.yml); runner prerequisites, executed commands and non-production release gates are in [`docs/NATIVE_VALIDATION.md`](docs/NATIVE_VALIDATION.md). A queued or absent workflow is **not** a passed compiler test. Network serving remains disabled.
+The legacy [`.github/workflows/native-contracts.yml`](.github/workflows/native-contracts.yml) is retired and intentionally fails closed. Trusted native execution is pending independently reviewed security PR #20 and protected-main runner governance; prerequisites and non-production release gates are in [`docs/NATIVE_VALIDATION.md`](docs/NATIVE_VALIDATION.md). A queued or absent workflow is **not** a passed compiler test. Network serving remains disabled.
 
 ## Opt-in native Oreslang loopback ingress
 
