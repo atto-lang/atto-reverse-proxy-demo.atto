@@ -21,42 +21,44 @@ pub routine main(): int {
   counts.add(0); counts.add(0);
 
   for (let i = 0; i < 4; i++) {
-    val picked = lb_policy.choose(rt borrow pool, 7, healthy, counts, i);
+    val picked = lb_policy.choose(rt borrow pool, 7, rt borrow healthy, rt borrow counts, i);
     if picked.is_err(); then stdio.println("FAIL weighted scheduler"); return 1; fi
     val chosen = picked.unwrap();
-    if chosen.epoch != 7 || chosen.index != (i == 3 ? 1 : 0); then
+    let int expected = 0;
+    if i == 3; then expected = 1; fi
+    if chosen.epoch != 7 || chosen.index != expected; then
       stdio.println("FAIL expected 3:1 weights and pinned epoch"); return 1;
     fi
   }
-  if lb_policy.choose(rt borrow pool, 7, healthy, counts, 4).is_ok() ||
-     lb_policy.choose(rt borrow pool, 0, healthy, counts, 0).is_ok(); then
+  if lb_policy.choose(rt borrow pool, 7, rt borrow healthy, rt borrow counts, 4).is_ok() ||
+     lb_policy.choose(rt borrow pool, 0, rt borrow healthy, rt borrow counts, 0).is_ok(); then
     stdio.println("FAIL ordinal/epoch bounds"); return 1;
   fi
 
   let Array<bool> one_live = new Array<bool>();
   one_live.add(false); one_live.add(true);
-  if lb_policy.choose(rt borrow pool, 7, one_live, counts, 0).unwrap().index != 1 ||
-     lb_policy.choose(rt borrow pool, 7, one_live, counts, 1).is_ok(); then
+  if lb_policy.choose(rt borrow pool, 7, rt borrow one_live, rt borrow counts, 0).unwrap().index != 1 ||
+     lb_policy.choose(rt borrow pool, 7, rt borrow one_live, rt borrow counts, 1).is_ok(); then
     stdio.println("FAIL unhealthy failover or recomputed weight"); return 1;
   fi
   let Array<int> saturated = new Array<int>();
   saturated.add(128); saturated.add(0);
-  if lb_policy.choose(rt borrow pool, 7, healthy, saturated, 0).unwrap().index != 1; then
+  if lb_policy.choose(rt borrow pool, 7, rt borrow healthy, rt borrow saturated, 0).unwrap().index != 1; then
     stdio.println("FAIL capacity failover"); return 1;
   fi
   saturated = new Array<int>();
   saturated.add(128); saturated.add(128);
-  if lb_policy.choose(rt borrow pool, 7, healthy, saturated, 0).is_ok(); then
+  if lb_policy.choose(rt borrow pool, 7, rt borrow healthy, rt borrow saturated, 0).is_ok(); then
     stdio.println("FAIL all saturated must reject"); return 1;
   fi
   let Array<bool> none_live = new Array<bool>();
   none_live.add(false); none_live.add(false);
-  if lb_policy.choose(rt borrow pool, 7, none_live, counts, 0).is_ok(); then
+  if lb_policy.choose(rt borrow pool, 7, rt borrow none_live, rt borrow counts, 0).is_ok(); then
     stdio.println("FAIL all unhealthy must reject"); return 1;
   fi
   let Array<int> forged = new Array<int>();
   forged.add(-1); forged.add(0);
-  if lb_policy.choose(rt borrow pool, 7, healthy, forged, 0).is_ok(); then
+  if lb_policy.choose(rt borrow pool, 7, rt borrow healthy, rt borrow forged, 0).is_ok(); then
     stdio.println("FAIL negative active count"); return 1;
   fi
 
@@ -66,16 +68,16 @@ pub routine main(): int {
   val least = least_parsed.unwrap().upstreams.get(0);
   let Array<int> loads = new Array<int>();
   loads.add(9); loads.add(1);
-  if lb_policy.choose(rt borrow least, 7, healthy, loads, 0).unwrap().index != 1; then
+  if lb_policy.choose(rt borrow least, 7, rt borrow healthy, rt borrow loads, 0).unwrap().index != 1; then
     stdio.println("FAIL normalized weighted least connections"); return 1;
   fi
   loads = new Array<int>();
   loads.add(3); loads.add(1);
-  if lb_policy.choose(rt borrow least, 7, healthy, loads, 0).unwrap().index != 0 ||
-     lb_policy.choose(rt borrow least, 7, healthy, loads, 1).unwrap().index != 1; then
+  if lb_policy.choose(rt borrow least, 7, rt borrow healthy, rt borrow loads, 0).unwrap().index != 0 ||
+     lb_policy.choose(rt borrow least, 7, rt borrow healthy, rt borrow loads, 1).unwrap().index != 1; then
     stdio.println("FAIL rotating least-conn tie"); return 1;
   fi
-  if lb_policy.choose(rt borrow least, 7, healthy, loads, 2).is_ok(); then
+  if lb_policy.choose(rt borrow least, 7, rt borrow healthy, rt borrow loads, 2).is_ok(); then
     stdio.println("FAIL tie ordinal bounds"); return 1;
   fi
 
@@ -86,7 +88,7 @@ pub routine main(): int {
      proxy_yaml.parse(document.replace_literal("max_connections: 128", "max_connections: 2048"), "reverse").is_ok() ||
      proxy_yaml.parse(document.replace_literal("algorithm: weighted_round_robin", "algorithm: random"), "reverse").is_ok() ||
      proxy_yaml.parse(document.replace_literal("http://a.example.test:9000", "http://user@a.example.test:9000"), "reverse").is_ok() ||
-     proxy_yaml.parse(document.replace_literal("https://b.example.test:9443", "https://a.example.test:9000"), "reverse").is_ok() ||
+     proxy_yaml.parse(document.replace_literal("https://b.example.test:9443", "http://a.example.test:9000"), "reverse").is_ok() ||
      proxy_yaml.parse(document.replace_literal("    weights: 3,1\n", "    weights: 3,1\n    weights: 3,1\n"), "reverse").is_ok() ||
      proxy_yaml.parse(base, "reverse").is_ok(); then
     stdio.println("FAIL invalid pool or unresolved route reference"); return 1;
