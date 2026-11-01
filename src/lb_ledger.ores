@@ -71,6 +71,15 @@ define module lb_ledger as
             ticket.backend < 0 || ticket.backend >= counts.size; then
             return false;
           fi
+          // Global reservation nonces must be unique across all live
+          // slots; a forged public Ledger must not admit two different
+          // backends with one supposedly unique completion ticket.
+          for (let previous = 0; previous < i; previous++) {
+            if self.live.get(previous) &&
+              self.tickets.get(previous).nonce == ticket.nonce; then
+              return false;
+            fi
+          }
           // Cannot mutate the totals alias in-place in an immutable snapshot.
           let Array<int> next = new Array<int>();
           for (let j = 0; j < counts.size; j++) {
