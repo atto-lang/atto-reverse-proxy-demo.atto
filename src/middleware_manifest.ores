@@ -33,7 +33,7 @@ define module middleware_manifest as
         if rule.kind == "trace"; then continue; fi
         if rule.kind == "deny"; then return false; fi
         if rule.kind == "require_header"; then
-          if rule.header != header || value == "" ||
+          if rule.header != header || value.trim() == "" ||
             !header_policy.canonical_name(header) ||
             !header_policy.value_safe(value); then return false; fi
           continue;
