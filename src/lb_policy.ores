@@ -93,8 +93,9 @@ define module lb_policy as
       let int index = i + ordinal;
       if index >= pool.origins.size; then index = index - pool.origins.size; fi
       if available(rt borrow pool, rt borrow healthy, rt borrow active, index); then
-        if best < 0 ||
-          active.get(index) * pool.weights.get(best) <
+        if best < 0; then
+          best = index;
+        elif active.get(index) * pool.weights.get(best) <
           active.get(best) * pool.weights.get(index); then
           best = index;
         fi
