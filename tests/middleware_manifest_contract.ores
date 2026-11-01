@@ -52,7 +52,8 @@ pub routine main(): int {
     "kind: trace\n", "kind: require_header\n    header: x-auth-token\n");
   val guarded_open = generation.open(guarded_yaml, "forward");
   if guarded_open.is_err(); then stdio.println("FAIL guarded YAML"); return 1; fi
-  val guarded_snapshot = guarded_open.unwrap().snapshot().unwrap();
+  val guarded_coordinator = guarded_open.unwrap();
+  val guarded_snapshot = guarded_coordinator.snapshot().unwrap();
   val guarded_result = middleware_manifest.bind(rt borrow guarded_snapshot, "egress", "gate");
   if guarded_result.is_err(); then stdio.println("FAIL guarded bind"); return 1; fi
   val guarded_plan = guarded_result.unwrap();
