@@ -15,7 +15,9 @@ upstreams:
     max_connections: 128
 ```
 
-For the first contract, only `weighted_round_robin` and `least_conn` are admitted. Every pool needs 1–16 unique canonical HTTP(S) origins, one 1–16 integer weight per origin (strict nonzero decimal spelling), and `max_connections` in {16,32,64,128,256,512,1024}. There can be at most 64 pools. Repeated/unknown fields, duplicate names and unresolved pool references fail the **entire** config. Forward mode rejects `upstreams:`; forward CONNECT destination admission is a different security problem. No environment interpolation, imports, anchors, scripts, secrets or arbitrary expressions are accepted. `ores.proxy/v1` is retained to avoid disturbing direct-origin configuration.
+Pool-bearing documents must use `version: ores.proxy/v2`. The parser continues to accept legacy `ores.proxy/v1` direct origins but *rejects* any pools in v1, and rejects v2 in forward mode. This prevents older controllers from treating new configuration syntax as the old contract.
+
+For the first contract, only `weighted_round_robin` and `least_conn` are admitted. Every pool needs 1–16 unique canonical HTTP(S) origins, one 1–16 integer weight per origin (strict nonzero decimal spelling), and `max_connections` in {16,32,64,128,256,512,1024}. There can be at most 64 pools. Repeated/unknown fields, duplicate names and unresolved pool references fail the **entire** config. Forward mode rejects `upstreams:`; forward CONNECT destination admission is a different security problem. No environment interpolation, imports, anchors, scripts, secrets or arbitrary expressions are accepted. Legacy direct-origin `ores.proxy/v1` configuration remains accepted.
 
 ## Selection and generation fencing
 
@@ -33,7 +35,7 @@ For the first contract, only `weighted_round_robin` and `least_conn` are admitte
 | Weighted round-robin | Pure bounded selection | Smooth concurrent scheduling and atomic leases |
 | Least connections | Pure normalized selection | Actor-owned, generation-safe counters and releases |
 | Health & failover | Pure generation-fenced passive 3-failure/5000ms breaker, half-open probe state and external health bitmap | Actor-owned counters, timer/probes, atomic probe lease, configurable cooldown and slow-start |
-| Backend pools & routes | Fail-closed v1 YAML | Atomic generation publication, live reload and graceful drain |
+| Backend pools & routes | Fail-closed v2 pooled YAML and legacy v1 direct origins | Atomic generation publication, live reload and graceful drain |
 | Request routing | Canonical host/path matching | L7 streaming with status, headers, trailers, WebSocket and HTTP/2 |
 | Retries | None | Replay safety, idempotence, retry budget and no retry after commit |
 | Circuit breakers | None | Per-backend and per-route states, bounded queues |
