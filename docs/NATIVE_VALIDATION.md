@@ -47,13 +47,16 @@ compiler, including `src/http_framing.ores`, `src/header_policy.ores`,
 `src/proxy_wire.ores`, and their import closure. Do NOT run `src/main.ores`
 as a ready server; it is intentionally not a production data plane.
 
-Execute these 11 standalone native contract entrypoints for EACH source
-snapshot, preserving nonzero exits and actual output:
+Execute these standalone native contract entrypoints for EACH source
+snapshot, preserving nonzero exits and actual output (11 baseline; 13 on
+this reverse-LB feature branch):
 
 - `tests/data_layout_contract.ores`
 - `tests/generation_contract.ores`
 - `tests/header_policy_contract.ores`
 - `tests/http_framing_contract.ores`
+- `tests/lb_health_contract.ores` (reverse-LB branch)
+- `tests/lb_policy_contract.ores` (reverse-LB branch)
 - `tests/middleware_generation_contract.ores`
 - `tests/middleware_manifest_contract.ores`
 - `tests/path_admission_contract.ores`
