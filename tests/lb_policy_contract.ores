@@ -62,6 +62,20 @@ pub routine main(): int {
     stdio.println("FAIL negative active count"); return 1;
   fi
 
+  val round_robin = document.replace_literal("weighted_round_robin", "round_robin")
+    .replace_literal("weights: 3,1", "weights: 1,1");
+  val rr_parsed = proxy_yaml.parse(round_robin, "reverse");
+  if rr_parsed.is_err(); then stdio.println("FAIL round-robin admission"); return 1; fi
+  val rr_pool = rr_parsed.unwrap().upstreams.get(0);
+  if lb_policy.choose(rt borrow rr_pool, 7, rt borrow healthy,
+      rt borrow counts, 0).unwrap().index != 0 ||
+     lb_policy.choose(rt borrow rr_pool, 7, rt borrow healthy,
+      rt borrow counts, 1).unwrap().index != 1 ||
+     proxy_yaml.parse(document.replace_literal("weighted_round_robin", "round_robin"),
+      "reverse").is_ok(); then
+    stdio.println("FAIL unweighted RR or illegal nonunit weight"); return 1;
+  fi
+
   val least_yaml = document.replace_literal("weighted_round_robin", "least_conn");
   val least_parsed = proxy_yaml.parse(least_yaml, "reverse");
   if least_parsed.is_err(); then stdio.println("FAIL least-conn admission"); return 1; fi
