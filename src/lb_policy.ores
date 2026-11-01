@@ -1,0 +1,105 @@
+// Native Oreslang, pure load-balancer scheduling contract (NOT network I/O).
+// Only the supervising actor may own changing health and active counts.
+// Callers must atomically acquire a connection lease at the selected
+// generation before dialing; this pure function does not reserve capacity.
+import module proxy_yaml from "./proxy_yaml";
+
+define module lb_policy as
+  pub define class Choice as
+    pub val int epoch;
+    pub val int index;
+    pub val String origin;
+  end
+
+  // Config can be constructed programmatically: validate its shape again
+  // instead of trusting only proxy_yaml.parse() to have admitted values.
+  fnc valid_pool(borrow proxy_yaml.UpstreamPool pool): bool {
+    if !proxy_yaml.valid_header_name(pool.name) ||
+      (pool.algorithm != "weighted_round_robin" &&
+       pool.algorithm != "least_conn") ||
+      pool.max_connections <= 0 || pool.max_connections > 1024 ||
+      pool.origins.size == 0 || pool.origins.size > 16 ||
+      pool.origins.size != pool.weights.size; then
+      return false;
+    fi
+    for (let i = 0; i < pool.origins.size; i++) {
+      if !proxy_yaml.valid_upstream_origin(pool.origins.get(i)) ||
+        pool.weights.get(i) < 1 || pool.weights.get(i) > 16; then
+        return false;
+      fi
+      for (let j = 0; j < i; j++) {
+        if pool.origins.get(j) == pool.origins.get(i); then
+          return false;
+        fi
+      }
+    }
+    return true;
+  }
+
+  fnc available(borrow proxy_yaml.UpstreamPool pool,
+                Array<bool> healthy, Array<int> active, int index): bool {
+    return healthy.get(index) && active.get(index) < pool.max_connections;
+  }
+
+  // All metrics are pinned, same-epoch snapshots supplied by the owner.
+  // Never use raw client headers for health, counts or stickiness.
+  // weighted_round_robin: ordinal must be in [0, eligible weight sum).
+  // least_conn: ordinal must be in [0, backend count), rotating tie order.
+  // No eligible backend => Err, never a dead/saturated fallback.
+  pub fnc choose(borrow proxy_yaml.UpstreamPool pool, int epoch,
+                 Array<bool> healthy, Array<int> active,
+                 int ordinal): Result<Choice, String> {
+    if !valid_pool(rt borrow pool) || epoch <= 0 ||
+      healthy.size != pool.origins.size ||
+      active.size != pool.origins.size || ordinal < 0; then
+      return Err("invalid pool, epoch or metrics");
+    fi
+    for (const count of active) {
+      if count < 0 || count > pool.max_connections; then
+        return Err("invalid active-connection count");
+      fi
+    }
+    let int eligible_weight = 0;
+    for (let i = 0; i < pool.origins.size; i++) {
+      if available(rt borrow pool, healthy, active, i); then
+        eligible_weight = eligible_weight + pool.weights.get(i);
+      fi
+    }
+    if eligible_weight == 0; then return Err("no healthy unsaturated backend"); fi
+
+    if pool.algorithm == "weighted_round_robin"; then
+      if ordinal >= eligible_weight; then
+        return Err("weighted-round-robin ordinal out of range");
+      fi
+      let int offset = ordinal;
+      for (let i = 0; i < pool.origins.size; i++) {
+        if available(rt borrow pool, healthy, active, i); then
+          val int weight = pool.weights.get(i);
+          if offset < weight; then
+            return Ok(new Choice(epoch, i, pool.origins.get(i)));
+          fi
+          offset = offset - weight;
+        fi
+      }
+      return Err("no weighted choice");
+    fi
+
+    if ordinal >= pool.origins.size; then
+      return Err("least-connection tie ordinal out of range");
+    fi
+    let int best = -1;
+    for (let i = 0; i < pool.origins.size; i++) {
+      let int index = i + ordinal;
+      if index >= pool.origins.size; then index = index - pool.origins.size; fi
+      if available(rt borrow pool, healthy, active, index); then
+        if best < 0 ||
+          active.get(index) * pool.weights.get(best) <
+          active.get(best) * pool.weights.get(index); then
+          best = index;
+        fi
+      fi
+    }
+    if best < 0; then return Err("no least-connection choice"); fi
+    return Ok(new Choice(epoch, best, pool.origins.get(best)));
+  }
+end
