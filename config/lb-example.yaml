@@ -1,0 +1,22 @@
+# Declarative reverse-LB control-plane example only: NO LIVE UPSTREAM FORWARDING.
+# Strict Oreslang YAML subset; no anchors, aliases, tags, quoted or nested maps.
+version: ores.proxy/v1
+mode: reverse
+listen:
+  host: 127.0.0.1
+  port: 8080
+runtime:
+  carriers: 20
+  actors: 100
+  max_inflight: 1024
+routes:
+  - name: api
+    host: api.example.test
+    path_prefix: /api
+    upstream: pool:api-pool
+upstreams:
+  - name: api-pool
+    algorithm: weighted_round_robin
+    origins: https://node-a.example.test:9443,https://node-b.example.test:9443
+    weights: 3,1
+    max_connections: 128
