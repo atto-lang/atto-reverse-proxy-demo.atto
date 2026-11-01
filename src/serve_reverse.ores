@@ -74,6 +74,13 @@ pub async routine main(): int {
       continue;
     fi
     val target = matched.unwrap();
+    // Pool names are valid control-plane references, not dial authority.
+    // Never accidentally open egress or advertise working load balancing.
+    if target.upstream.starts_with("pool:"); then
+      exchange.respond(501, "text/plain; charset=utf-8",
+        "Upstream pool forwarding unavailable in this runtime");
+      continue;
+    fi
     if proxy_wire.upstream_origin(target.upstream).is_err(); then
       exchange.respond(502, "text/plain; charset=utf-8", "Invalid upstream origin");
       continue;
