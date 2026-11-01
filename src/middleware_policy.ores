@@ -2,6 +2,7 @@
 // This pure proof helper handles one canonical lookup for tests only; a live
 // HTTP adapter must provide complete per-request header lookup and enforcement.
 import module proxy_yaml from "./proxy_yaml";
+import module header_policy from "./header_policy";
 define module middleware_policy as
   pub fnc evaluate(borrow proxy_yaml.Config snapshot, String chain,
                    String supplied_header, String supplied_value): Result<bool, String> {
@@ -12,9 +13,12 @@ define module middleware_policy as
         if rule.name == id; then
           found = true;
           if rule.kind == "deny"; then return Ok(false); fi
-          if rule.kind == "require_header" &&
-            (supplied_header != rule.header || supplied_value == ""); then
-            return Ok(false);
+          if rule.kind == "require_header"; then
+            if supplied_header != rule.header || supplied_value == "" ||
+              !header_policy.canonical_name(supplied_header) ||
+              !header_policy.value_safe(supplied_value); then
+              return Ok(false);
+            fi
           fi
           // 'trace' only marks the tracing intent; it does not emit telemetry.
         fi
