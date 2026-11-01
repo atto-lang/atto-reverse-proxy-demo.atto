@@ -9,7 +9,7 @@ This is a *pure policy* contract. A nonempty `require_header` value is not suffi
 | Input | Snapshot evaluator | Pinned manifest |
 | --- | --- | --- |
 | exact canonical `x-auth-token`, nonempty safe value | allow | allow |
-| empty value | deny | deny |
+| empty or whitespace-only value | deny | deny |
 | uppercase/mismatched field name | deny | deny |
 | CRLF and forged field line | deny | deny |
 | newline-only injection | deny | deny |
