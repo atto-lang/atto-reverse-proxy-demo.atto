@@ -4,7 +4,7 @@ import module proxy_yaml from "../src/proxy_yaml";
 import module lb_policy from "../src/lb_policy";
 
 pub routine main(): int {
-  val String base = "version: ores.proxy/v1\nmode: reverse\nlisten:\n  host: 127.0.0.1\n  port: 8080\nruntime:\n  carriers: 20\n  actors: 100\n  max_inflight: 1024\nroutes:\n  - name: main\n    host: app.example.test\n    path_prefix: /\n    upstream: pool:app-pool\n";
+  val String base = "version: ores.proxy/v2\nmode: reverse\nlisten:\n  host: 127.0.0.1\n  port: 8080\nruntime:\n  carriers: 20\n  actors: 100\n  max_inflight: 1024\nroutes:\n  - name: main\n    host: app.example.test\n    path_prefix: /\n    upstream: pool:app-pool\n";
   val String pools = "upstreams:\n  - name: app-pool\n    algorithm: weighted_round_robin\n    origins: http://a.example.test:9000,https://b.example.test:9443\n    weights: 3,1\n    max_connections: 128\n";
   val String document = base + pools;
   val parsed = proxy_yaml.parse(document, "reverse");
@@ -93,11 +93,13 @@ pub routine main(): int {
      proxy_yaml.parse(base, "reverse").is_ok(); then
     stdio.println("FAIL invalid pool or unresolved route reference"); return 1;
   fi
-  if proxy_yaml.parse(document + pools.replace_literal("upstreams:\n", ""), "reverse").is_ok(); then
+  if proxy_yaml.parse(document.replace_literal("ores.proxy/v2", "ores.proxy/v1"), "reverse").is_ok() ||
+     proxy_yaml.parse(document + pools.replace_literal("upstreams:\n", ""), "reverse").is_ok(); then
     stdio.println("FAIL duplicate pool name"); return 1;
   fi
   // A raw origin must remain supported for backward-compatible v1 snapshots.
-  val direct = base.replace_literal("pool:app-pool", "http://a.example.test:9000");
+  val direct = base.replace_literal("pool:app-pool", "http://a.example.test:9000")
+    .replace_literal("ores.proxy/v2", "ores.proxy/v1");
   if proxy_yaml.parse(direct, "reverse").is_err(); then
     stdio.println("FAIL legacy direct upstream"); return 1;
   fi
