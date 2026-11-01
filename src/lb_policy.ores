@@ -1,0 +1,163 @@
+// Deterministic, actor-owned reference for an admitted upstream backend pool.
+// This is a PURE decision oracle, not a socket dialer, DNS resolver, health
+// monitor, breaker timer, or proof of an operating reverse proxy.
+// Observations must come from one supervisor-owned, generation-pinned snapshot.
+import module proxy_yaml from "./proxy_yaml";
+
+define module lb_policy as
+  pub define class Backend as
+    pub val String name;
+    pub val String origin;
+    pub val int weight;
+    pub val int max_connections;
+    pub val bool backup;
+  end
+
+  pub define class Pool as
+    pub val String name;
+    pub val String algorithm;
+    pub val Array<Backend> backends;
+  end
+
+  pub define class Status as
+    pub val bool healthy;
+    pub val bool draining;
+    pub val bool ejected;
+    pub val int inflight;
+  end
+
+  pub define class Choice as
+    pub val int index;
+    pub val String backend_name;
+    pub val String origin;
+    pub val bool backup;
+  end
+
+  // Validate the *entire* pool, including backends that would not be chosen.
+  // Origin syntax is not an SSRF/DNS/TLS authorization. Dialers must pin all
+  // resolved addresses and verify peer identity per request and generation.
+  pub fnc validate(borrow Pool pool): Result<bool, String> {
+    if !proxy_yaml.valid_header_name(pool.name) ||
+      !(pool.algorithm == "weighted_round_robin" ||
+        pool.algorithm == "least_connections" ||
+        pool.algorithm == "source_hash") ||
+      pool.backends.size == 0 || pool.backends.size > 32; then
+      return Err("invalid pool name, algorithm or backend count");
+    fi
+    let int sum = 0;
+    for (const backend of pool.backends) {
+      if !proxy_yaml.valid_header_name(backend.name) ||
+        !proxy_yaml.valid_upstream_origin(backend.origin) ||
+        backend.weight < 1 || backend.weight > 128 ||
+        backend.max_connections < 1 ||
+        backend.max_connections > 65536; then
+        return Err("invalid backend metadata");
+      fi
+      for (const other of pool.backends) {
+        if other.name == backend.name && other.origin != backend.origin; then
+          return Err("duplicate backend name");
+        fi
+      }
+      sum = sum + backend.weight;
+    }
+    // Also reject exact duplicate entries (same name and same origin).
+    for (let i = 0; i < pool.backends.size; i++) {
+      for (let j = i + 1; j < pool.backends.size; j++) {
+        if pool.backends.get(i).name == pool.backends.get(j).name ||
+          pool.backends.get(i).origin == pool.backends.get(j).origin; then
+          return Err("duplicate backend name or origin");
+        fi
+      }
+    }
+    if sum > 4096; then return Err("backend weight budget exceeded"); fi
+    return Ok(true);
+  }
+
+  // Only healthy, non-draining, non-ejected backends with spare capacity can
+  // receive new requests. Saturation fails closed; no implicit unbounded queue.
+  pub fnc eligible(borrow Backend backend, borrow Status status): bool {
+    return status.healthy && !status.draining && !status.ejected &&
+      status.inflight >= 0 && status.inflight < backend.max_connections;
+  }
+
+  // sequence is an actor-owned, nonnegative selection counter. stable_hash
+  // must come from a trusted canonical source (not an unauthenticated header).
+  // The weighted hash is deterministic but NOT consistent under pool changes.
+  // A caller must acquire capacity atomically *after* selection and retry
+  // against an updated observation if another actor changed the counter.
+  pub fnc choose(borrow Pool pool, borrow Array<Status> observations,
+                 int sequence, int stable_hash): Result<Choice, String> {
+    val verified = validate(rt borrow pool);
+    if verified.is_err(); then return Err("invalid backend pool"); fi
+    if observations.size != pool.backends.size ||
+      sequence < 0 || stable_hash < 0; then
+      return Err("invalid backend observations or selection key");
+    fi
+
+    let bool primary_ready = false;
+    for (let i = 0; i < observations.size; i++) {
+      val status = observations.get(i);
+      val backend = pool.backends.get(i);
+      if status.inflight < 0 || status.inflight > backend.max_connections; then
+        return Err("invalid observed inflight count");
+      fi
+      if !backend.backup && eligible(rt borrow backend, rt borrow status); then
+        primary_ready = true;
+      fi
+    }
+
+    // Primary/backup tiers are mutually exclusive. Backup only admits when
+    // there are zero usable primaries, not merely because the key maps there.
+    let int total_weight = 0;
+    for (let i = 0; i < observations.size; i++) {
+      val backend = pool.backends.get(i);
+      val status = observations.get(i);
+      if eligible(rt borrow backend, rt borrow status) &&
+        (backend.backup == !primary_ready); then
+        total_weight = total_weight + backend.weight;
+      fi
+    }
+    if total_weight == 0; then return Err("no healthy backend capacity"); fi
+
+    if pool.algorithm == "least_connections"; then
+      let int best = -1;
+      for (let i = 0; i < observations.size; i++) {
+        val candidate = pool.backends.get(i);
+        val current = observations.get(i);
+        if eligible(rt borrow candidate, rt borrow current) &&
+          candidate.backup == !primary_ready; then
+          if best < 0; then
+            best = i;
+          else
+            val chosen = pool.backends.get(best);
+            val chosen_status = observations.get(best);
+            // All operands bounded: max_conn <= 65536; weight <= 128.
+            if current.inflight * chosen.weight <
+              chosen_status.inflight * candidate.weight; then
+              best = i;
+            fi
+          fi
+        fi
+      }
+      if best < 0; then return Err("no eligible least-connections backend"); fi
+      val winner = pool.backends.get(best);
+      return Ok(new Choice(best, winner.name, winner.origin, winner.backup));
+    fi
+
+    val int ticket = if pool.algorithm == "source_hash" then
+      stable_hash % total_weight else sequence % total_weight;
+    let int accumulated = 0;
+    for (let i = 0; i < observations.size; i++) {
+      val backend = pool.backends.get(i);
+      val status = observations.get(i);
+      if eligible(rt borrow backend, rt borrow status) &&
+        backend.backup == !primary_ready; then
+        accumulated = accumulated + backend.weight;
+        if ticket < accumulated; then
+          return Ok(new Choice(i, backend.name, backend.origin, backend.backup));
+        fi
+      fi
+    }
+    return Err("selection invariant violated");
+  }
+end
