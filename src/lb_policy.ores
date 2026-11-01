@@ -13,7 +13,7 @@ define module lb_policy as
 
   // Config can be constructed programmatically: validate its shape again
   // instead of trusting only proxy_yaml.parse() to have admitted values.
-  fnc valid_pool(borrow proxy_yaml.UpstreamPool pool): bool {
+  pub fnc valid_pool(borrow proxy_yaml.UpstreamPool pool): bool {
     if !proxy_yaml.valid_header_name(pool.name) ||
       (pool.algorithm != "round_robin" &&
        pool.algorithm != "weighted_round_robin" &&
