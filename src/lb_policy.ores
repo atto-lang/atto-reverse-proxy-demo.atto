@@ -37,7 +37,8 @@ define module lb_policy as
   }
 
   fnc available(borrow proxy_yaml.UpstreamPool pool,
-                Array<bool> healthy, Array<int> active, int index): bool {
+                borrow Array<bool> healthy, borrow Array<int> active,
+                int index): bool {
     return healthy.get(index) && active.get(index) < pool.max_connections;
   }
 
@@ -47,7 +48,7 @@ define module lb_policy as
   // least_conn: ordinal must be in [0, backend count), rotating tie order.
   // No eligible backend => Err, never a dead/saturated fallback.
   pub fnc choose(borrow proxy_yaml.UpstreamPool pool, int epoch,
-                 Array<bool> healthy, Array<int> active,
+                 borrow Array<bool> healthy, borrow Array<int> active,
                  int ordinal): Result<Choice, String> {
     if !valid_pool(rt borrow pool) || epoch <= 0 ||
       healthy.size != pool.origins.size ||
@@ -61,7 +62,7 @@ define module lb_policy as
     }
     let int eligible_weight = 0;
     for (let i = 0; i < pool.origins.size; i++) {
-      if available(rt borrow pool, healthy, active, i); then
+      if available(rt borrow pool, rt borrow healthy, rt borrow active, i); then
         eligible_weight = eligible_weight + pool.weights.get(i);
       fi
     }
@@ -73,7 +74,7 @@ define module lb_policy as
       fi
       let int offset = ordinal;
       for (let i = 0; i < pool.origins.size; i++) {
-        if available(rt borrow pool, healthy, active, i); then
+        if available(rt borrow pool, rt borrow healthy, rt borrow active, i); then
           val int weight = pool.weights.get(i);
           if offset < weight; then
             return Ok(new Choice(epoch, i, pool.origins.get(i)));
@@ -91,7 +92,7 @@ define module lb_policy as
     for (let i = 0; i < pool.origins.size; i++) {
       let int index = i + ordinal;
       if index >= pool.origins.size; then index = index - pool.origins.size; fi
-      if available(rt borrow pool, healthy, active, index); then
+      if available(rt borrow pool, rt borrow healthy, rt borrow active, index); then
         if best < 0 ||
           active.get(index) * pool.weights.get(best) <
           active.get(best) * pool.weights.get(index); then
