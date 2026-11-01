@@ -120,7 +120,22 @@ define module lb_policy as
     if total_weight == 0; then return Err("no healthy backend capacity"); fi
 
     if pool.algorithm == "least_connections"; then
+      // Rotate exact weighted-score ties among ELIGIBLE servers, not all
+      // configured servers; excluded backup entries must not bias fairness.
+      let int eligible_count = 0;
+      for (let i = 0; i < observations.size; i++) {
+        val candidate = pool.backends.get(i);
+        val current = observations.get(i);
+        if eligible(rt borrow candidate, rt borrow current) &&
+          candidate.backup == !primary_ready; then
+          eligible_count = eligible_count + 1;
+        fi
+      }
+      if eligible_count == 0; then return Err("no eligible least-connections backend"); fi
+      val int tie_ticket = sequence % eligible_count;
       let int best = -1;
+      let int best_ordinal = -1;
+      let int ordinal = 0;
       for (let i = 0; i < observations.size; i++) {
         val candidate = pool.backends.get(i);
         val current = observations.get(i);
@@ -128,15 +143,22 @@ define module lb_policy as
           candidate.backup == !primary_ready; then
           if best < 0; then
             best = i;
+            best_ordinal = ordinal;
           else
             val chosen = pool.backends.get(best);
             val chosen_status = observations.get(best);
             // All operands bounded: max_conn <= 65536; weight <= 128.
-            if current.inflight * chosen.weight <
-              chosen_status.inflight * candidate.weight; then
+            val int lhs = current.inflight * chosen.weight;
+            val int rhs = chosen_status.inflight * candidate.weight;
+            if lhs < rhs ||
+              (lhs == rhs &&
+                (ordinal + eligible_count - tie_ticket) % eligible_count <
+                (best_ordinal + eligible_count - tie_ticket) % eligible_count); then
               best = i;
+              best_ordinal = ordinal;
             fi
           fi
+          ordinal = ordinal + 1;
         fi
       }
       if best < 0; then return Err("no eligible least-connections backend"); fi
