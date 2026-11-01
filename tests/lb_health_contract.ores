@@ -31,6 +31,25 @@ pub routine main(): int {
      lb_health.begin_probe(rt borrow probe, 11, 5, 5102).is_ok(); then
     stdio.println("FAIL half-open is single-probe only"); return 1;
   fi
+  if probe.next_probe_ms != 7102 ||
+     lb_health.expire_probe(rt borrow probe, 11, 5, 7101).is_ok() ||
+     lb_health.expire_probe(rt borrow probe, 12, 5, 7102).is_ok() ||
+     lb_health.expire_probe(rt borrow probe, 11, 4, 7102).is_ok(); then
+    stdio.println("FAIL half-open probe timeout admission"); return 1;
+  fi
+  val timed_out = lb_health.expire_probe(rt borrow probe, 11, 5, 7102).unwrap();
+  if lb_health.can_serve(rt borrow timed_out) ||
+     timed_out.phase != 1 ||
+     timed_out.next_probe_ms != 12102 ||
+     lb_health.expire_probe(rt borrow timed_out, 11, 6, 12102).is_ok() ||
+     lb_health.begin_probe(rt borrow timed_out, 11, 5, 12102).is_ok(); then
+    stdio.println("FAIL lost half-open probe reopen/cooldown fencing"); return 1;
+  fi
+  val retry_probe = lb_health.begin_probe(rt borrow timed_out, 11, 6, 12102);
+  if retry_probe.is_err() || retry_probe.unwrap().next_probe_ms != 14102; then
+    stdio.println("FAIL bounded retry probe deadline"); return 1;
+  fi
+
   val recovered = lb_health.succeed(rt borrow probe, 11, 5, 5103).unwrap();
   if !lb_health.can_serve(rt borrow recovered) ||
      recovered.failures != 0 || recovered.sequence != 6; then
