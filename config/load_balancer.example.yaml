@@ -1,0 +1,22 @@
+# Standalone typed backend-pool proposal; NOT loaded by src/main.ores.
+# Strict ores.lb/v1 subset; one backend per name, no YAML anchors or tags.
+# Application route to pool binding and real outbound transport are NOT ready.
+version: ores.lb/v1
+pool: api-pool
+algorithm: weighted_round_robin
+backends:
+  - name: api-a
+    origin: http://api-a.example.test:8080
+    weight: 3
+    max_connections: 128
+    backup: false
+  - name: api-b
+    origin: http://api-b.example.test:8080
+    weight: 1
+    max_connections: 128
+    backup: false
+  - name: disaster-backup
+    origin: https://backup.example.test:443
+    weight: 1
+    max_connections: 64
+    backup: true
