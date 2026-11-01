@@ -17,12 +17,13 @@ upstreams:
 
 Pool-bearing documents must use `version: ores.proxy/v2`. The parser continues to accept legacy `ores.proxy/v1` direct origins but *rejects* any pools in v1, and rejects v2 in forward mode. This prevents older controllers from treating new configuration syntax as the old contract.
 
-For the first contract, only `weighted_round_robin` and `least_conn` are admitted. Every pool needs 1–16 unique canonical HTTP(S) origins, one 1–16 integer weight per origin (strict nonzero decimal spelling), and `max_connections` in {16,32,64,128,256,512,1024}. There can be at most 64 pools. Repeated/unknown fields, duplicate names and unresolved pool references fail the **entire** config. Forward mode rejects `upstreams:`; forward CONNECT destination admission is a different security problem. No environment interpolation, imports, anchors, scripts, secrets or arbitrary expressions are accepted. Legacy direct-origin `ores.proxy/v1` configuration remains accepted.
+For the first contract, only `round_robin`, `weighted_round_robin` and `least_conn` are admitted. Every pool needs 1–16 unique canonical HTTP(S) origins, one 1–16 integer weight per origin (strict nonzero decimal spelling), and `max_connections` in {16,32,64,128,256,512,1024}. There can be at most 64 pools. Repeated/unknown fields, duplicate names and unresolved pool references fail the **entire** config. Forward mode rejects `upstreams:`; forward CONNECT destination admission is a different security problem. No environment interpolation, imports, anchors, scripts, secrets or arbitrary expressions are accepted. Legacy direct-origin `ores.proxy/v1` configuration remains accepted.
 
 ## Selection and generation fencing
 
 `lb_policy.choose(pool, epoch, healthy, active, ordinal)` is a pure Oreslang contract. Both metrics arrays align *exactly* with pool order and must be frozen from the same generation. A positive generation epoch is carried into `Choice`; the networking actor **must** revalidate the epoch and atomically reserve an individual backend slot *before* it connects. A pure choice is not an authorization or capacity reservation.
 
+- `round_robin`: exactly the same bounded oracle with all weights required to be 1, rejecting nonunit weights.
 - `weighted_round_robin`: ordinal is within the total **eligible** weight (0..sum-1); select over healthy, unsaturated backends only, with contiguous weighted slots. This is a deterministic **reference oracle**, not yet HAProxy-style smooth weighted RR under concurrency. Scheduler owner will manage a cyclic cursor, independent of transport requests.
 - `least_conn`: ordinal is within the backend count (0..count-1) and rotates equal-load tie order. Weighted comparison uses `active_i / weight_i` via bounded integer cross-products; unhealthy or full backends are skipped.
 - No healthy capacity: return `Err`; never silently revive a failed node or exceed a cap.
