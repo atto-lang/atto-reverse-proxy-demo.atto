@@ -1,0 +1,158 @@
+// Narrow declarative YAML pool schema. Strictly rejects unknown keys and
+// YAML features (anchors, tags, multiline scalars, flow syntax, quoting).
+// This is not a general YAML parser and is NOT loaded by the live listener.
+// Restricted numeric profile is intentional until checked integer parsing
+// and runtime enforcement have verified cross-backend implementations.
+import module lb_policy from "./lb_policy";
+import module proxy_yaml from "./proxy_yaml";
+
+define module lb_yaml as
+  fnc weight_value(String value): int {
+    if value == "1"; then return 1; fi
+    if value == "2"; then return 2; fi
+    if value == "3"; then return 3; fi
+    if value == "4"; then return 4; fi
+    if value == "5"; then return 5; fi
+    if value == "6"; then return 6; fi
+    if value == "7"; then return 7; fi
+    if value == "8"; then return 8; fi
+    return -1;
+  }
+
+  fnc capacity_value(String value): int {
+    if value == "1"; then return 1; fi
+    if value == "2"; then return 2; fi
+    if value == "4"; then return 4; fi
+    if value == "8"; then return 8; fi
+    if value == "16"; then return 16; fi
+    if value == "32"; then return 32; fi
+    if value == "64"; then return 64; fi
+    if value == "128"; then return 128; fi
+    if value == "256"; then return 256; fi
+    if value == "512"; then return 512; fi
+    if value == "1024"; then return 1024; fi
+    return -1;
+  }
+
+  fnc safe_scalar(String value): bool {
+    if value == "" || value.starts_with(" ") || value.ends_with(" ") ||
+      value.contains_literal("\r") || value.contains_literal("\t") ||
+      value.contains_literal("\n") || value.contains_literal("#") ||
+      value.contains_literal("&") || value.contains_literal("*") ||
+      value.contains_literal("!") || value.contains_literal("{") ||
+      value.contains_literal("}") || value.contains_literal("[") ||
+      value.contains_literal("]") || value.contains_literal("|") ||
+      value.contains_literal(">") || value.contains_literal("\\") ||
+      value.contains_literal("\"") || value.contains_literal("'"); then
+      return false;
+    fi
+    return true;
+  }
+
+  fnc backend(String name, String origin, String weight,
+              String connections, String backup): Result<lb_policy.Backend, String> {
+    val int w = weight_value(weight);
+    val int c = capacity_value(connections);
+    if !proxy_yaml.valid_header_name(name) ||
+      !proxy_yaml.valid_upstream_origin(origin) || w < 1 || c < 1 ||
+      !(backup == "true" || backup == "false"); then
+      return Err("invalid typed backend fields");
+    fi
+    return Ok(new lb_policy.Backend(name, origin, w, c, backup == "true"));
+  }
+
+  pub fnc parse(String yaml): Result<lb_policy.Pool, String> {
+    val lines = yaml.split_literal("\n");
+    if lines.size > 512; then return Err("upstream YAML line budget exceeded"); fi
+    let String version = "";
+    let String name = "";
+    let String algorithm = "";
+    let bool seen_backends = false;
+    let String section = "";
+    let String bn = "";
+    let String bo = "";
+    let String bw = "";
+    let String bc = "";
+    let String bb = "";
+    let Array<lb_policy.Backend> entries = new Array<lb_policy.Backend>();
+    for (const original of lines) {
+      if original.contains_literal("\r") ||
+        original.contains_literal("\t"); then
+        return Err("CR and tabs are forbidden");
+      fi
+      val String line = original.trim();
+      if line == "" || line.starts_with("#"); then continue; fi
+
+      if original.starts_with("  - "); then
+        if section != "backends"; then
+          return Err("unexpected YAML list item");
+        fi
+        if bn != ""; then
+          val prior = backend(bn, bo, bw, bc, bb);
+          if prior.is_err(); then return Err("invalid previous backend"); fi
+          entries.add(prior.unwrap());
+        fi
+        bn = ""; bo = ""; bw = ""; bc = ""; bb = "";
+        val parts = line.split_literal(": ");
+        if parts.size != 2 || parts.get(0) != "- name" ||
+          !safe_scalar(parts.get(1)); then
+          return Err("backend list needs '- name: SAFE_NAME'");
+        fi
+        bn = parts.get(1);
+        continue;
+      fi
+
+      if original.starts_with("    "); then
+        if original.starts_with("     ") || section != "backends" ||
+          bn == ""; then return Err("invalid backend indentation"); fi
+        val parts = line.split_literal(": ");
+        if parts.size != 2 || !safe_scalar(parts.get(1)); then
+          return Err("invalid backend field");
+        fi
+        val String key = parts.get(0);
+        val String value = parts.get(1);
+        if key == "origin" && bo == ""; then bo = value;
+        elif key == "weight" && bw == ""; then bw = value;
+        elif key == "max_connections" && bc == ""; then bc = value;
+        elif key == "backup" && bb == ""; then bb = value;
+        else return Err("unknown or duplicate backend field"); fi
+        continue;
+      fi
+      if original.starts_with(" ") || original != line; then
+        return Err("invalid YAML indentation");
+      fi
+      if line == "backends:"; then
+        if seen_backends; then return Err("duplicate backend section"); fi
+        seen_backends = true;
+        section = "backends";
+        continue;
+      fi
+      // Require all scalar keys BEFORE backends: prevents duplicate/late
+      // declarations and implicit resets after reading list elements.
+      if seen_backends; then return Err("root key after backends"); fi
+      val parts = line.split_literal(": ");
+      if parts.size != 2 || !safe_scalar(parts.get(1)); then
+        return Err("invalid root YAML entry");
+      fi
+      val String key = parts.get(0);
+      val String value = parts.get(1);
+      if key == "version" && version == ""; then version = value;
+      elif key == "pool" && name == ""; then name = value;
+      elif key == "algorithm" && algorithm == ""; then algorithm = value;
+      else return Err("unknown or duplicate root field"); fi
+    }
+
+    if bn != ""; then
+      val last = backend(bn, bo, bw, bc, bb);
+      if last.is_err(); then return Err("invalid last backend"); fi
+      entries.add(last.unwrap());
+    fi
+    if version != "ores.lb/v1" || !seen_backends; then
+      return Err("invalid LB version or missing backends");
+    fi
+    val result = new lb_policy.Pool(name, algorithm, entries);
+    val checked = lb_policy.validate(rt borrow result);
+    if checked.is_err(); then return Err("invalid backend pool"); fi
+    return Ok(result);
+  }
+end
