@@ -1,0 +1,75 @@
+// Single-writer LB reservation and generation/nonce contract; NOT socket I/O.
+import module proxy_yaml from "../src/proxy_yaml";
+import module lb_ledger from "../src/lb_ledger";
+
+pub routine main(): int {
+  val String yaml = "version: ores.proxy/v2\nmode: reverse\nlisten:\n  host: 127.0.0.1\n  port: 8080\nruntime:\n  carriers: 20\n  actors: 100\n  max_inflight: 1024\nroutes:\n  - name: app\n    host: app.example.test\n    path_prefix: /\n    upstream: pool:app\nupstreams:\n  - name: app\n    algorithm: round_robin\n    origins: https://one.example.test:443,https://two.example.test:443\n    weights: 1,1\n    max_connections: 16\n";
+  val parsed = proxy_yaml.parse(yaml, "reverse");
+  if parsed.is_err(); then stdio.println("FAIL parsed LB fixture"); return 1; fi
+  val pool = parsed.unwrap().upstreams.get(0);
+  val initialized = lb_ledger.start(pool, 7);
+  if initialized.is_err(); then stdio.println("FAIL ledger create"); return 1; fi
+  val zero = initialized.unwrap();
+  if zero.reserve(7, 1, 0).is_ok() || zero.live_count() != 0 ||
+    zero.healthy_at(0).unwrap() || zero.healthy_at(1).unwrap(); then
+    stdio.println("FAIL unprobed backend incorrectly live"); return 1;
+  fi
+  if zero.set_health(8, 1, 0, true).is_ok() ||
+     zero.set_health(7, 2, 0, true).is_ok() ||
+     zero.set_health(7, 1, 2, true).is_ok(); then
+    stdio.println("FAIL health generation, sequence or index fencing"); return 1;
+  fi
+  val one = zero.set_health(7, 1, 0, true).unwrap();
+  val two = one.set_health(7, 2, 1, true).unwrap();
+  if two.sequence != 3 ||
+     two.reserve(7, 2, 0).is_ok() ||
+     two.reserve(8, 3, 0).is_ok(); then
+    stdio.println("FAIL reservation generation/sequence"); return 1;
+  fi
+  val first = two.reserve(7, 3, 0);
+  if first.is_err(); then stdio.println("FAIL initial reserve"); return 1; fi
+  val a = first.unwrap();
+  val second = a.state.reserve(7, 4, 1);
+  if second.is_err(); then stdio.println("FAIL second reserve"); return 1; fi
+  val b = second.unwrap();
+  if a.ticket.backend != 0 || b.ticket.backend != 1 ||
+     a.ticket.slot == b.ticket.slot || b.state.live_count() != 2 ||
+     b.state.active_at(0).unwrap() != 1 ||
+     b.state.active_at(1).unwrap() != 1; then
+    stdio.println("FAIL distinct backend reservations"); return 1;
+  fi
+  val wrong = new lb_ledger.Ticket(7, a.ticket.slot,
+    a.ticket.nonce, b.ticket.backend);
+  val forged = new lb_ledger.Ticket(7, a.ticket.slot,
+    a.ticket.nonce + 1, a.ticket.backend);
+  if b.state.release(8, 5, rt borrow a.ticket).is_ok() ||
+     b.state.release(7, 4, rt borrow a.ticket).is_ok() ||
+     b.state.release(7, 5, rt borrow wrong).is_ok() ||
+     b.state.release(7, 5, rt borrow forged).is_ok(); then
+    stdio.println("FAIL forged, cross-backend or stale release"); return 1;
+  fi
+  val released = b.state.release(7, 5, rt borrow a.ticket);
+  if released.is_err(); then stdio.println("FAIL valid release"); return 1; fi
+  val c = released.unwrap();
+  if c.live_count() != 1 || c.active_at(0).unwrap() != 0 ||
+     c.release(7, 6, rt borrow a.ticket).is_ok(); then
+    stdio.println("FAIL duplicate release or incorrect count"); return 1;
+  fi
+  val recycled = c.reserve(7, 6, 0).unwrap();
+  if recycled.ticket.slot != a.ticket.slot ||
+     recycled.ticket.nonce == a.ticket.nonce ||
+     recycled.state.release(7, 7, rt borrow a.ticket).is_ok(); then
+    stdio.println("FAIL recycled slot ABA"); return 1;
+  fi
+  val offline = recycled.state.set_health(7, 7, 0, false).unwrap();
+  if offline.reserve(7, 8, 0).unwrap().ticket.backend != 1 ||
+     offline.reserve(7, 8, 1).is_ok(); then
+    stdio.println("FAIL backend health failover"); return 1;
+  fi
+  val both_offline = offline.set_health(7, 8, 1, false).unwrap();
+  if both_offline.reserve(7, 9, 0).is_ok(); then
+    stdio.println("FAIL all-offline fail closed"); return 1;
+  fi
+  stdio.println("PASS atomic pure LB reservations, nonces, epochs and offline failover");
+  return 0;
+}
