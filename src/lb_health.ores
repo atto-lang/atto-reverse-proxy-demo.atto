@@ -19,7 +19,8 @@ define module lb_health as
   // Only fully closed circuits may serve traffic. Half-open is probe-only.
   pub fnc can_serve(borrow State state): bool {
     return state.epoch > 0 && state.phase == 0 &&
-      state.sequence > 0 && state.failures >= 0;
+      state.sequence > 0 && state.failures >= 0 &&
+      state.failures < 3 && state.next_probe_ms == 0;
   }
 
   fnc valid_event(borrow State state, int epoch, int expected_sequence,
@@ -28,7 +29,12 @@ define module lb_health as
       state.sequence == expected_sequence && expected_sequence > 0 &&
       expected_sequence < 2147483647 &&
       now_ms >= 0 && now_ms <= 2147478647 &&
-      state.phase >= 0 && state.phase <= 2;
+      ((state.phase == 0 && state.failures >= 0 &&
+        state.failures < 3 && state.next_probe_ms == 0) ||
+       (state.phase == 1 && state.failures == 3 &&
+        state.next_probe_ms > 0) ||
+       (state.phase == 2 && state.failures == 3 &&
+        state.next_probe_ms > 0));
   }
 
   // Three consecutive failures open the breaker for 5000ms. Values are
