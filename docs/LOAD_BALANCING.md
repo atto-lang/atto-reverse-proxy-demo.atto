@@ -32,7 +32,7 @@ For the first contract, only `weighted_round_robin` and `least_conn` are admitte
 | --- | --- | --- |
 | Weighted round-robin | Pure bounded selection | Smooth concurrent scheduling and atomic leases |
 | Least connections | Pure normalized selection | Actor-owned, generation-safe counters and releases |
-| Health & failover | External health bitmap input | Active probes, passive failures, cooldown and slow-start |
+| Health & failover | Pure generation-fenced passive 3-failure/5000ms breaker, half-open probe state and external health bitmap | Actor-owned counters, timer/probes, atomic probe lease, configurable cooldown and slow-start |
 | Backend pools & routes | Fail-closed v1 YAML | Atomic generation publication, live reload and graceful drain |
 | Request routing | Canonical host/path matching | L7 streaming with status, headers, trailers, WebSocket and HTTP/2 |
 | Retries | None | Replay safety, idempotence, retry budget and no retry after commit |
@@ -45,6 +45,8 @@ For the first contract, only `weighted_round_robin` and `least_conn` are admitte
 | Static content/cache | None | Separate explicit scope and cache correctness/security policies |
 
 This is an architecture target inspired by official HAProxy and NGINX documentation, **not a claim of performance or feature parity**.
+
+The `lb_health` module is a **single-owner immutable state oracle** (closed → open → half-open → closed/open) with sequence/epoch fencing; it does not schedule health checks, acquire a probe lease, publish a shared health table or guarantee concurrency-safe execution. The production scheduler must combine it with atomic actor-owned reservations and fully verified outbound transport.
 
 ## Release/CI gates
 
