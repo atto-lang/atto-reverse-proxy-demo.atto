@@ -249,7 +249,8 @@ define module proxy_yaml as
                     String weights, String max_connections):
       Result<UpstreamPool, String> {
     if !valid_header_name(name) ||
-      (algorithm != "weighted_round_robin" && algorithm != "least_conn") ||
+      (algorithm != "round_robin" &&
+       algorithm != "weighted_round_robin" && algorithm != "least_conn") ||
       !safe_scalar(origins) || !safe_scalar(weights); then
       return Err("pool requires canonical name, algorithm, origins and weights");
     fi
@@ -264,7 +265,8 @@ define module proxy_yaml as
     for (let i = 0; i < raw_origins.size; i++) {
       val String origin = raw_origins.get(i);
       val int weight = pool_weight(raw_weights.get(i));
-      if !valid_upstream_origin(origin) || weight <= 0; then
+      if !valid_upstream_origin(origin) || weight <= 0 ||
+        (algorithm == "round_robin" && weight != 1); then
         return Err("invalid pool backend origin/weight");
       fi
       for (const previous of destinations) {
