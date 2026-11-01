@@ -59,6 +59,7 @@ pub routine main(): int {
   val guarded_plan = guarded_result.unwrap();
   if !guarded_plan.permitted("x-auth-token", "valid-token") ||
     guarded_plan.permitted("x-auth-token", "") ||
+    guarded_plan.permitted("x-auth-token", "   ") ||
     guarded_plan.permitted("X-AUTH-TOKEN", "valid-token") ||
     guarded_plan.permitted("x-auth-token", "valid\r\nx-admin: true") ||
     guarded_plan.permitted("x-auth-token", "valid\nforged") ||
