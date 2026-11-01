@@ -44,10 +44,11 @@ No mock parser or synthetic Oreslang executable may satisfy this gate.
 
 Check **every** tracked `src/*.ores` and `tests/*.ores` with the real
 compiler, including `src/http_framing.ores`, `src/header_policy.ores`,
-`src/proxy_wire.ores`, and their import closure. Do NOT run `src/main.ores`
+`src/proxy_wire.ores`, `src/lb_policy.ores`, `src/lb_yaml.ores`,
+and their import closure. Do NOT run `src/main.ores`
 as a ready server; it is intentionally not a production data plane.
 
-Execute these 11 standalone native contract entrypoints for EACH source
+Execute these 12 standalone native contract entrypoints for EACH source
 snapshot, preserving nonzero exits and actual output:
 
 - `tests/data_layout_contract.ores`
@@ -59,6 +60,7 @@ snapshot, preserving nonzero exits and actual output:
 - `tests/path_admission_contract.ores`
 - `tests/slot_lifecycle_contract.ores`
 - `tests/slot_pool_contract.ores`
+- `tests/lb_policy_contract.ores`
 - `tests/wire_contract.ores`
 - `tests/yaml_policy_contract.ores`
 
