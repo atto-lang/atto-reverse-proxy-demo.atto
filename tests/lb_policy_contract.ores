@@ -64,6 +64,13 @@ pub routine main(): int {
   fi
   val lc = lb_yaml.parse(yaml.replace_literal("weighted_round_robin",
     "least_connections")).unwrap();
+  val tie_a = lb_policy.choose(rt borrow lc, rt borrow live, 0, 0);
+  val tie_b = lb_policy.choose(rt borrow lc, rt borrow live, 1, 0);
+  if tie_a.is_err() || tie_b.is_err() ||
+    tie_a.unwrap().backend_name != "primary-a" ||
+    tie_b.unwrap().backend_name != "primary-b"; then
+    stdio.println("FAIL least-connections eligible tie rotation"); return 1;
+  fi
   let Array<lb_policy.Status> loads = new Array<lb_policy.Status>();
   loads.add(new lb_policy.Status(true, false, false, 3));
   loads.add(new lb_policy.Status(true, false, false, 0));
