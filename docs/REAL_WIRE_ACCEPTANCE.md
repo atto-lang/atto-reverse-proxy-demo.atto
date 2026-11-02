@@ -28,7 +28,10 @@ claim, are required. Streaming dispatches may range from one to five; at
 least one stream must be claimed, and claims cannot exceed dispatches because
 four abandoned streaming clients can cancel before actor claim. Unknown
 receipt markers, extra/missing claims, symlinked logs, and logs over 1 MiB
-are rejected by a source-free verifier with **21 synthetic test cases**.
+are rejected by a source-free verifier with **24 synthetic test cases**.
+The verifier also rejects an actor claim appearing before its corresponding
+supervisor dispatch in the observed log, even if final counts match. This is
+a log-order invariant, not a unique-request or cancellation proof.
 
 **Markers prove the code reached the point after claim if the native job
 actually runs and produces the receipts. They do not prove task retirement,

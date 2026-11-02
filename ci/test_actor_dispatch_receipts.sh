@@ -47,6 +47,11 @@ emit_valid; printf '%s\n' "$sd" >> "$log"; expect_pass abandoned_stream_dispatch
 emit_valid; printf '%s\n%s\n' "$sd" "$sc" >> "$log"; expect_pass second_stream_claim
 emit_valid; for _ in 1 2 3 4; do printf '%s\n' "$sd" >> "$log"; done; expect_pass five_stream_dispatches
 emit_valid; for _ in 1 2 3 4; do printf '%s\n%s\n' "$sd" "$sc" >> "$log"; done; expect_pass five_stream_claims
+# Equal final counts cannot excuse a claim preceding its own dispatch.
+# Swap the first pair for each actor type without changing any totals.
+emit_valid; /usr/bin/sed -i '1s/DISPATCH/CLAIM/;2s/CLAIM/DISPATCH/' "$log"; expect_fail claim_precedes_hello_dispatch
+emit_valid; /usr/bin/sed -i '7s/DISPATCH/CLAIM/;8s/CLAIM/DISPATCH/' "$log"; expect_fail claim_precedes_fallback_dispatch
+emit_valid; /usr/bin/sed -i '9s/DISPATCH/CLAIM/;10s/CLAIM/DISPATCH/' "$log"; expect_fail claim_precedes_stream_dispatch
 emit_valid; printf '%s\n' "$hd" >> "$log"; expect_fail unexpected_hello_dispatch
 emit_valid; remove_first "$hd"; expect_fail missing_hello_dispatch
 emit_valid; printf '%s\n' "$hc" >> "$log"; expect_fail unexpected_hello_claim
@@ -70,4 +75,4 @@ if /bin/bash --noprofile --norc "$verifier" "$scratch/missing" > /dev/null 2>&1;
   echo 'FAIL accepted missing receipt log' >&2; exit 1
 fi
 echo 'PASS rejected synthetic actor receipts: missing_log'
-echo 'SOURCE_FREE_ACTOR_CLAIM_RECEIPT_TESTS_PASS=21/21; NATIVE_ORESLANG_NOT_EXECUTED'
+echo 'SOURCE_FREE_ACTOR_CLAIM_RECEIPT_TESTS_PASS=24/24; NATIVE_ORESLANG_NOT_EXECUTED'

@@ -42,5 +42,29 @@ if (( hello != 3 || hello_claim != 3 || fallback != 1 || fallback_claim != 1 ||
     "$hello_claim" "$hello" "$fallback_claim" "$fallback" "$stream_claim" "$stream" "$all" >&2
   exit 1
 fi
+# A matching aggregate count alone can conceal claims logged before any
+# supervisor dispatch. Each actor's observed claim prefix must be bounded by
+# its dispatch prefix. This is a log-order check, not a proof of task retirement.
+hello_seen=0
+hello_claim_seen=0
+stream_seen=0
+stream_claim_seen=0
+fallback_seen=0
+fallback_claim_seen=0
+while IFS= read -r line || [[ -n "$line" ]]; do
+  case "$line" in
+    ORES_PROXY_TEST_DISPATCH_HELLO) ((hello_seen+=1)) ;;
+    ORES_PROXY_TEST_CLAIM_HELLO) ((hello_claim_seen+=1)) ;;
+    ORES_PROXY_TEST_DISPATCH_STREAM) ((stream_seen+=1)) ;;
+    ORES_PROXY_TEST_CLAIM_STREAM) ((stream_claim_seen+=1)) ;;
+    ORES_PROXY_TEST_DISPATCH_FALLBACK) ((fallback_seen+=1)) ;;
+    ORES_PROXY_TEST_CLAIM_FALLBACK) ((fallback_claim_seen+=1)) ;;
+  esac
+  if (( hello_claim_seen > hello_seen || stream_claim_seen > stream_seen ||
+        fallback_claim_seen > fallback_seen )); then
+    echo 'FAIL actor claim precedes supervisor dispatch in receipt log' >&2
+    exit 1
+  fi
+done < "$log"
 printf 'PASS actor claim/dispatch receipts hello=%s/%s fallback=%s/%s stream=%s/%s; NOT task-retirement proof\n' \
   "$hello_claim" "$hello" "$fallback_claim" "$fallback" "$stream_claim" "$stream"

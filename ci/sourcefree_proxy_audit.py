@@ -308,12 +308,19 @@ def source_guards() -> None:
           and "grep -Ec '^ORES_PROXY_TEST_(DISPATCH|CLAIM)_'" in verifier
           and '|| -L "$log"' in verifier,
           "host verifier denies symlinked, oversized and unknown-receipt logs")
-    check("SOURCE_FREE_ACTOR_CLAIM_RECEIPT_TESTS_PASS=21/21" in synthetic_tests
+    check("hello_claim_seen > hello_seen" in verifier
+          and "stream_claim_seen > stream_seen" in verifier
+          and "fallback_claim_seen > fallback_seen" in verifier,
+          "host verifier rejects out-of-order actor claims")
+    check("SOURCE_FREE_ACTOR_CLAIM_RECEIPT_TESTS_PASS=24/24" in synthetic_tests
           and "unexpected_hello_claim" in synthetic_tests
           and "missing_fallback_claim" in synthetic_tests
           and "stream_claim_exceeds_dispatch" in synthetic_tests
-          and "unknown_claim_marker" in synthetic_tests,
-          "21 synthetic host-side claim and dispatch receipt tests retained")
+          and "unknown_claim_marker" in synthetic_tests
+           and "claim_precedes_hello_dispatch" in synthetic_tests
+           and "claim_precedes_fallback_dispatch" in synthetic_tests
+           and "claim_precedes_stream_dispatch" in synthetic_tests,
+          "24 synthetic host-side claim and dispatch receipt tests retained")
     smoke = read("tests/actor_ingress_tcp_smoke.ores")
     check(smoke.count('network.connect_async("127.0.0.1", 8080)') >= 5
           and "FAIL unregistered actor code image must not execute" in smoke,
