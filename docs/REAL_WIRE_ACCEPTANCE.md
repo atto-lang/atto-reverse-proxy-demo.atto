@@ -12,6 +12,7 @@ programs, launches `src/serve_reverse.ores` in a subprocess on
 separate native Oreslang client. The client checks:
 - HTTP 200 for the allowlisted statically compiled local Oreslang actor service, plus a separate streaming actor response with chunked HTTP/1.1 transfer framing, no conflicting Content-Length, both text body stages in order, and a terminal zero-length chunk
 - HTTP 501 for an admitted but unimplemented outbound HTTP upstream
+- HTTP 405 with an empty response body for HEAD on local actor and fallback upstream routes, before route or actor dispatch; the demo has no proven HEAD metadata/response-body suppression contract
 - HTTP 400, or transport-initiated connection close, for actor GET requests declaring `Content-Length: 1` or `Transfer-Encoding: chunked`; source-level body-framing denial runs before route selection and actor dispatch
 - HTTP 403 when the configured presence-check middleware fails
 - HTTP 400 for a percent-encoded noncanonical traversal target and HTTP 404 for an unconfigured route, each tested through a separate loopback TCP connection

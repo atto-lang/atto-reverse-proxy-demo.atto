@@ -112,6 +112,16 @@ def source_guards() -> None:
           and 'if request.method != "GET"; then' in serving
           and "Stale or overprivileged actor binding" in serving,
           "canonical GET-only HttpExchange handoff rechecks actor dispatch fence")
+    # HEAD must be rejected before *all* route types, not merely local
+    # service:// routes. The fallback 501 actor would otherwise emit a body.
+    request_extract = serving.index('val request = admitted.unwrap();')
+    method_gate = serving.index('if request.method != "GET"; then')
+    route_select = serving.index('val matched = route_policy.select')
+    fallback = serving.index('unavailable.dispatch(rt borrow mut exchange);')
+    check(request_extract < method_gate < route_select < fallback
+          and 'await exchange.respond(405, "text/plain; charset=utf-8", "");' in
+          serving[method_gate:route_select],
+          "GET-only method gate precedes all routes and actor dispatch")
     actor_wire = read("tests/actor_ingress_tcp_smoke.ores")
     check('HEAD /actor HTTP/1.1' in actor_wire
           and 'HEAD /stream HTTP/1.1' in actor_wire
@@ -131,6 +141,9 @@ def source_guards() -> None:
                "FAIL body-framed actor request admitted (Content-Length)",
                "FAIL body-framed actor request admitted (Transfer-Encoding)")),
           "real-wire fixtures reject length-delimited and chunked request bodies")
+    check('HEAD /api HTTP/1.1\\r\\nHost: worker.example.test' in actor_wire
+          and 'FAIL HEAD reached fallback upstream actor' in actor_wire,
+          "HEAD to non-service fallback is rejected before actor handoff")
     headers = read("src/header_policy.ores")
     check('!admission_text.control_free' not in headers
           and "return admission_text.control_free(value)" in headers,

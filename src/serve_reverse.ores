@@ -117,6 +117,13 @@ pub async routine main(): int {
       continue;
     fi
     val request = admitted.unwrap();
+    // The experimental adapter has no proven HEAD response semantics for
+    // either local actor services or the fallback upstream-unavailable actor.
+    // Reject HEAD before middleware, route selection or actor ownership handoff.
+    if request.method != "GET"; then
+      await exchange.respond(405, "text/plain; charset=utf-8", "");
+      continue;
+    fi
     val matched = route_policy.select(rt borrow config,
       request.authority, request.path);
     if matched.is_err(); then
@@ -157,14 +164,6 @@ pub async routine main(): int {
       continue;
     fi
     if proxy_yaml.valid_service_ref(target.upstream); then
-      // HEAD response framing is not yet proven through the guest actor adapter.
-      // Keep public actor services GET-only until actor-owned request metadata
-      // can enforce bodyless HEAD semantics after http.claim().
-      if request.method != "GET"; then
-        await exchange.respond(405, "text/plain; charset=utf-8",
-          "Actor service currently requires GET");
-        continue;
-      fi
       val bound = service_bindings.reverse_route(rt borrow snapshot,
         rt borrow trusted_services, request.authority, request.path);
       if bound.is_err(); then
