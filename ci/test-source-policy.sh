@@ -246,6 +246,20 @@ git -C "$pinned_repo" config --unset core.filemode
 EXPECTED_DEMO_SHA="$pinned_sha" bash "$pinned_repo/ci/source-policy.sh" > /dev/null || {
   echo 'TEST_FAILURE: pinned checkout rejected after chmod fixture recovery' >&2; exit 1;
 }
+# Git index hints can suppress the diff that normally catches chmod drift.
+# The policy must compare actual filesystem mode to the committed Git mode.
+for hint in assume-unchanged skip-worktree; do
+  git -C "$pinned_repo" update-index "--$hint" -- docs/allowed.txt
+  chmod +x "$pinned_repo/docs/allowed.txt"
+  if EXPECTED_DEMO_SHA="$pinned_sha" bash "$pinned_repo/ci/source-policy.sh" >/dev/null 2>&1; then
+    echo "TEST_FAILURE: $hint concealed executable-bit drift" >&2; exit 1
+  fi
+  chmod -x "$pinned_repo/docs/allowed.txt"
+  git -C "$pinned_repo" update-index "--no-$hint" -- docs/allowed.txt
+  EXPECTED_DEMO_SHA="$pinned_sha" bash "$pinned_repo/ci/source-policy.sh" > /dev/null || {
+    echo "TEST_FAILURE: pinned checkout rejected after $hint recovery" >&2; exit 1
+  }
+done
 # A migration-only Python exception must never be accepted by SHA-pinned
 # production admission, even with a clean tracked Git tree and matching HEAD.
 legacy_repo="$test_repo/legacy-pinned-mode"
