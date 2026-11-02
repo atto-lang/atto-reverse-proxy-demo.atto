@@ -13,6 +13,7 @@ separate native Oreslang client. The client checks:
 - HTTP 200 for the allowlisted statically compiled local Oreslang actor service, plus a separate streaming actor response with chunked HTTP/1.1 transfer framing, no conflicting Content-Length, both text body stages in order, and a terminal zero-length chunk
 - HTTP 501 for an admitted but unimplemented outbound HTTP upstream
 - HTTP 405 with an empty response body for HEAD on local actor and fallback upstream routes, before route or actor dispatch; the demo has no proven HEAD metadata/response-body suppression contract
+- Raw-framing negative vectors (zero/empty Content-Length, conflicting duplicate Content-Length, Content-Length plus Transfer-Encoding, duplicate Host, mixed-case Transfer-Encoding) require HTTP 400 or a transport-initiated close, **never** local actor dispatch; a subsequent clean GET must still receive HTTP 200. The guest's scalar `exchange.header()` cannot itself validate duplicate raw fields, so these remain transport-level acceptance requirements until native execution proves them
 - HTTP 400, or transport-initiated connection close, for actor GET requests declaring `Content-Length: 1` or `Transfer-Encoding: chunked`; source-level body-framing denial runs before route selection and actor dispatch
 - HTTP 403 when the configured presence-check middleware fails
 - HTTP 400 for a percent-encoded noncanonical traversal target and HTTP 404 for an unconfigured route, each tested through a separate loopback TCP connection

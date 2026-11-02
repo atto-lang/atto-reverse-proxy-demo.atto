@@ -144,6 +144,31 @@ def source_guards() -> None:
     check('HEAD /api HTTP/1.1\\r\\nHost: worker.example.test' in actor_wire
           and 'FAIL HEAD reached fallback upstream actor' in actor_wire,
           "HEAD to non-service fallback is rejected before actor handoff")
+    # The raw transport must reject duplicates and conflicting framing before
+    # normalizing to exchange.header(); this audit merely preserves native
+    # negative test vectors. It is not evidence that the runtime rejects them.
+    framing_vectors = {
+        "zero_length": "Content-Length zero must not dispatch actor",
+        "empty_length": "Empty Content-Length must not dispatch actor",
+        "duplicate_length": "Conflicting duplicate Content-Length must not dispatch actor",
+        "length_and_encoding": "Content-Length plus Transfer-Encoding must not dispatch actor",
+        "duplicate_host": "Duplicate Host fields must not dispatch actor",
+        "mixed_case_te": "Mixed-case transfer coding must not dispatch actor",
+    }
+    for vector, failure in framing_vectors.items():
+        check(f"val {vector} = await network.connect_async" in actor_wire
+              and f"FAIL {failure}" in actor_wire,
+              f"native raw framing vector retained: {vector}")
+    check('FAIL actor service unavailable after framing denial' in actor_wire
+          and 'val post_framing = await network.connect_async' in actor_wire,
+          "native recovery request after malformed framing retained")
+    check(all(token in actor_wire for token in
+              ("Content-Length: 0\\r\\n", "Content-Length:\\r\\n",
+               "Content-Length: 1\\r\\nContent-Length: 0\\r\\n",
+               "Content-Length: 1\\r\\nTransfer-Encoding: chunked\\r\\n",
+               "Host: worker.example.test\\r\\nHost: second.example.test\\r\\n",
+               "tRaNsFeR-EnCoDiNg: chunked\\r\\n")),
+          "malformed wire request bytes preserve framing ambiguity vectors")
     headers = read("src/header_policy.ores")
     check('!admission_text.control_free' not in headers
           and "return admission_text.control_free(value)" in headers,
