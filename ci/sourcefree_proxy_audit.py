@@ -286,19 +286,34 @@ def source_guards() -> None:
               and first_gate < method_gate < route_gate
               and route_gate < serving.index(marker) < serving.index(dispatch),
               f"fixed {label} receipt follows request gates and precedes dispatch")
+    # The actor receipt occurs after the single-use http.claim, inside each
+    # actor's receive handler, not in the calling supervisor before dispatch.
+    for actor, label in (("HelloV1", "HELLO"), ("StreamV1", "STREAM"),
+                         ("UpstreamUnavailable", "FALLBACK")):
+        start = serving.index(f"define isoactor {actor} as")
+        end = serving.index("\nend", start)
+        segment = serving[start:end]
+        claim = 'val exchange = http.claim(mail.value);'
+        receipt = f'stdio.println("ORES_PROXY_TEST_CLAIM_{label}");'
+        check(segment.count(claim) == 1 and segment.count(receipt) == 1
+              and segment.index(claim) < segment.index(receipt),
+              f"actor-side {label} receipt follows exchange claim")
     verifier = read("ci/verify_actor_dispatch_receipts.sh")
     synthetic_tests = read("ci/test_actor_dispatch_receipts.sh")
-    check("hello != 3 || fallback != 1 || stream < 1 || stream > 5" in verifier
-          and "all != hello + fallback + stream" in verifier,
-          "host verifier enforces exact positive and bounded stream counts")
+    check("hello != 3 || hello_claim != 3 || fallback != 1 || fallback_claim != 1" in verifier
+          and "stream_claim < 1 || stream_claim > stream" in verifier
+          and "all != hello + hello_claim + fallback + fallback_claim + stream + stream_claim" in verifier,
+          "host verifier binds claim/dispatch receipt counts per actor")
     check("size > 1048576" in verifier
-          and "grep -c '^ORES_PROXY_TEST_DISPATCH_'" in verifier
+          and "grep -Ec '^ORES_PROXY_TEST_(DISPATCH|CLAIM)_'" in verifier
           and '|| -L "$log"' in verifier,
-          "host verifier denies symlinked, oversized and unknown-marker logs")
-    check("SOURCE_FREE_DISPATCH_RECEIPT_TESTS_PASS=10/10" in synthetic_tests
-          and "unexpected_hello_dispatch" in synthetic_tests
-          and "unknown_dispatch_marker" in synthetic_tests,
-          "ten synthetic host-side receipt tests retained")
+          "host verifier denies symlinked, oversized and unknown-receipt logs")
+    check("SOURCE_FREE_ACTOR_CLAIM_RECEIPT_TESTS_PASS=21/21" in synthetic_tests
+          and "unexpected_hello_claim" in synthetic_tests
+          and "missing_fallback_claim" in synthetic_tests
+          and "stream_claim_exceeds_dispatch" in synthetic_tests
+          and "unknown_claim_marker" in synthetic_tests,
+          "21 synthetic host-side claim and dispatch receipt tests retained")
     smoke = read("tests/actor_ingress_tcp_smoke.ores")
     check(smoke.count('network.connect_async("127.0.0.1", 8080)') >= 5
           and "FAIL unregistered actor code image must not execute" in smoke,

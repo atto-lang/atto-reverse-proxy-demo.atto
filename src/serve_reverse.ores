@@ -15,6 +15,8 @@ import module service_bindings from "./service_bindings";
 define isoactor UpstreamUnavailable as
   receive(ActorMail<String> mail): void {
     val exchange = http.claim(mail.value);
+    // Actor-side marker: only emitted after the single-use exchange claim.
+    stdio.println("ORES_PROXY_TEST_CLAIM_FALLBACK");
     await exchange.respond(501, "text/plain; charset=utf-8",
       "Upstream forwarding unavailable in this runtime");
     return;
@@ -26,6 +28,8 @@ end
 define isoactor HelloV1 as
   receive(ActorMail<String> mail): void {
     val exchange = http.claim(mail.value);
+    // Actor-side marker: only emitted after the single-use exchange claim.
+    stdio.println("ORES_PROXY_TEST_CLAIM_HELLO");
     await exchange.respond(200, "text/plain; charset=utf-8",
       "hello from native Oreslang actor service");
     return;
@@ -37,6 +41,8 @@ end
 define isoactor StreamV1 as
   receive(ActorMail<String> mail): void {
     val exchange = http.claim(mail.value);
+    // Actor-side marker: only emitted after the single-use exchange claim.
+    stdio.println("ORES_PROXY_TEST_CLAIM_STREAM");
     await exchange.start(200, "text/plain; charset=utf-8");
     await exchange.write("stage-one\n");
     await exchange.write("stage-two\n");
