@@ -98,6 +98,8 @@ pub async routine main(): int {
   val stream = http.handler("StreamV1").pooled(25);
   val server = http.listen("127.0.0.1", 8080, 1024, 65536, 30000);
   stdio.println("EXPERIMENTAL loopback actor ingress; HTTP upstream forwarding returns 501");
+  // Fixed, input-free markers record attempted handoffs for the test harness.
+  // They do not prove actor receipt, cancellation, or loan retirement.
   loop {
     val exchange = await server.accept();
     val String host = exchange.header("Host");
@@ -177,9 +179,11 @@ pub async routine main(): int {
       // gap is the matching actor-owned receipt check after http.claim().
       if service_bindings.local_dispatch_allowed(rt borrow actor_binding,
           rt borrow snapshot, "hello-v1"); then
+        stdio.println("ORES_PROXY_TEST_DISPATCH_HELLO");
         hello.dispatch(rt borrow mut exchange);
       elif service_bindings.local_dispatch_allowed(rt borrow actor_binding,
           rt borrow snapshot, "stream-v1"); then
+        stdio.println("ORES_PROXY_TEST_DISPATCH_STREAM");
         stream.dispatch(rt borrow mut exchange);
       elif actor_binding.target == "hello-v1" ||
         actor_binding.target == "stream-v1"; then
@@ -191,6 +195,7 @@ pub async routine main(): int {
       fi
       continue;
     fi
+    stdio.println("ORES_PROXY_TEST_DISPATCH_FALLBACK");
     unavailable.dispatch(rt borrow mut exchange);
   }
   return 0;

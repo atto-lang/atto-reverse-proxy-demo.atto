@@ -19,6 +19,15 @@ separate native Oreslang client. The client checks:
 - HTTP 400 for a percent-encoded noncanonical traversal target and HTTP 404 for an unconfigured route, each tested through a separate loopback TCP connection
 - Four clients that send a complete streaming request and immediately close their TCP connections, followed by a fresh local actor-service request that must still return HTTP 200
 
+The trusted-native wire workflow is prepared to check fixed
+`ORES_PROXY_TEST_DISPATCH_*` markers immediately before actor handoff.
+It requires exactly three successful Hello and one fallback handoff, plus
+one to five streaming handoffs (the four disconnected streams may cancel).
+The source-free verifier has 10 synthetic positive/negative fixtures and
+rejects missing/extra or unknown markers, symlinked logs and logs over 1 MiB.
+**This is attempted-dispatch evidence only, not actor receipt or task
+retirement, and has not been demonstrated by native execution.**
+
 The disconnect sequence is **listener survivability evidence only** if it executes: it cannot prove that the abandoned stream's task was cancelled at a specific linearization point or that a receiver/state loan was physically retired. Those claims require actor-local continuation accounting, an observable quiescence barrier, scheduler/task-retirement instrumentation, and explicit bounded-retirement tests; none is present in this fixture.
 
 

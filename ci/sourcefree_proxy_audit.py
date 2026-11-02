@@ -273,6 +273,32 @@ def source_guards() -> None:
           "actor ingress only binds pre-registered code images")
     check("network.connect_async" not in serving and "http.request" not in serving,
           "reverse serving path has no guest outbound network API")
+    # Attempted-dispatch receipts are checked by the native wire workflow.
+    # These source checks alone cannot establish actor execution or retirement.
+    first_gate = serving.index('if exchange.header("Content-Length") != "" ||')
+    method_gate = serving.index('if request.method != "GET"; then')
+    route_gate = serving.index('val matched = route_policy.select')
+    for label, handler in (("HELLO", "hello"), ("STREAM", "stream"),
+                           ("FALLBACK", "unavailable")):
+        marker = f'stdio.println("ORES_PROXY_TEST_DISPATCH_{label}");'
+        dispatch = f'{handler}.dispatch(rt borrow mut exchange);'
+        check(serving.count(marker) == 1 and serving.count(dispatch) == 1
+              and first_gate < method_gate < route_gate
+              and route_gate < serving.index(marker) < serving.index(dispatch),
+              f"fixed {label} receipt follows request gates and precedes dispatch")
+    verifier = read("ci/verify_actor_dispatch_receipts.sh")
+    synthetic_tests = read("ci/test_actor_dispatch_receipts.sh")
+    check("hello != 3 || fallback != 1 || stream < 1 || stream > 5" in verifier
+          and "all != hello + fallback + stream" in verifier,
+          "host verifier enforces exact positive and bounded stream counts")
+    check("size > 1048576" in verifier
+          and "grep -c '^ORES_PROXY_TEST_DISPATCH_'" in verifier
+          and '|| -L "$log"' in verifier,
+          "host verifier denies symlinked, oversized and unknown-marker logs")
+    check("SOURCE_FREE_DISPATCH_RECEIPT_TESTS_PASS=10/10" in synthetic_tests
+          and "unexpected_hello_dispatch" in synthetic_tests
+          and "unknown_dispatch_marker" in synthetic_tests,
+          "ten synthetic host-side receipt tests retained")
     smoke = read("tests/actor_ingress_tcp_smoke.ores")
     check(smoke.count('network.connect_async("127.0.0.1", 8080)') >= 5
           and "FAIL unregistered actor code image must not execute" in smoke,
@@ -306,6 +332,9 @@ def source_guards() -> None:
     check("    if: >-" not in legacy_native,
           "legacy native workflow has no alternate conditional runner path")
     wire = read(".github/workflows/actor-ingress-wire.yml")
+    check("ci/test_actor_dispatch_receipts.sh ci/verify_actor_dispatch_receipts.sh" in wire
+          and 'ci/verify_actor_dispatch_receipts.sh "$log"' in wire,
+          "real-wire job preserves receipt verifier and synthetic test steps")
     check("actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09" in wire
           and "actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961" in wire,
           "real-wire workflow dependencies pinned to reviewed v5 commits")

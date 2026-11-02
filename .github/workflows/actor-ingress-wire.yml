@@ -6,6 +6,9 @@ on:
       - 'src/**'
       - 'config/**'
       - 'tests/actor_ingress_tcp_smoke.ores'
+      - 'ci/verify_actor_dispatch_receipts.sh'
+      - 'ci/test_actor_dispatch_receipts.sh'
+      - 'ci/sourcefree_proxy_audit.py'
       - '.github/workflows/actor-ingress-wire.yml'
   workflow_dispatch:
 permissions:
@@ -94,6 +97,11 @@ jobs:
           fi
           "$wrapper" --check src/serve_reverse.ores
           "$wrapper" --check tests/actor_ingress_tcp_smoke.ores
+          # Host-only synthetic checks do not establish guest native success.
+          /bin/bash -n ci/verify_actor_dispatch_receipts.sh
+          /bin/bash -n ci/test_actor_dispatch_receipts.sh
+          /usr/bin/env -i PATH=/usr/bin:/bin LC_ALL=C /bin/bash --noprofile --norc \
+            ci/test_actor_dispatch_receipts.sh ci/verify_actor_dispatch_receipts.sh
       - name: Real native Oreslang actor HTTP exchange over loopback
         shell: bash
         env:
@@ -159,4 +167,6 @@ jobs:
           timeout --signal=TERM --kill-after=5s 30s \
             "$wrapper" --no-prompt --allow-net=127.0.0.1:8080 \
             tests/actor_ingress_tcp_smoke.ores
+          # Assert exact handoff counts after the bounded real-wire client exits.
+          /bin/bash --noprofile --norc ci/verify_actor_dispatch_receipts.sh "$log"
           cat "$log"
