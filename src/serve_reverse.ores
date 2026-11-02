@@ -101,6 +101,15 @@ pub async routine main(): int {
   loop {
     val exchange = await server.accept();
     val String host = exchange.header("Host");
+    // This experimental actor ingress accepts bodyless requests only.
+    // Fail closed on declared payload framing before routing or actor dispatch.
+    // The transport must separately reject duplicate/conflicting headers before accept().
+    if exchange.header("Content-Length") != "" ||
+      exchange.header("Transfer-Encoding") != ""; then
+      await exchange.respond(400, "text/plain; charset=utf-8",
+        "Request payload framing unsupported");
+      continue;
+    fi
     val String request_line = exchange.method + " " + exchange.target + " HTTP/1.1";
     val admitted = proxy_wire.reverse(request_line, host);
     if admitted.is_err(); then

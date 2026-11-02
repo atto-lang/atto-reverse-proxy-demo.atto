@@ -12,6 +12,33 @@ pub async routine main(): int {
     return 1;
   fi
 
+  // Declared HTTP request bodies must never reach a local actor. A transport
+  // may reject malformed framing by closing the connection before dispatch;
+  // if it returns a response, it must be the explicit bad-request response.
+  val content_length = await network.connect_async("127.0.0.1", 8080);
+  await content_length.write_text_async(
+    "GET /actor HTTP/1.1\r\nHost: worker.example.test\r\nContent-Length: 1\r\nConnection: close\r\n\r\nx");
+  val content_length_status = await content_length.read_line_async();
+  await content_length.close_async();
+  if !content_length_status.is_none(); then
+    if !content_length_status.unwrap().starts_with("HTTP/1.1 400"); then
+      stdio.println("FAIL body-framed actor request admitted (Content-Length)");
+      return 1;
+    fi
+  fi
+
+  val transfer_encoding = await network.connect_async("127.0.0.1", 8080);
+  await transfer_encoding.write_text_async(
+    "GET /actor HTTP/1.1\r\nHost: worker.example.test\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n1\r\nx\r\n0\r\n\r\n");
+  val transfer_encoding_status = await transfer_encoding.read_line_async();
+  await transfer_encoding.close_async();
+  if !transfer_encoding_status.is_none(); then
+    if !transfer_encoding_status.unwrap().starts_with("HTTP/1.1 400"); then
+      stdio.println("FAIL body-framed actor request admitted (Transfer-Encoding)");
+      return 1;
+    fi
+  fi
+
   // Actor services are deliberately GET-only until http.handler can carry
   // actor-owned request metadata and prove bodyless HEAD semantics after claim.
   val actor_head = await network.connect_async("127.0.0.1", 8080);

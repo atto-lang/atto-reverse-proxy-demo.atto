@@ -117,6 +117,20 @@ def source_guards() -> None:
           and 'HEAD /stream HTTP/1.1' in actor_wire
           and 'starts_with("HTTP/1.1 405")' in actor_wire,
           "wire acceptance retains HEAD refusal before actor dispatch")
+    # Header-level denial is defense in depth, not proof of raw HTTP parsing
+    # or duplicate-header handling by the underlying transport adapter.
+    guard_start = serving.index('if exchange.header("Content-Length") != "" ||')
+    guard_end = serving.index('    fi', guard_start)
+    body_guard = serving[guard_start:guard_end]
+    check('exchange.header("Transfer-Encoding") != ""' in body_guard
+          and 'await exchange.respond(400' in body_guard
+          and guard_end < serving.index('val matched = route_policy.select'),
+          "declared request-body denial precedes route and actor dispatch")
+    check(all(token in actor_wire for token in
+              ("Content-Length: 1\\r\\n", "Transfer-Encoding: chunked\\r\\n",
+               "FAIL body-framed actor request admitted (Content-Length)",
+               "FAIL body-framed actor request admitted (Transfer-Encoding)")),
+          "real-wire fixtures reject length-delimited and chunked request bodies")
     headers = read("src/header_policy.ores")
     check('!admission_text.control_free' not in headers
           and "return admission_text.control_free(value)" in headers,
