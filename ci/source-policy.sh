@@ -88,6 +88,26 @@ while IFS= read -r -d '' entry; do
   [[ "$actual_blob" == "$object" ]] || {
     echo "POLICY_FAILURE: staged blob differs from audited worktree: $path" >&2; exit 2;
   }
+  # Git's assume-unchanged/skip-worktree flags can hide executable-bit drift
+  # from diff even with core.filemode=true. The object hash covers bytes,
+  # not filesystem mode; check the leaf directly against the staged Git mode.
+  actual_mode="$(/usr/bin/stat -c %a -- "$path")" || {
+    echo "POLICY_FAILURE: cannot stat tracked mode: $path" >&2; exit 2;
+  }
+  [[ "$actual_mode" =~ ^[0-7]{3,4}$ ]] || {
+    echo "POLICY_FAILURE: invalid tracked mode: $path" >&2; exit 2;
+  }
+  (( (8#$actual_mode & 8#7022) == 0 )) || {
+    echo "POLICY_FAILURE: unsafe tracked filesystem permissions: $path" >&2; exit 2;
+  }
+  case "$filemode" in
+    100644) (( (8#$actual_mode & 8#111) == 0 )) || {
+      echo "POLICY_FAILURE: unreviewed executable tracked file: $path" >&2; exit 2;
+    } ;;
+    100755) (( (8#$actual_mode & 8#100) != 0 )) || {
+      echo "POLICY_FAILURE: missing owner-executable tracked file: $path" >&2; exit 2;
+    } ;;
+  esac
 done < "$stage_list"
 while IFS= read -r -d '' path; do
   count=$((count+1))
