@@ -29,6 +29,13 @@ ActorRef or network grant.
 The opt-in `src/serve_reverse.ores` has exactly TWO trusted local code
 images: `hello-v1` -> `HelloV1` and `stream-v1` -> `StreamV1`.
 `config/worker-example.yaml` declares symbolic service references for them.
+The sample's three local `service://` routes intentionally have **no**
+middleware chain: `service_bindings.reverse_route` rejects *all* nonempty
+middleware chains, including trace-only, until the supervisor can present an
+unforgeable generation-pinned receipt. The `/api` HTTP fallback alone keeps
+`middleware: required` to exercise missing-header 403 versus admitted-but-
+unimplemented 501. This is a loopback-only test fixture, **not** a general
+authentication or tracing bypass for production actor services.
 The supervisor registry, not YAML, authorizes these images without granting
 network capability. Local hello and streaming routes return 200, an unknown
 code image fails binding with 503, and external HTTP/pool upstreams return

@@ -194,6 +194,35 @@ def source_guards() -> None:
           service_route.index('if route.middleware != ""; then') <
           service_route.index("valid_service_ref(route.upstream)"),
           "middleware-gated actor service planning fails closed")
+    # Example service:// routes must not advertise a middleware receipt that
+    # reverse_route cannot mint. Even trace-only middleware fails closed.
+    # This is fixture consistency, NOT native actor-dispatch evidence.
+    example = read("config/worker-example.yaml")
+    check(example.count("\nroutes:\n") == 1,
+          "worker example has one routes section")
+    route_entries = example.split("\nroutes:\n", 1)[1].split("  - name: ")
+    example_routes = {}
+    for entry in route_entries[1:]:
+        lines = entry.split("\n", 1)
+        name = lines[0].strip()
+        check(bool(name) and name not in example_routes,
+              f"unique worker example route: {name}")
+        example_routes[name] = lines[1] if len(lines) > 1 else ""
+    for route, upstream in (
+            ("workers", "service://greeting"),
+            ("streaming-route", "service://streaming"),
+            ("unregistered-route", "service://unavailable")):
+        body = example_routes.get(route, "")
+        check(f"    upstream: {upstream}\n" in body
+              and "    middleware:" not in body,
+              f"worker local service {route} has no unproven middleware receipt")
+    origin = example_routes.get("origin", "")
+    check("    upstream: http://127.0.0.1:9000\n" in origin
+          and "    middleware: required\n" in origin
+          and "  - name: required\n    kind: require_header\n" in example,
+          "worker HTTP origin retains required-header denial fixture")
+    check("  - name: trace\n" not in example,
+          "worker example does not declare unused trace middleware")
     actor_tests = read("tests/service_bindings_contract.ores")
     check(all(token in actor_tests for token in
           ("gated_documents.add(gated_deny)", "kind: require_header",
