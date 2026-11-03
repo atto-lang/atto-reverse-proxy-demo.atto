@@ -6,7 +6,7 @@ STAT=/usr/bin/stat
 CMP=/usr/bin/cmp
 MKTEMP=/usr/bin/mktemp
 RM=/usr/bin/rm
-git_clean() { /usr/bin/env -i PATH=/usr/bin:/bin LC_ALL=C HOME=/nonexistent /usr/bin/git "$@"; }
+git_clean() { /usr/bin/env -i PATH=/usr/bin:/bin LC_ALL=C HOME=/nonexistent GIT_CONFIG_NOSYSTEM=1 GIT_ATTR_NOSYSTEM=1 /usr/bin/git "$@"; }
 root="$(git_clean rev-parse --show-toplevel)"
 cd "$root"
 scan_dir="$($MKTEMP -d)"
