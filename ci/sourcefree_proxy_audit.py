@@ -4,9 +4,13 @@ from __future__ import annotations
 
 from pathlib import Path
 import re
+import runpy
 import sys
 
 ROOT = Path(__file__).resolve().parent.parent
+verify_quarantined_job = runpy.run_path(
+    str(ROOT / "ci/workflow_quarantine.py")
+)["verify_quarantined_job"]
 checks = 0
 
 
@@ -349,10 +353,8 @@ def source_guards() -> None:
     # A same-repository PR head is not a trusted runner authority. Keep both
     # legacy self-hosted workflows inert until protected-main native admission.
     legacy_native = read(".github/workflows/native-contracts.yml")
-    check("if: ${{ false }}" in legacy_native,
-          "PR-head native contracts cannot allocate self-hosted runner")
-    check("    if: >-" not in legacy_native,
-          "legacy native workflow has no alternate conditional runner path")
+    verify_quarantined_job(legacy_native, "native-contracts")
+    check(True, "PR-head native contract job has exact fail-closed quarantine")
     wire = read(".github/workflows/actor-ingress-wire.yml")
     check("ci/test_actor_dispatch_receipts.sh ci/verify_actor_dispatch_receipts.sh" in wire
           and 'ci/verify_actor_dispatch_receipts.sh "$log"' in wire,
@@ -360,8 +362,8 @@ def source_guards() -> None:
     check("actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09" in wire
           and "actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961" in wire,
           "real-wire workflow dependencies pinned to reviewed v5 commits")
-    check("if: ${{ false }}" in wire,
-          "PR-head actor wire cannot allocate self-hosted runner")
+    verify_quarantined_job(wire, "actor-ingress")
+    check(True, "PR-head actor wire job has exact fail-closed quarantine")
     check("- 'src/**'" in wire and "- 'config/**'" in wire,
           "wire workflow covers all transitive source and configuration changes")
     wire_exec = "\n".join(
