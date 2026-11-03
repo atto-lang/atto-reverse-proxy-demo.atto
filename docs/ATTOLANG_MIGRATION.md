@@ -12,6 +12,6 @@ Existing runtime/CLI compatibility identifiers such as the `oreslang` executable
 
 ## Gate
 
-`ci/attolang_source_policy.sh` rejects tracked or untracked legacy `.ores` files, symlinked/misplaced `.atto` files, executable-bit drift, group/world-writable files, and working-tree byte drift. Its source-free test harness exercises eleven positive/negative cases.
+`ci/attolang_source_policy.sh` rejects tracked or untracked legacy `.ores` files, symlinked/misplaced `.atto` files, executable-bit drift, group/world-writable files, and working-tree byte drift. Its source-free test harness exercises thirteen positive/negative cases.
 
 This migration is source/contract policy work only. It is not native AttoLang execution evidence and does not relax the protected-main, independent-review, trusted-runner, or runtime-manifest release gates.

@@ -18,4 +18,6 @@ new_repo; printf '// mutated\n' >> src/main.atto; fail working_byte_drift
 new_repo; ln src/main.atto src/alias.atto; git add src/alias.atto; git commit -qm hardlink; fail hardlinked_atto
 new_repo; mkdir -p misc; printf 'x\n' > misc/misplaced.atto; git add .; git commit -qm misplaced; fail unexpected_atto_location
 new_repo; rm src/main.atto; fail missing_tracked_atto
-printf 'ATTOLANG_SOURCE_POLICY_TESTS_PASS=11/11\n'
+new_repo; cp .git/index "$scratch/old-index"; mkdir -p misc; printf 'x\n' > misc/hidden.atto; git add .; git commit -qm hidden; if GIT_INDEX_FILE="$scratch/old-index" "$policy" >/dev/null 2>&1; then printf 'FAIL accepted git_index_poisoning\n' >&2; exit 1; else printf 'PASS rejected git_index_poisoning\n'; fi
+new_repo; poison="$scratch/poison"; mkdir -p "$poison"; for n in git find stat cmp mktemp rm; do printf '#!/usr/bin/env bash\nexit 99\n' > "$poison/$n"; chmod +x "$poison/$n"; done; PATH="$poison:$PATH" "$policy" >/dev/null; printf 'PASS path_poisoning_ignored\n'
+printf 'ATTOLANG_SOURCE_POLICY_TESTS_PASS=13/13\n'
