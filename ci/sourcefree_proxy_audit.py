@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 import re
 import runpy
+import subprocess
 import sys
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -400,11 +401,31 @@ def workflow_guards() -> None:
           "native checkout does not persist token credentials")
 
 
+def quarantine_mutation_regressions() -> None:
+    """Run the committed synthetic bypass suite during the source-free audit."""
+    suite = ROOT / "ci/test_workflow_quarantine.py"
+    check(suite.is_file() and not suite.is_symlink(),
+          "native quarantine mutation suite exists as a regular file")
+    result = subprocess.run(
+        [sys.executable, "-I", str(suite)],
+        cwd=ROOT, env={"LC_ALL": "C", "PATH": "/usr/bin:/bin"},
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        text=True, timeout=15, check=False,
+    )
+    if result.returncode != 0:
+        print(result.stdout, file=sys.stderr)
+        print(result.stderr, file=sys.stderr)
+    check(result.returncode == 0 and "Ran 20 tests" in result.stderr
+          and "\nOK" in result.stderr,
+          "all 20 synthetic job-quarantine bypass regressions execute")
+
+
 if __name__ == "__main__":
     try:
         inventory()
         source_guards()
         workflow_guards()
+        quarantine_mutation_regressions()
     except (AssertionError, ValueError, OSError) as exc:
         print(f"FAIL source-free proxy audit: {exc}", file=sys.stderr)
         raise SystemExit(1)
