@@ -1,4 +1,4 @@
-// Native Oreslang reference data layouts for proxy hot-path design.
+// Native AttoLang reference data layouts for proxy hot-path design.
 // NOT a serving socket/HTTP loop and NOT a preallocated or lock-free slab.
 // Every instance is exclusively owned by one actor; never mutate from
 // independent carrier threads. Real engine must reserve/fill a fixed arena.

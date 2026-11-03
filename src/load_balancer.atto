@@ -1,4 +1,4 @@
-// Pure Oreslang upstream load-balancing policy oracle, not a socket
+// Pure AttoLang upstream load-balancing policy oracle, not a socket
 // connector, DNS resolver, shared state manager or a live HAProxy replacement.
 // One trusted actor owns the health/active-count snapshot. The transport must
 // atomically reserve a backend credit before sending, and release exactly once.
