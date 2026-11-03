@@ -35,11 +35,11 @@ def inventory() -> None:
     actual = sorted(
         p.relative_to(ROOT).as_posix()
         for directory in ("src", "tests")
-        for p in (ROOT / directory).rglob("*.ores")
+        for p in (ROOT / directory).rglob("*.atto")
     )
     check(not any(p.is_symlink() for directory in ("src", "tests")
                   for p in (ROOT / directory).rglob("*")),
-          "all Oreslang source paths are regular, not symbolic links")
+          "all AttoLang source paths are regular, not symbolic links")
     for path in actual:
         check(bool(re.fullmatch(r"(src|tests)/[A-Za-z0-9_./-]+\.ores", path)),
               f"canonical path {path}")
@@ -48,27 +48,27 @@ def inventory() -> None:
     pure = sorted(p for p in actual if re.fullmatch(r"tests/[^/]+_contract\.ores", p))
     check(read("ci/pure-contracts.txt").splitlines() == pure,
           "complete sorted standalone contract inventory")
-    check("tests/lexical_admission_contract.ores" in pure,
+    check("tests/lexical_admission_contract.atto" in pure,
           "foundational lexical negative contract retained")
-    check("tests/network_admission_contract.ores" in pure,
+    check("tests/network_admission_contract.atto" in pure,
           "generation/route pre-dial contract retained")
-    check("tests/actor_ingress_tcp_smoke.ores" not in pure
-          and "tests/ingress_tcp_smoke.ores" not in pure,
+    check("tests/actor_ingress_tcp_smoke.atto" not in pure
+          and "tests/ingress_tcp_smoke.atto" not in pure,
           "TCP integrations are not mislabelled standalone pure tests")
 
 
 def source_guards() -> None:
-    controls = read("src/admission_text.ores")
+    controls = read("src/admission_text.atto")
     expected = [f"\\u{x:04x}" for x in range(32)] + ["\\u007f"]
     check(all(token in controls for token in expected),
           "all 32 C0 controls and DEL rejected by shared predicate")
-    yaml = read("src/proxy_yaml.ores")
+    yaml = read("src/proxy_yaml.atto")
     check('import module admission_text from "./admission_text";' in yaml,
           "YAML imports raw lexical guard")
     # Schema evolution must update handwritten malformed-policy fixtures.
     config_schema = section(yaml, "  pub define class Config as", "  end")
     config_fields = config_schema.count("pub val ")
-    lexical = read("tests/lexical_admission_contract.ores")
+    lexical = read("tests/lexical_admission_contract.atto")
     forged = section(lexical, "  val forged = new proxy_yaml.Config(",
                      "  );\n  if middleware_policy.evaluate")
     forged_args = forged.split("Config(", 1)[1]
@@ -99,7 +99,7 @@ def source_guards() -> None:
     check('elif section == "services"; then' in yaml
           and 'valid_service_ref(route.upstream)' in yaml,
           "actor-service configuration support preserved")
-    bindings = read("src/service_bindings.ores")
+    bindings = read("src/service_bindings.atto")
     check('if binding.network_capable; then' in bindings
           and 'network-capable actor image forbidden on public ingress route' in bindings,
           "public actor ingress rejects trusted-but-network-capable code images")
@@ -107,7 +107,7 @@ def source_guards() -> None:
           and "binding.epoch == snapshot.epoch" in bindings
           and 'binding.target == expected_target' in bindings,
           "actor dispatch binding is generation and exact-target fenced")
-    serving = read("src/serve_reverse.ores")
+    serving = read("src/serve_reverse.atto")
     check("service_bindings.local_dispatch_allowed" in serving
           and 'if request.method != "GET"; then' in serving
           and "Stale or overprivileged actor binding" in serving,
@@ -122,7 +122,7 @@ def source_guards() -> None:
           and 'await exchange.respond(405, "text/plain; charset=utf-8", "");' in
           serving[method_gate:route_select],
           "GET-only method gate precedes all routes and actor dispatch")
-    actor_wire = read("tests/actor_ingress_tcp_smoke.ores")
+    actor_wire = read("tests/actor_ingress_tcp_smoke.atto")
     check('HEAD /actor HTTP/1.1' in actor_wire
           and 'HEAD /stream HTTP/1.1' in actor_wire
           and 'starts_with("HTTP/1.1 405")' in actor_wire,
@@ -169,14 +169,14 @@ def source_guards() -> None:
                "Host: worker.example.test\\r\\nHost: second.example.test\\r\\n",
                "tRaNsFeR-EnCoDiNg: chunked\\r\\n")),
           "malformed wire request bytes preserve framing ambiguity vectors")
-    headers = read("src/header_policy.ores")
+    headers = read("src/header_policy.atto")
     check('!admission_text.control_free' not in headers
           and "return admission_text.control_free(value)" in headers,
           "header values use complete control-byte filter")
     check("for (const original of connection_tokens.split_literal" in headers
           and "Only ASCII SP" in headers and "return !matched" in headers,
           "Connection nomination checks entire token list")
-    admission = read("src/network_admission.ores")
+    admission = read("src/network_admission.atto")
     guard = section(admission, "    val route = selected.unwrap();",
                     "    return Ok(new ReversePermit")
     check('if route.middleware != ""; then' in guard and
@@ -187,7 +187,7 @@ def source_guards() -> None:
           "middleware pre-dial denial precedes endpoint permit")
     check("network.connect" not in admission and "http.request" not in admission,
           "pure network admission module does not mint sockets")
-    services = read("src/service_bindings.ores")
+    services = read("src/service_bindings.atto")
     service_route = section(services, "  pub fnc reverse_route(", "\n  }\nend")
     check('if route.middleware != ""; then' in service_route and
           "middleware receipt required before reverse service planning" in service_route and
@@ -223,12 +223,12 @@ def source_guards() -> None:
           "worker HTTP origin retains required-header denial fixture")
     check("  - name: trace\n" not in example,
           "worker example does not declare unused trace middleware")
-    actor_tests = read("tests/service_bindings_contract.ores")
+    actor_tests = read("tests/service_bindings_contract.atto")
     check(all(token in actor_tests for token in
           ("gated_documents.add(gated_deny)", "kind: require_header",
            "kind: trace", "FAIL middleware-gated service route escaped admission")),
           "deny, required-header and trace actor-routing denial vectors retained")
-    tests = read("tests/network_admission_contract.ores")
+    tests = read("tests/network_admission_contract.atto")
     check(all(token in tests for token in
               ("middleware: denied", "kind: require_header",
                "middleware: token", '"/deny/request"',
@@ -236,7 +236,7 @@ def source_guards() -> None:
           "negative deny and required-header pre-dial regressions retained")
 
 
-    pools = read("src/backend_pools.ores")
+    pools = read("src/backend_pools.atto")
     check('define module backend_pools as' in pools and
           'load_balancer.choose' in pools and 'valid_upstream_origin' in pools,
           "backend selection remains a validated per-generation plan")
@@ -246,7 +246,7 @@ def source_guards() -> None:
           and "pub fnc current(borrow Plan plan" in pools
           and "return plan.epoch == snapshot.epoch;" in pools,
           "reverse pool plans carry explicit generation identity")
-    pool_contract = read("tests/backend_pools_contract.ores")
+    pool_contract = read("tests/backend_pools_contract.atto")
     check("FAIL stale pool plan generation fence" in pool_contract
           and "backend_pools.current(rt borrow direct_plan" in pool_contract
           and "backend_pools.current(rt borrow newer_plan" in pool_contract,
@@ -254,17 +254,17 @@ def source_guards() -> None:
     check('if route.middleware != ""; then' in pools and
           'return Err("middleware receipt required before reverse pool planning");' in pools,
           "middleware-bearing reverse pools fail closed before planning")
-    check("FAIL pool plan bypassed deny middleware" in read("tests/backend_pools_contract.ores")
-          and "FAIL pool plan bypassed required header" in read("tests/backend_pools_contract.ores"),
+    check("FAIL pool plan bypassed deny middleware" in read("tests/backend_pools_contract.atto")
+          and "FAIL pool plan bypassed required header" in read("tests/backend_pools_contract.atto"),
           "deny and required-header pool negative fixtures retained")
-    pool_tests = read("tests/backend_pools_contract.ores")
+    pool_tests = read("tests/backend_pools_contract.atto")
     check("weighted-round-robin" in pool_tests and
           "FAIL deterministic backend rotation" in pool_tests and
           "FAIL unknown backend pool" in pool_tests,
           "weighted pool native contract and negative cases retained")
 
 
-    serving = read("src/serve_reverse.ores")
+    serving = read("src/serve_reverse.atto")
     check('http.listen("127.0.0.1", 8080, 1024, 65536, 30000)' in serving,
           "actor ingress listener remains loopback-only and bounded")
     check('new service_bindings.CodeImage(' in serving
@@ -321,7 +321,7 @@ def source_guards() -> None:
            and "claim_precedes_fallback_dispatch" in synthetic_tests
            and "claim_precedes_stream_dispatch" in synthetic_tests,
           "24 synthetic host-side claim and dispatch receipt tests retained")
-    smoke = read("tests/actor_ingress_tcp_smoke.ores")
+    smoke = read("tests/actor_ingress_tcp_smoke.atto")
     check(smoke.count('network.connect_async("127.0.0.1", 8080)') >= 5
           and "FAIL unregistered actor code image must not execute" in smoke,
           "real-wire smoke is loopback-only and denies unregistered actor images")
@@ -391,7 +391,7 @@ def workflow_guards() -> None:
           "native workflow enforces reviewed inventories")
     check("Run every reviewed standalone pure contract" in wf
           and '"$wrapper" "$file"' in wf,
-          "all standalone Oreslang contracts remain required native steps")
+          "all standalone AttoLang contracts remain required native steps")
     check("runs-on: [self-hosted, linux, x64, oreslang-jdk25]" in wf,
           "native validation cannot silently downgrade to static checks")
     check("persist-credentials: false" in wf,
