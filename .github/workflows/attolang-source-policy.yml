@@ -1,0 +1,39 @@
+name: AttoLang source extension policy
+on:
+  pull_request:
+    paths:
+      - 'src/**'
+      - 'tests/**'
+      - 'bench/**'
+      - 'ci/attolang_source_policy.sh'
+      - 'ci/test_attolang_source_policy.sh'
+      - '.github/workflows/attolang-source-policy.yml'
+  workflow_dispatch:
+permissions: {}
+jobs:
+  source-policy:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+          submodules: false
+      - name: Syntax-check AttoLang policy
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash -n ci/attolang_source_policy.sh
+          bash -n ci/test_attolang_source_policy.sh
+      - name: Execute source-free negative mutation tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash ci/test_attolang_source_policy.sh ci/attolang_source_policy.sh
+      - name: Enforce .atto-only guest source
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash ci/attolang_source_policy.sh
