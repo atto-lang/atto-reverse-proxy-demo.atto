@@ -1,4 +1,4 @@
-// Native Oreslang adversarial lifecycle proof for one reusable slot.
+// Native AttoLang adversarial lifecycle proof for one reusable slot.
 // No claim of real concurrency, atomics or arena-backed memory.
 import module slot_lifecycle from "../src/slot_lifecycle";
 

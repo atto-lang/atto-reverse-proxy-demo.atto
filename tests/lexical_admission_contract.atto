@@ -1,4 +1,4 @@
-// Native regression vectors; only an executing Oreslang compiler can pass this.
+// Native regression vectors; only an executing AttoLang compiler can pass this.
 import module header_policy from "../src/header_policy";
 import module proxy_wire from "../src/proxy_wire";
 import module proxy_yaml from "../src/proxy_yaml";

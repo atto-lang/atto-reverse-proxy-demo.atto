@@ -1,4 +1,4 @@
-// Execute separately from src/serve_reverse.ores with config/worker-example.yaml.
+// Execute separately from src/serve_reverse.atto with config/worker-example.yaml.
 // This is a real TCP integration candidate, not a unit test and not CI-executed
 // without a safely launched listener. The caller needs loopback NET permission.
 pub async routine main(): int {
@@ -312,6 +312,6 @@ pub async routine main(): int {
     return 1;
   fi
 
-  stdio.println("PASS native Oreslang actor-service and streaming TCP smoke");
+  stdio.println("PASS native AttoLang actor-service and streaming TCP smoke");
   return 0;
 }
