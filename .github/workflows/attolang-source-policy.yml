@@ -2,6 +2,8 @@ name: AttoLang source extension policy
 on:
   pull_request:
     paths:
+      - '**/*.ores'
+      - '**/*.atto'
       - 'src/**'
       - 'tests/**'
       - 'bench/**'
