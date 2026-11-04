@@ -36,4 +36,5 @@ new_repo; printf 'x\n' > src/legacy.ORES; fail uppercase_legacy_ores
 new_repo; printf 'x\n' > src/canonical.ATTO; git add .; git commit -qm upper; fail tracked_noncanonical_atto_suffix
 new_repo; mkdir -p "$scratch/foreign"; printf 'fnc outside() {}\n' > "$scratch/foreign/outside.atto"; ln -s "$scratch/foreign" src/linked; fail linked_source_directory
 new_repo; mkdir -p tests/legacy.ores; fail legacy_directory_suffix
-printf 'ATTOLANG_SOURCE_POLICY_TESTS_PASS=28/28\n'
+new_repo; printf 'fnc decoy() {}\n' > src/alias0.atto; printf 'fnc mode() {}\n' > 'src/alias[0].atto'; chmod +x 'src/alias[0].atto'; git add .; git commit -qm indexed_exec; chmod -x 'src/alias[0].atto'; fail tracked_glob_mode_shadowing
+printf 'ATTOLANG_SOURCE_POLICY_TESTS_PASS=29/29\n'
