@@ -28,6 +28,5 @@ new_repo; ln -s main.atto src/rogue.atto; fail untracked_atto_symlink
 new_repo; printf 'src/ignored.atto\n' > .git/info/exclude; printf 'fnc ignored() {}\n' > src/ignored.atto; fail git_ignored_atto_source
 new_repo; mkdir -p stray; printf 'fnc stray() {}\n' > stray/rogue.atto; fail untracked_atto_outside_roots
 new_repo; printf 'fnc legitimate() {}\n' > src/basic0.atto; git add src/basic0.atto; git commit -qm ordinary; printf 'fnc escape() {}\n' > 'src/basic[0].atto'; fail literal_git_pathspec_escape
-new_repo; printf 'fnc newline() {}\n' > 
-src/new\nline.atto'; fail newline_named_untracked_atto
+new_repo; npath="$(printf 'src/new\nline.atto')"; printf 'fnc newline() {}\n' > "$npath"; fail newline_named_untracked_atto
 printf 'ATTOLANG_SOURCE_POLICY_TESTS_PASS=21/21\n'
