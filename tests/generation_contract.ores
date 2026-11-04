@@ -26,6 +26,9 @@ pub routine main(): int {
   if control.prepare(source).is_err() || control.abort().is_err(); then
     stdio.println("FAIL abort"); return 1;
   fi
+  // Abort must discard staging without reviving a stale generation.
+  if control.publish(2).is_ok(); then panic("aborted reverse generation published"); fi
+  if control.snapshot().unwrap().epoch != 2; then panic("reverse abort mutated live epoch"); fi
   stdio.println("PASS reverse pure generation prepare/publish/abort");
   return 0;
 }
