@@ -33,6 +33,22 @@ if [[ -s "$legacy_fs" ]]; then
   IFS= read -r -d '' first < "$legacy_fs" || true
   printf 'untracked or symlink legacy .ores path is forbidden: %s\n' "$first" >&2; exit 1
 fi
+# A tracked-only audit misses untracked or Git-ignored .atto source that a
+# compiler or build script could still consume. Enumerate the live filesystem
+# and require each path to be tracked by its *literal* Git path, so glob-shaped
+# filenames cannot borrow another tracked file's identity.
+atto_fs="$scan_dir/atto-fs"
+if ! $FIND . \( -type f -o -type l \) -name '*.atto' -not -path './.git/*' -print0 > "$atto_fs"; then
+  echo 'AttoLang .atto filesystem scan failed' >&2; exit 1
+fi
+while IFS= read -r -d '' disk_file; do
+  disk_file="${disk_file#./}"
+  if ! git_clean ls-files --error-unmatch -- ":(literal)$disk_file" >/dev/null 2>&1; then
+    printf 'untracked or ignored .atto filesystem path forbidden: %s\n' "$disk_file" >&2
+    exit 1
+  fi
+done < "$atto_fs"
+
 atto_count=0
 while IFS= read -r -d '' file; do
   ((atto_count+=1))
