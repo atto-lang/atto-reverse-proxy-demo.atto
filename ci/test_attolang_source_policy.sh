@@ -21,4 +21,13 @@ new_repo; rm src/main.atto; fail missing_tracked_atto
 new_repo; cp .git/index "$scratch/old-index"; mkdir -p misc; printf 'x\n' > misc/hidden.atto; git add .; git commit -qm hidden; if GIT_INDEX_FILE="$scratch/old-index" "$policy" >/dev/null 2>&1; then printf 'FAIL accepted git_index_poisoning\n' >&2; exit 1; else printf 'PASS rejected git_index_poisoning\n'; fi
 new_repo; poison="$scratch/poison"; mkdir -p "$poison"; for n in git find stat cmp mktemp rm; do printf '#!/usr/bin/env bash\nexit 99\n' > "$poison/$n"; chmod +x "$poison/$n"; done; PATH="$poison:$PATH" "$policy" >/dev/null; printf 'PASS path_poisoning_ignored\n'
 new_repo; cfg="$scratch/poison.gitconfig"; printf '[core]\n\tfilemode = false\n[alias]\n\tls-files = !exit 99\n' > "$cfg"; HOME="$scratch" GIT_CONFIG_GLOBAL="$cfg" GIT_CONFIG_SYSTEM="$cfg" GIT_ATTR_NOSYSTEM=0 "$policy" >/dev/null; printf 'PASS git_config_poisoning_ignored\n'
-printf 'ATTOLANG_SOURCE_POLICY_TESTS_PASS=14/14\n'
+# Live-tree additions must be denied even when Git does not track them.
+new_repo; printf 'fnc rogue() {}\n' > src/rogue.atto; fail untracked_atto_source
+new_repo; printf 'fnc rogue() {}\n' > tests/rogue_contract.atto; fail untracked_atto_test
+new_repo; ln -s main.atto src/rogue.atto; fail untracked_atto_symlink
+new_repo; printf 'src/ignored.atto\n' > .git/info/exclude; printf 'fnc ignored() {}\n' > src/ignored.atto; fail git_ignored_atto_source
+new_repo; mkdir -p stray; printf 'fnc stray() {}\n' > stray/rogue.atto; fail untracked_atto_outside_roots
+new_repo; printf 'fnc legitimate() {}\n' > src/basic0.atto; git add src/basic0.atto; git commit -qm ordinary; printf 'fnc escape() {}\n' > 'src/basic[0].atto'; fail literal_git_pathspec_escape
+new_repo; printf 'fnc newline() {}\n' > 
+src/new\nline.atto'; fail newline_named_untracked_atto
+printf 'ATTOLANG_SOURCE_POLICY_TESTS_PASS=21/21\n'
