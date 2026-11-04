@@ -26,7 +26,7 @@ if ! git_clean ls-files -z -- '*.atto' > "$atto_index"; then
   echo 'failed to enumerate tracked AttoLang source' >&2; exit 1
 fi
 if [[ ! -s "$atto_index" ]]; then echo 'no tracked .atto guest files found' >&2; exit 1; fi
-if ! $FIND . \( -type f -o -type l \) -name '*.ores' -not -path './.git/*' -print0 > "$legacy_fs"; then
+if ! $FIND . -iname '*.ores' -not -path './.git/*' -print0 > "$legacy_fs"; then
   echo 'legacy .ores filesystem scan failed' >&2; exit 1
 fi
 if [[ -s "$legacy_fs" ]]; then
@@ -38,23 +38,38 @@ fi
 # and require each path to be tracked by its *literal* Git path, so glob-shaped
 # filenames cannot borrow another tracked file's identity.
 atto_fs="$scan_dir/atto-fs"
-if ! $FIND . \( -type f -o -type l \) -name '*.atto' -not -path './.git/*' -print0 > "$atto_fs"; then
+if ! $FIND . -iname '*.atto' -not -path './.git/*' -print0 > "$atto_fs"; then
   echo 'AttoLang .atto filesystem scan failed' >&2; exit 1
 fi
 while IFS= read -r -d '' disk_file; do
   disk_file="${disk_file#./}"
+  [[ "$disk_file" == *.atto ]] || {
+    printf 'noncanonical .atto extension forbidden: %s\n' "$disk_file" >&2; exit 1;
+  }
   if ! git_clean ls-files --error-unmatch -- ":(literal)$disk_file" >/dev/null 2>&1; then
     printf 'untracked or ignored .atto filesystem path forbidden: %s\n' "$disk_file" >&2
     exit 1
   fi
 done < "$atto_fs"
 
+# find(1) does not traverse symlinked directories by default. Forbid
+# symlink aliases in guest source roots, including paths without a suffix.
+for src_root in src tests bench; do
+  [[ -d "$src_root" ]] || continue
+  if ! $FIND "$src_root" -type l -print0 > "$scan_dir/symlinks"; then
+    echo 'failed to inspect guest source symlinks' >&2; exit 1
+  fi
+  if [[ -s "$scan_dir/symlinks" ]]; then
+    IFS= read -r -d '' first < "$scan_dir/symlinks" || true
+    printf 'symlinked guest source tree path forbidden: %s\n' "$first" >&2; exit 1
+  fi
+done
 atto_count=0
 while IFS= read -r -d '' file; do
   ((atto_count+=1))
   [[ "$file" == src/* || "$file" == tests/* || "$file" == bench/* ]] || { echo "unexpected .atto location: $file" >&2; exit 1; }
   test -f "$file" && test ! -L "$file" && test -s "$file" || { echo "invalid .atto regular file: $file" >&2; exit 1; }
-  entry="$(git_clean ls-files --stage -- "$file")"
+  entry="$(git_clean ls-files --stage -- ":(literal)$file")"
   mode="${entry%% *}"
   test "$mode" = 100644 || { echo "unapproved .atto Git mode $mode: $file" >&2; exit 1; }
   actual_mode="$($STAT -c %a -- "$file")"
