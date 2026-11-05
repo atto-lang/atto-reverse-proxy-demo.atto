@@ -97,23 +97,45 @@ guest_env=(
   "TMPDIR=$guest_tmp"
 )
 # Preserve only the two reviewed reverse ingress configuration cases:
-# tracked example.yaml and the deliberately absent configuration fixture.
+# tracked example.yaml and a sentinel that the verifier maps to a private,
+# per-invocation missing path inside guest_tmp. Never authorize a predictable
+# missing-config pathname in shared RUNNER_TEMP.
+guest_args=("$@")
 if [[ "${ores_proxy_conf_yaml+x}" == x ]]; then
   example_cfg="$(/usr/bin/realpath -e -- "$GITHUB_WORKSPACE/config/example.yaml")" || exit 1
-  missing_cfg="$RUNNER_TEMP/ores-proxy-missing-config.yaml"
-  if [[ "$ores_proxy_conf_yaml" != "$example_cfg" && "$ores_proxy_conf_yaml" != "$missing_cfg" ]]; then
+  missing_sentinel='@ORESLANG_MISSING_CONFIG@'
+  if [[ "$ores_proxy_conf_yaml" == "$example_cfg" ]]; then
+    guest_env+=("ores_proxy_conf_yaml=$example_cfg")
+  elif [[ "$ores_proxy_conf_yaml" == "$missing_sentinel" ]]; then
+    missing_cfg="$guest_tmp/ores-proxy-missing-config.yaml"
+    test ! -e "$missing_cfg" && test ! -L "$missing_cfg" || {
+      echo "private missing-config fixture unexpectedly exists" >&2
+      exit 1
+    }
+    missing_allow_read_seen=0
+    for i in "${!guest_args[@]}"; do
+      if [[ "${guest_args[$i]}" == "--allow-read=$missing_sentinel" ]]; then
+        guest_args[$i]="--allow-read=$missing_cfg"
+        (( missing_allow_read_seen += 1 ))
+      fi
+    done
+    test "$missing_allow_read_seen" -eq 1 || {
+      echo "missing-config sentinel requires exactly one scoped --allow-read" >&2
+      exit 1
+    }
+    guest_env+=("ores_proxy_conf_yaml=$missing_cfg")
+  else
     echo "unapproved reverse ingress configuration environment path" >&2
     exit 1
   fi
-  if [[ "$ores_proxy_conf_yaml" == "$missing_cfg" ]]; then
-    # The negative fixture is authorized only while it is truly absent.
-    # Recheck immediately before guest launch; otherwise a persistent process
-    # on the runner could turn the "missing" path into an unexpected input.
-    test ! -e "$missing_cfg" && test ! -L "$missing_cfg" || {
-      echo "missing-config fixture unexpectedly exists" >&2
-      exit 1
-    }
-  fi
-  guest_env+=("ores_proxy_conf_yaml=$ores_proxy_conf_yaml")
 fi
-exec /usr/bin/env -i "${guest_env[@]}" /usr/bin/timeout --signal=TERM --kill-after=2s 120s "$launcher" "$@"
+
+cleanup_guest_tmp() {
+  /usr/bin/rm -rf -- "$guest_tmp"
+}
+trap cleanup_guest_tmp EXIT
+set +e
+/usr/bin/env -i "${guest_env[@]}" /usr/bin/timeout --signal=TERM --kill-after=2s 120s "$launcher" "${guest_args[@]}"
+guest_status=$?
+set -e
+exit "$guest_status"
