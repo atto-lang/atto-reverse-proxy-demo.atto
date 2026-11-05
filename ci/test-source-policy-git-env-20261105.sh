@@ -14,7 +14,7 @@ printf '\n' >> "$tmp/SOURCE_REF"
 git -C "$tmp" add .
 git -C "$tmp" commit -qm baseline
 pass() { SOURCE_POLICY_ROOT="$tmp" GIT_INDEX_FILE="$tmp/.git/forged-empty-index" GIT_WORK_TREE=/ GIT_DIR=/tmp GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.fsmonitor GIT_CONFIG_VALUE_0=false bash "$root/ci/source-policy.sh" >/dev/null; }
-deny() { if SOURCE_POLICY_ROOT="$tmp" GIT_INDEX_FILE="$tmp/.git/forged-empty-index" GIT_WORK_TREE=/ GIT_DIR=/tmp bash "$root/ci/source-policy.sh" >/dev/null 2>&1; then echo 'POLICY_STAGED_WORKTRE_BYPASS' >&2; exit 1; fi; }
+deny() { if SOURCE_POLICY_ROOT="$tmp" GIT_INDEX_FILE="$tmp/.git/forged-empty-index" GIT_WORK_TREE=/ GIT_DIR=/tmp bash "$root/ci/source-policy.sh" >/dev/null 2>&1; then echo 'POLICY_STAGED_WORKTREE_BYPASS' >&2; exit 1; fi; }
 pass
 # A staged original paired with different worktree bytes must be denied.
 printf 'tampered actor source\n' > "$tmp/src/worker.ores"
