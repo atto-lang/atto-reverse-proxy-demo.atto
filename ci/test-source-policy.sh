@@ -138,4 +138,19 @@ git -C "$test_repo" add src/disguised.txt
 check_ok
 git -C "$test_repo" rm -q -f -- src/disguised.txt
 check_ok
-printf 'SOURCE_POLICY_NEGATIVE_TESTS_PASS scenarios=16\n'
+# A harmless extension cannot make mutated worktree bytes match the pinned index.
+printf 'changed after staging\n' > "$test_repo/src/hello.ores"
+check_bad
+printf '00_abc\n' > "$test_repo/src/hello.ores"
+check_ok
+# Neither a foreign Git repository nor caller-supplied Git config may redirect
+# the audit away from the pinned checkout's own index and object database.
+poison_repo="$(mktemp -d)"
+git init -q "$poison_repo"
+GIT_DIR="$poison_repo/.git" GIT_WORK_TREE="$poison_repo" check_ok
+GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.bare GIT_CONFIG_VALUE_0=true check_ok
+rm -rf -- "$poison_repo"
+# A well-formed but stale external expected-HEAD claim must be rejected.
+EXPECTED_DEMO_SHA="$(printf '0%.0s' {1..40})" check_bad
+check_ok
+printf 'SOURCE_POLICY_NEGATIVE_TESTS_PASS scenarios=20\n'
