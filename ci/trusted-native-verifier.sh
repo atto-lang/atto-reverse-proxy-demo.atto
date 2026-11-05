@@ -78,7 +78,27 @@ done
 # than shared /tmp. This narrows cross-process interference on persistent
 # self-hosted runners; runner-group isolation remains an independent admin gate.
 umask 077
-guest_tmp="$(/usr/bin/mktemp -d -- "$RUNNER_TEMP/oreslang-guest.XXXXXX")" || {
+runner_temp_root="$(/usr/bin/realpath -e -- "$RUNNER_TEMP")" || {
+  echo "runner temp root is missing or cannot be resolved" >&2
+  exit 1
+}
+test "$runner_temp_root" = "$RUNNER_TEMP" && test -d "$runner_temp_root" && test ! -L "$RUNNER_TEMP" || {
+  echo "runner temp root must be canonical and not a symlink" >&2
+  exit 1
+}
+test "$(/usr/bin/stat -c %u -- "$runner_temp_root")" = "$(/usr/bin/id -u)" || {
+  echo "runner temp root must be owned by the runner account" >&2
+  exit 1
+}
+runner_temp_mode="$(/usr/bin/stat -c %a -- "$runner_temp_root")"
+[[ "$runner_temp_mode" =~ ^[0-7]{3,4}$ ]] && (( (8#$runner_temp_mode & 8#22) == 0 )) || {
+  echo "runner temp root must not be group/world writable" >&2
+  exit 1
+}
+case "$runner_temp_root/" in
+  "$checkout_root/"*) echo "runner temp root must be outside the frozen checkout" >&2; exit 1 ;;
+esac
+guest_tmp="$(/usr/bin/mktemp -d -- "$runner_temp_root/oreslang-guest.XXXXXX")" || {
   echo "unable to create private guest temp directory" >&2
   exit 1
 }
