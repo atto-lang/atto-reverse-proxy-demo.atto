@@ -78,7 +78,9 @@ jobs:
           grep -Fq '"TMPDIR=$guest_tmp"' ci/trusted-native-verifier.sh
           grep -Fq 'test ! -e "$missing_cfg" && test ! -L "$missing_cfg"' ci/trusted-native-verifier.sh
           grep -Fq 'missing-config fixture unexpectedly exists' ci/trusted-native-verifier.sh
-          echo 'TRUSTED_NATIVE_VERIFIER_SOURCE_HARDENING_PASS private_tmp=1 missing_fixture_recheck=1'
+          verifier_blob="$(git hash-object --no-filters -- ci/trusted-native-verifier.sh)"
+          grep -Fq "test \"\$verifier_blob\" = '$verifier_blob'" .github/workflows/trusted-frozen-reverse-native.yml
+          echo "TRUSTED_NATIVE_VERIFIER_SOURCE_HARDENING_PASS private_tmp=1 missing_fixture_recheck=1 verifier_blob=$verifier_blob"
       - name: Audit exact checked-out source against pinned head
         shell: bash
         env:
