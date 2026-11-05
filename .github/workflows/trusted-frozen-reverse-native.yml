@@ -355,7 +355,7 @@ jobs:
             echo 'root-owned manifest pin disagrees with independently approved Actions variable' >&2; exit 1;
           }
           verifier_blob="$(/usr/bin/env -u GIT_DIR -u GIT_WORK_TREE -u GIT_COMMON_DIR -u GIT_INDEX_FILE -u GIT_OBJECT_DIRECTORY -u GIT_ALTERNATE_OBJECT_DIRECTORIES -u GIT_NAMESPACE -u GIT_CONFIG -u GIT_CONFIG_COUNT -u GIT_CONFIG_PARAMETERS GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null /usr/bin/git hash-object --no-filters -- "$verifier")"
-          test "$verifier_blob" = '1ce44ead79c16416e64580a8a703c4799982144c' || {
+          test "$verifier_blob" = '41bc1fb367dbc38d8d9b65d8813bce417797561a' || {
             echo 'root-owned verifier does not match reviewed Git blob' >&2; exit 1;
           }
           /usr/bin/timeout 15s "$verifier" --version || /usr/bin/timeout 15s "$verifier" --build-info || /usr/bin/timeout 15s "$verifier" --help
@@ -575,11 +575,10 @@ jobs:
           set -euo pipefail
           export PATH='/usr/bin:/bin:/usr/sbin:/sbin'
           hash -r
-          missing="$RUNNER_TEMP/ores-proxy-missing-config.yaml"
-          /usr/bin/rm -f "$missing"
+          missing_sentinel='@ORESLANG_MISSING_CONFIG@'
           set +e
-          ores_proxy_conf_yaml="$missing" /usr/bin/timeout --signal=TERM --kill-after=2s 15s "/opt/oreslang-approved/oreslang-runtime/bin/verified-reverse-oreslang" --no-prompt \
-            --allow-read="$missing" \
+          ores_proxy_conf_yaml="$missing_sentinel" /usr/bin/timeout --signal=TERM --kill-after=2s 15s "/opt/oreslang-approved/oreslang-runtime/bin/verified-reverse-oreslang" --no-prompt \
+            --allow-read="$missing_sentinel" \
             --allow-env=ores_proxy_conf_yaml \
             src/serve_reverse.ores >"$RUNNER_TEMP/missing-config.log" 2>&1
           status=$?
