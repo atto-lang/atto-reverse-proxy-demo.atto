@@ -74,12 +74,27 @@ done
 # Pass a minimal explicit guest environment. Runner/provider credentials,
 # dynamic-loader hooks, Git configuration and unexpected variables stay outside
 # the untrusted Oreslang process, including previously unknown secret names.
+# Give each guest invocation a private job-local temporary directory rather
+# than shared /tmp. This narrows cross-process interference on persistent
+# self-hosted runners; runner-group isolation remains an independent admin gate.
+umask 077
+guest_tmp="$(/usr/bin/mktemp -d -- "$RUNNER_TEMP/oreslang-guest.XXXXXX")" || {
+  echo "unable to create private guest temp directory" >&2
+  exit 1
+}
+test -d "$guest_tmp" && test ! -L "$guest_tmp" || exit 1
+test "$( /usr/bin/stat -c %u -- "$guest_tmp" )" = "$( /usr/bin/id -u )" || exit 1
+guest_tmp_mode="$(/usr/bin/stat -c %a -- "$guest_tmp")"
+[[ "$guest_tmp_mode" =~ ^[0-7]{3,4}$ ]] && (( (8#$guest_tmp_mode & 8#077) == 0 )) || {
+  echo "guest temp directory is accessible outside the runner account" >&2
+  exit 1
+}
 guest_env=(
   "JAVA_HOME=$java_root"
   "PATH=$java_root/bin:/usr/bin:/bin"
   "LANG=C.UTF-8"
   "HOME=/nonexistent"
-  "TMPDIR=/tmp"
+  "TMPDIR=$guest_tmp"
 )
 # Preserve only the two reviewed reverse ingress configuration cases:
 # tracked example.yaml and the deliberately absent configuration fixture.
@@ -89,6 +104,15 @@ if [[ "${ores_proxy_conf_yaml+x}" == x ]]; then
   if [[ "$ores_proxy_conf_yaml" != "$example_cfg" && "$ores_proxy_conf_yaml" != "$missing_cfg" ]]; then
     echo "unapproved reverse ingress configuration environment path" >&2
     exit 1
+  fi
+  if [[ "$ores_proxy_conf_yaml" == "$missing_cfg" ]]; then
+    # The negative fixture is authorized only while it is truly absent.
+    # Recheck immediately before guest launch; otherwise a persistent process
+    # on the runner could turn the "missing" path into an unexpected input.
+    test ! -e "$missing_cfg" && test ! -L "$missing_cfg" || {
+      echo "missing-config fixture unexpectedly exists" >&2
+      exit 1
+    }
   fi
   guest_env+=("ores_proxy_conf_yaml=$ores_proxy_conf_yaml")
 fi
