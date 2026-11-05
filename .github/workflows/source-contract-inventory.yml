@@ -69,6 +69,16 @@ jobs:
           bash -n ci/source-policy.sh
           bash -n ci/test-source-policy.sh
           bash ci/test-source-policy.sh
+      - name: Verify trusted native verifier source hardening
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash -n ci/trusted-native-verifier.sh
+          grep -Fq 'guest_tmp="$(/usr/bin/mktemp -d -- "$RUNNER_TEMP/oreslang-guest.XXXXXX")"' ci/trusted-native-verifier.sh
+          grep -Fq '"TMPDIR=$guest_tmp"' ci/trusted-native-verifier.sh
+          grep -Fq 'test ! -e "$missing_cfg" && test ! -L "$missing_cfg"' ci/trusted-native-verifier.sh
+          grep -Fq 'missing-config fixture unexpectedly exists' ci/trusted-native-verifier.sh
+          echo 'TRUSTED_NATIVE_VERIFIER_SOURCE_HARDENING_PASS private_tmp=1 missing_fixture_recheck=1'
       - name: Audit exact checked-out source against pinned head
         shell: bash
         env:
