@@ -1,0 +1,62 @@
+#!/usr/bin/env bash
+# Hermetic format-contract tests; never treat synthetic receipts as native evidence.
+set -euo pipefail
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
+tmp="$(/usr/bin/mktemp -d)"
+trap '/usr/bin/rm -rf -- "$tmp"' EXIT
+make_valid() {
+  local repo source tree compiler contracts
+  case "$1" in
+    forward)
+      repo=1429955596 source=fe46a4cac8c3cbedfaa5d872bc0e6348974141b5
+      tree=42052135ffd0ed6db5f4d1031fbbc2234824b81a compiler=31 contracts=15 ;;
+    reverse)
+      repo=1429954649 source=1a667fcd4481e3511e0cfa1008e855d96540c200
+      tree=5937599df00b6122dccaf22bcdebdaf836f6d3ee compiler=28 contracts=13 ;;
+    *) exit 1 ;;
+  esac
+  /usr/bin/jq -n --argjson repo "$repo" --arg source "$source" --arg tree "$tree" \
+    --argjson compiler "$compiler" --argjson contracts "$contracts" '
+    {schema:"atto.proxy.native-evidence.v1", repository_id:$repo,
+     source_sha:$source, source_tree:$tree, control_sha:("a" * 40),
+     runtime_manifest_sha256:("b" * 64), jdk_major:25,
+     run_id:101, run_attempt:1, job_id:102, runner_id:103,
+     status:"completed", conclusion:"success", compiler_checks:$compiler,
+     standalone_contracts:$contracts, wire_tests:1, native_negative_mutations:1,
+     source_free:false, host_only:false, release_authorized:false,
+     steps:[
+       {role:"compiler", number:1, status:"completed", conclusion:"success"},
+       {role:"contracts", number:2, status:"completed", conclusion:"success"},
+       {role:"wire", number:3, status:"completed", conclusion:"success"}
+     ]}
+  ' > "$tmp/base.json"
+}
+negative=0
+reject() {
+  if /bin/bash "$root/ci/native-release-evidence-v1.sh" "$tmp/candidate.json" >/dev/null 2>&1; then
+    echo 'TEST_FAILURE: invalid or untrusted receipt accepted' >&2
+    exit 1
+  fi
+  negative=$((negative+1))
+}
+for side in forward reverse; do
+  make_valid "$side"
+  /bin/bash "$root/ci/native-release-evidence-v1.sh" "$tmp/base.json" | /usr/bin/grep -Fq 'NOT_RELEASE_AUTHORITY'
+  /usr/bin/cp "$tmp/base.json" "$tmp/candidate.json"
+  for mutation in \
+    '.schema="wrong"' '.repository_id=0' '.source_sha="stale"' \
+    '.source_tree="stale"' '.control_sha="short"' \
+    '.runtime_manifest_sha256="unknown"' '.jdk_major=24' \
+    '.run_id=0' '.run_attempt=0' '.job_id=0' '.runner_id=0' \
+    '.status="queued"' '.conclusion="cancelled"' \
+    '.steps=[]' '.steps=null' \
+    '.steps[0].conclusion="failure"' '.steps[1].status="queued"' \
+    '.steps[2].role="compiler"' '.steps[0].number=2' \
+    '.compiler_checks=0' '.standalone_contracts=0' \
+    '.wire_tests=0' '.native_negative_mutations=0' \
+    '.source_free=true' '.host_only=true' '.release_authorized=true'; do
+    /usr/bin/jq "$mutation" "$tmp/base.json" > "$tmp/candidate.json"
+    reject
+  done
+done
+printf 'SOURCE_FREE_NATIVE_EVIDENCE_FORMAT_TESTS_PASS positive_fixtures=2 negative_mutations=%s; native_guest=NOT_EXECUTED\n' "$negative"

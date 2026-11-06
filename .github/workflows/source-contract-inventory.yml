@@ -96,6 +96,13 @@ jobs:
         run: |
           set -euo pipefail
           bash ci/source-policy.sh
+      - name: Validate shared native evidence format (source-free negative fixtures only)
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash -n ci/native-release-evidence-v1.sh
+          bash -n ci/test-native-release-evidence-v1.sh
+          bash ci/test-native-release-evidence-v1.sh
       - name: Preserve non-production verdict
         shell: bash
         run: echo 'SOURCE_INVENTORY_ONLY; native compile/execute, upstream forwarding and network proof NOT_EXECUTED.'
