@@ -114,17 +114,13 @@ if ! /usr/bin/jq -e '
     "source_free", "host_only", "release_authorized", "steps"
   ]) and
   .schema == "atto.proxy.native-evidence.v1" and
-  (
-    (.repository_id == 1429955596 and
-     .source_sha == "fe46a4cac8c3cbedfaa5d872bc0e6348974141b5" and
-     .source_tree == "42052135ffd0ed6db5f4d1031fbbc2234824b81a" and
-     .compiler_checks == 31 and .standalone_contracts == 15)
-    or
-    (.repository_id == 1429954649 and
-     .source_sha == "1a667fcd4481e3511e0cfa1008e855d96540c200" and
-     .source_tree == "5937599df00b6122dccaf22bcdebdaf836f6d3ee" and
-     .compiler_checks == 28 and .standalone_contracts == 13)
-  ) and
+  # Repository-local admission: a valid receipt from the *other* proxy
+  # must not be accepted, even when its source/tree/counts are self-consistent.
+  .repository_id == 1429954649 and
+  .source_sha == "1a667fcd4481e3511e0cfa1008e855d96540c200" and
+  .source_tree == "5937599df00b6122dccaf22bcdebdaf836f6d3ee" and
+  .compiler_checks == 28 and
+  .standalone_contracts == 13 and
   (.control_sha | sha40) and
   (.runtime_manifest_sha256 | sha64) and
   .jdk_major == 25 and
