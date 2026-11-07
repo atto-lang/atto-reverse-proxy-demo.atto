@@ -103,11 +103,11 @@ for side in forward reverse; do
   # JSON number syntax matters even when jq's floating-point evaluation
   # rounds the token back into an integer. A second receipt parser may not
   # agree about a run ID, attempt or step number. Exercise both receipt types.
-  for token in 101.0 101e0 101.0000000000000001 1.01e2 101E+0 0101 00101; do
+  for token in 101.0 101e0 101.0000000000000001 1.01e2 101E+0 0101 00101 +101 .101 101. 101e00; do
     /usr/bin/sed "s/\"run_id\": 101,/\"run_id\": $token,/" "$tmp/base.json" > "$tmp/candidate.json"
     reject
   done
-  for token in 1.0 1e0 1.0000000000000001 1E+0 01 001; do
+  for token in 1.0 1e0 1.0000000000000001 1E+0 01 001 +1 .1 1. 1e00; do
     /usr/bin/sed "s/\"number\": 1,/\"number\": $token,/" "$tmp/base.json" > "$tmp/candidate.json"
     reject
   done
