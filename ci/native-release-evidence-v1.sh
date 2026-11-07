@@ -8,6 +8,47 @@ if (( $# != 1 )) || [[ ! -f "$1" || -L "$1" ]]; then
   exit 2
 fi
 test -x /usr/bin/jq || { echo 'EVIDENCE_REJECTED: jq unavailable' >&2; exit 2; }
+# A format-only receipt must still have an unambiguous single JSON encoding.
+# jq normally accepts multiple top-level JSON texts and keeps the last value
+# of duplicate object keys. Another consumer can bind a different identity.
+# Refuse oversized, multi-document, or duplicate-key inputs before schema checks.
+receipt_bytes="$(/usr/bin/stat -c %s -- "$1")" || exit 2
+[[ "$receipt_bytes" =~ ^[0-9]+$ ]] && (( receipt_bytes > 0 && receipt_bytes <= 65536 )) || {
+  echo 'EVIDENCE_REJECTED: candidate receipt exceeds bounded JSON budget' >&2
+  exit 2
+}
+if ! /usr/bin/jq -s -e 'length == 1' "$1" >/dev/null; then
+  echo 'EVIDENCE_REJECTED: require exactly one valid JSON document' >&2
+  exit 2
+fi
+# Streaming retains duplicate-key events that ordinary jq object parsing
+# discards. Track repeated leaf paths and reopened object/array parent paths.
+if ! (
+  /usr/bin/jq --stream -c . "$1" |
+  /usr/bin/jq -s -e '
+    reduce .[] as $event (
+      {seen: [], closed: [], valid: true};
+      if (.valid | not) then .
+      elif ($event | length) == 2 then
+        ($event[0] | tojson) as $leaf
+        | [range(1; ($event[0] | length) + 1) | $event[0][0:.] | tojson] as $prefixes
+        | .closed as $closed
+        | .seen as $seen
+        | if (($seen | index($leaf)) != null)
+          or any($prefixes[]; . as $p | ($closed | index($p)) != null)
+          or any($prefixes[0:-1][]; . as $p | ($seen | index($p)) != null)
+          then .valid = false
+          else .seen += [$leaf]
+          end
+      else
+        .closed += [($event[0][0:-1] | tojson)]
+      end
+    ) | .valid
+  ' >/dev/null
+); then
+  echo 'EVIDENCE_REJECTED: duplicate or reopened JSON object key' >&2
+  exit 2
+fi
 if ! /usr/bin/jq -e '
   def sha40: type == "string" and test("^[0-9a-f]{40}$");
   def sha64: type == "string" and test("^[0-9a-f]{64}$");

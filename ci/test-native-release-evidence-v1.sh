@@ -58,5 +58,21 @@ for side in forward reverse; do
     /usr/bin/jq "$mutation" "$tmp/base.json" > "$tmp/candidate.json"
     reject
   done
+  # These raw-text mutations bypass ordinary jq's last-key-wins parsing.
+  # A separate process could interpret a different source, verdict or step.
+  /usr/bin/sed 's/"source_free": false,/"source_free": true, "source_free": false,/' "$tmp/base.json" > "$tmp/candidate.json"
+  reject
+  /usr/bin/sed 's/"role": "compiler",/"role": "wire", "role": "compiler",/' "$tmp/base.json" > "$tmp/candidate.json"
+  reject
+  /usr/bin/sed 's/"steps": \[/"steps": [], "steps": [/' "$tmp/base.json" > "$tmp/candidate.json"
+  reject
+  /usr/bin/cat "$tmp/base.json" "$tmp/base.json" > "$tmp/candidate.json"
+  reject
+  /usr/bin/printf '{}\n' > "$tmp/candidate.json"
+  /usr/bin/cat "$tmp/base.json" >> "$tmp/candidate.json"
+  reject
+  /usr/bin/cp "$tmp/base.json" "$tmp/candidate.json"
+  /usr/bin/printf '%*s' 66000 '' >> "$tmp/candidate.json"
+  reject
 done
 printf 'SOURCE_FREE_NATIVE_EVIDENCE_FORMAT_TESTS_PASS positive_fixtures=2 negative_mutations=%s; native_guest=NOT_EXECUTED\n' "$negative"
