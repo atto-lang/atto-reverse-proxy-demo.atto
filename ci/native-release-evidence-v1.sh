@@ -47,7 +47,7 @@ allowed_bytes="$(LC_ALL=C /usr/bin/tr -cd '\011\012\015\040-\176' < "$receipt" |
 # the bounded ASCII snapshot, consuming quoted JSON strings as whole tokens.
 # This is still format-only evidence, never native or release authorization.
 if ! /usr/bin/jq -Rse '
-  [scan("\"(?:\\\\.|[^\"\\\\])*\"|-?(?:0|[1-9][0-9]*)(?:\\.[0-9]+)?(?:[eE][+-]?[0-9]+)?")] |
+  [scan("\"(?:\\\\.|[^\"\\\\])*\"|-?[0-9]+(?:\\.[0-9]+)?(?:[eE][+-]?[0-9]+)?")] |
   all(.[]; startswith("\"") or test("^(0|[1-9][0-9]*)$"))
 ' "$receipt" >/dev/null; then
   echo 'EVIDENCE_REJECTED: noncanonical or floating-point numeric JSON token' >&2
