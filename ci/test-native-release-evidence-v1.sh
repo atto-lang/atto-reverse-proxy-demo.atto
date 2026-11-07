@@ -100,6 +100,17 @@ for side in forward reverse; do
     /usr/bin/jq "$mutation" "$tmp/base.json" > "$tmp/candidate.json"
     reject
   done
+  # JSON number syntax matters even when jq's floating-point evaluation
+  # rounds the token back into an integer. A second receipt parser may not
+  # agree about a run ID, attempt or step number. Exercise both receipt types.
+  for token in 101.0 101e0 101.0000000000000001 1.01e2 101E+0; do
+    /usr/bin/sed "s/\"run_id\": 101,/\"run_id\": $token,/" "$tmp/base.json" > "$tmp/candidate.json"
+    reject
+  done
+  for token in 1.0 1e0 1.0000000000000001 1E+0; do
+    /usr/bin/sed "s/\"number\": 1,/\"number\": $token,/" "$tmp/base.json" > "$tmp/candidate.json"
+    reject
+  done
   # jq may silently ignore a NUL suffix; another parser may treat it as a
   # boundary or consume a second contradictory document. Fail before jq.
   /usr/bin/cp "$tmp/base.json" "$tmp/candidate.json"
