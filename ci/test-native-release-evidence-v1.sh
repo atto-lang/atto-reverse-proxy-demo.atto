@@ -74,6 +74,20 @@ for side in forward reverse; do
   /usr/bin/cp "$tmp/base.json" "$tmp/candidate.json"
   /usr/bin/printf '%*s' 66000 '' >> "$tmp/candidate.json"
   reject
+  # A jq-positive integer can exceed the exact range of JS/JSON consumers.
+  # Reject identity collisions from rounding, oversized counts and steps.
+  for mutation in \
+    '.run_id=9007199254740992' \
+    '.run_attempt=9007199254740992' \
+    '.job_id=1e30' \
+    '.runner_id=1e308' \
+    '.wire_tests=1e30' \
+    '.native_negative_mutations=9007199254740992' \
+    '.steps[0].number=9007199254740992' \
+    '.steps[1].number=1e30'; do
+    /usr/bin/jq "$mutation" "$tmp/base.json" > "$tmp/candidate.json"
+    reject
+  done
   # Closed schema: do not let speculative approval/provenance keys bypass
   # the explicitly non-authoritative result or conflict with checked roles.
   for mutation in \
