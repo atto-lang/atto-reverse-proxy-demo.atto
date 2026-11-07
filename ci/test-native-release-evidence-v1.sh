@@ -41,8 +41,26 @@ reject() {
 }
 for side in forward reverse; do
   make_valid "$side"
+  # A fully self-consistent receipt from another private repository is still
+  # unauthorized for the local verifier; no cross-repository evidence replay.
+  if [[ "$side" != "reverse" ]]; then
+    /usr/bin/cp "$tmp/base.json" "$tmp/candidate.json"
+    reject
+    continue
+  fi
   /bin/bash "$root/ci/native-release-evidence-v1.sh" "$tmp/base.json" | /usr/bin/grep -Fq 'NOT_RELEASE_AUTHORITY'
   /usr/bin/cp "$tmp/base.json" "$tmp/candidate.json"
+  # Partial foreign-identity substitution must not admit mixed source trees.
+  for mutation in \
+    '.repository_id=1429955596' \
+    '.source_sha="fe46a4cac8c3cbedfaa5d872bc0e6348974141b5"' \
+    '.source_tree="42052135ffd0ed6db5f4d1031fbbc2234824b81a"' \
+    '.compiler_checks=31' \
+    '.standalone_contracts=15' \
+    '.repository_id=1429955596 | .source_sha="fe46a4cac8c3cbedfaa5d872bc0e6348974141b5" | .source_tree="42052135ffd0ed6db5f4d1031fbbc2234824b81a"'; do
+    /usr/bin/jq "$mutation" "$tmp/base.json" > "$tmp/candidate.json"
+    reject
+  done
   for mutation in \
     '.schema="wrong"' '.repository_id=0' '.source_sha="stale"' \
     '.source_tree="stale"' '.control_sha="short"' \
@@ -131,4 +149,4 @@ for side in forward reverse; do
   { /usr/bin/printf '\357\273\277'; /usr/bin/cat "$tmp/base.json"; } > "$tmp/candidate.json"
   reject
 done
-printf 'SOURCE_FREE_NATIVE_EVIDENCE_FORMAT_TESTS_PASS positive_fixtures=2 negative_mutations=%s; native_guest=NOT_EXECUTED\n' "$negative"
+printf 'SOURCE_FREE_NATIVE_EVIDENCE_FORMAT_TESTS_PASS positive_fixtures=1 negative_mutations=%s; native_guest=NOT_EXECUTED\n' "$negative"
