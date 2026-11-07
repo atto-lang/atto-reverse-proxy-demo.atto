@@ -42,13 +42,18 @@ allowed_bytes="$(LC_ALL=C /usr/bin/tr -cd '\011\012\015\040-\176' < "$receipt" |
   echo 'EVIDENCE_REJECTED: receipt contains non-ASCII or disallowed control bytes' >&2
   exit 2
 }
-# Reject noncanonical numeric spellings before jq converts high-precision
-# fractions or scientific notation into an apparently exact integer. Scan
-# the bounded ASCII snapshot, consuming quoted JSON strings as whole tokens.
-# This is still format-only evidence, never native or release authorization.
+# jq accepts non-JSON numeric spellings (+101, 0101, .101, 101.)
+# and rounds high-precision fractions (101.0000000000000001) into integers.
+# A second parser can bind a different run/job/step identity. Strip quoted
+# strings as whole tokens, then reject every noncanonical unquoted token.
+# The bounded ASCII snapshot is checked before jq's permissive JSON parser.
+# This is still format-only evidence, not native or release authorization.
 if ! /usr/bin/jq -Rse '
-  [scan("\"(?:\\\\.|[^\"\\\\])*\"|-?[0-9]+(?:\\.[0-9]+)?(?:[eE][+-]?[0-9]+)?")] |
-  all(.[]; startswith("\"") or test("^(0|[1-9][0-9]*)$"))
+  gsub("\"(?:\\\\.|[^\"\\\\])*\""; " ")
+  | gsub("[\\[\\]{}:,[:space:]]"; " ")
+  | split(" ")
+  | map(select(length > 0))
+  | all(.[]; . == "true" or . == "false" or . == "null" or test("^(0|[1-9][0-9]*)$"))
 ' "$receipt" >/dev/null; then
   echo 'EVIDENCE_REJECTED: noncanonical or floating-point numeric JSON token' >&2
   exit 2
