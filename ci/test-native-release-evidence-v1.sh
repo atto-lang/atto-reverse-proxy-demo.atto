@@ -74,5 +74,17 @@ for side in forward reverse; do
   /usr/bin/cp "$tmp/base.json" "$tmp/candidate.json"
   /usr/bin/printf '%*s' 66000 '' >> "$tmp/candidate.json"
   reject
+  # Closed schema: do not let speculative approval/provenance keys bypass
+  # the explicitly non-authoritative result or conflict with checked roles.
+  for mutation in \
+    '.release_approved_by_admin=true' \
+    '.independent_review="APPROVED"' \
+    '.verified_guest_execution=true' \
+    '.extra_source_tree="ffffffffffffffffffffffffffffffffffffffff"' \
+    '.steps[0].native_execution_proven=true' \
+    '.steps[1].runner_id=999'; do
+    /usr/bin/jq "$mutation" "$tmp/base.json" > "$tmp/candidate.json"
+    reject
+  done
 done
 printf 'SOURCE_FREE_NATIVE_EVIDENCE_FORMAT_TESTS_PASS positive_fixtures=2 negative_mutations=%s; native_guest=NOT_EXECUTED\n' "$negative"

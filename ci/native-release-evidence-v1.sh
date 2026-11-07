@@ -52,14 +52,24 @@ fi
 if ! /usr/bin/jq -e '
   def sha40: type == "string" and test("^[0-9a-f]{40}$");
   def sha64: type == "string" and test("^[0-9a-f]{64}$");
+  # Explicit vocabulary: no unreviewed, contradictory claims may ride along.
+  # In particular, fields suggesting approval or native proof must not be
+  # interpreted by downstream consumers of a mere format-only candidate.
+  def exact_fields($expected): type == "object" and (keys == ($expected | sort));
   def positive_int: type == "number" and . >= 1 and . == floor;
   def complete_step: .status == "completed" and .conclusion == "success" and (.number | positive_int);
   def complete_roles:
     type == "array" and length == 3 and
     (map(.role) | sort) == ["compiler", "contracts", "wire"] and
-    all(.[]; complete_step) and
+    all(.[]; exact_fields(["role", "number", "status", "conclusion"]) and complete_step) and
     ([.[].number] | unique | length) == 3;
-  type == "object" and
+  exact_fields([
+    "schema", "repository_id", "source_sha", "source_tree", "control_sha",
+    "runtime_manifest_sha256", "jdk_major", "run_id", "run_attempt",
+    "job_id", "runner_id", "status", "conclusion", "compiler_checks",
+    "standalone_contracts", "wire_tests", "native_negative_mutations",
+    "source_free", "host_only", "release_authorized", "steps"
+  ]) and
   .schema == "atto.proxy.native-evidence.v1" and
   (
     (.repository_id == 1429955596 and
