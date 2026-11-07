@@ -100,5 +100,24 @@ for side in forward reverse; do
     /usr/bin/jq "$mutation" "$tmp/base.json" > "$tmp/candidate.json"
     reject
   done
+  # jq may silently ignore a NUL suffix; another parser may treat it as a
+  # boundary or consume a second contradictory document. Fail before jq.
+  /usr/bin/cp "$tmp/base.json" "$tmp/candidate.json"
+  /usr/bin/printf '\000' >> "$tmp/candidate.json"
+  reject
+  /usr/bin/cp "$tmp/base.json" "$tmp/candidate.json"
+  /usr/bin/printf '\000{"release_authorized":true}\n' >> "$tmp/candidate.json"
+  reject
+  /usr/bin/cp "$tmp/base.json" "$tmp/candidate.json"
+  /usr/bin/printf '\377' >> "$tmp/candidate.json"
+  reject
+  /usr/bin/cp "$tmp/base.json" "$tmp/candidate.json"
+  /usr/bin/printf '\033[31m' >> "$tmp/candidate.json"
+  reject
+  /usr/bin/cp "$tmp/base.json" "$tmp/candidate.json"
+  /usr/bin/printf '\302\240' >> "$tmp/candidate.json"
+  reject
+  { /usr/bin/printf '\357\273\277'; /usr/bin/cat "$tmp/base.json"; } > "$tmp/candidate.json"
+  reject
 done
 printf 'SOURCE_FREE_NATIVE_EVIDENCE_FORMAT_TESTS_PASS positive_fixtures=2 negative_mutations=%s; native_guest=NOT_EXECUTED\n' "$negative"

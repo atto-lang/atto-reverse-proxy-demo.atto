@@ -12,19 +12,44 @@ test -x /usr/bin/jq || { echo 'EVIDENCE_REJECTED: jq unavailable' >&2; exit 2; }
 # jq normally accepts multiple top-level JSON texts and keeps the last value
 # of duplicate object keys. Another consumer can bind a different identity.
 # Refuse oversized, multi-document, or duplicate-key inputs before schema checks.
-receipt_bytes="$(/usr/bin/stat -c %s -- "$1")" || exit 2
-[[ "$receipt_bytes" =~ ^[0-9]+$ ]] && (( receipt_bytes > 0 && receipt_bytes <= 65536 )) || {
-  echo 'EVIDENCE_REJECTED: candidate receipt exceeds bounded JSON budget' >&2
+# Check size before copying, then parse only a private immutable-by-convention
+# snapshot. Independent jq reads of a caller-writable path can see different
+# files, creating parser/identity disagreement between admission passes.
+source_bytes="$(/usr/bin/stat -c %s -- "$1")" || exit 2
+[[ "$source_bytes" =~ ^[0-9]+$ ]] && (( source_bytes > 0 && source_bytes <= 65536 )) || {
+  echo 'EVIDENCE_REJECTED: source receipt exceeds bounded JSON budget' >&2
   exit 2
 }
-if ! /usr/bin/jq -s -e 'length == 1' "$1" >/dev/null; then
+umask 077
+snapshot_dir="$(/usr/bin/mktemp -d)" || exit 2
+trap '/usr/bin/rm -rf -- "$snapshot_dir"' EXIT
+receipt="$snapshot_dir/receipt.json"
+/usr/bin/cp -- "$1" "$receipt" || {
+  echo 'EVIDENCE_REJECTED: unable to snapshot receipt' >&2
+  exit 2
+}
+receipt_bytes="$(/usr/bin/stat -c %s -- "$receipt")" || exit 2
+[[ "$receipt_bytes" =~ ^[0-9]+$ ]] && (( receipt_bytes > 0 && receipt_bytes <= 65536 )) || {
+  echo 'EVIDENCE_REJECTED: snapshotted receipt exceeds bounded JSON budget' >&2
+  exit 2
+}
+# jq accepts a NUL after valid JSON and may ignore trailing data. Reject all
+# non-ASCII/control octets before parsing so other JSON consumers cannot see
+# a different byte stream. The fixed schema uses only ASCII keys and values;
+# JSON \u escapes remain permissible.
+allowed_bytes="$(LC_ALL=C /usr/bin/tr -cd '\011\012\015\040-\176' < "$receipt" | /usr/bin/wc -c)" || exit 2
+[[ "$allowed_bytes" -eq "$receipt_bytes" ]] || {
+  echo 'EVIDENCE_REJECTED: receipt contains non-ASCII or disallowed control bytes' >&2
+  exit 2
+}
+if ! /usr/bin/jq -s -e 'length == 1' "$receipt" >/dev/null; then
   echo 'EVIDENCE_REJECTED: require exactly one valid JSON document' >&2
   exit 2
 fi
 # Streaming retains duplicate-key events that ordinary jq object parsing
 # discards. Track repeated leaf paths and reopened object/array parent paths.
 if ! (
-  /usr/bin/jq --stream -c . "$1" |
+  /usr/bin/jq --stream -c . "$receipt" |
   /usr/bin/jq -s -e '
     reduce .[] as $event (
       {seen: [], closed: [], valid: true};
@@ -97,7 +122,7 @@ if ! /usr/bin/jq -e '
   .source_free == false and .host_only == false and
   .release_authorized == false and
   (.steps | complete_roles)
-' "$1" >/dev/null; then
+' "$receipt" >/dev/null; then
   echo 'EVIDENCE_REJECTED: native candidate schema, exact identity or executed-step claims invalid' >&2
   exit 2
 fi
