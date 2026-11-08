@@ -101,6 +101,81 @@ jobs = mapping(root.fetch('jobs'), 'jobs')
 keys_eq(jobs, %w[protected-main-preflight native-contracts], 'jobs')
 expected_if = "github.event_name == 'workflow_dispatch' && github.repository_id == '#{repo_id}' && github.ref == 'refs/heads/main' && github.ref_protected == true"
 checkout = 'actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09'
+# Reviewed ordered step names. An added shell step or reordered execution
+# is not admitted by merely preserving the runner and trigger guards.
+reviewed_steps = {
+  'forward' => {
+    'protected-main-preflight' => [
+      "Verify live protected default branch and control-plane SHA",
+    ],
+    'native-contracts' => [
+      "Recheck protected private main before frozen checkout",
+      "Checkout exact frozen release candidate tree",
+      "Verify exact frozen source HEAD, JDK25 and administrator-approved runtime",
+      "Compile complete frozen Oreslang source inventory",
+      "Execute every standalone contract in frozen tree",
+      "Compiler-check entrypoint",
+      "Compiler-check configuration path admission",
+      "Compiler-check YAML parser",
+      "Compiler-check routing policy",
+      "Compiler-check middleware policy",
+      "Compiler-check generation coordinator",
+      "Compiler-check native YAML contract",
+      "Compiler-check native generation contract",
+      "Compiler-check native middleware contract",
+      "Compiler-check canonical path contract",
+      "Execute canonical configuration path contract",
+      "Execute YAML / routing / policy contract",
+      "Execute generation epoch / rollback contract",
+      "Execute independent middleware snapshot contract",
+      "Compiler-check HTTP metadata admission and header filtering",
+      "Compiler-check symbolic service and CONNECT actor gate",
+      "Execute symbolic service and CONNECT actor-gate contracts",
+      "Compiler-check native slot lifecycle, middleware manifest and data layouts",
+      "Compiler-check all security and slot regression vectors",
+      "Execute complete Oreslang safety contracts",
+      "Compiler-check lexical admission regression",
+      "Execute lexical admission regression",
+      "Compiler-check and execute native policy performance workload",
+    ],
+  },
+  'reverse' => {
+    'protected-main-preflight' => [
+      "Verify live protected default branch and control-plane SHA",
+    ],
+    'native-contracts' => [
+      "Recheck protected private main before frozen checkout",
+      "Checkout exact frozen release candidate tree",
+      "Verify exact frozen source HEAD, JDK25 and administrator-approved runtime",
+      "Compile complete frozen Oreslang source inventory",
+      "Execute every standalone contract in frozen tree",
+      "Compiler-check entrypoint",
+      "Compiler-check configuration path admission",
+      "Compiler-check YAML parser",
+      "Compiler-check routing policy",
+      "Compiler-check middleware policy",
+      "Compiler-check generation coordinator",
+      "Compiler-check native YAML contract",
+      "Compiler-check native generation contract",
+      "Compiler-check native middleware contract",
+      "Compiler-check canonical path contract",
+      "Execute canonical configuration path contract",
+      "Execute YAML / routing / policy contract",
+      "Execute generation epoch / rollback contract",
+      "Execute independent middleware snapshot contract",
+      "Compiler-check HTTP metadata admission and header filtering",
+      "Compiler-check native slot lifecycle, middleware manifest and data layouts",
+      "Compiler-check all security and slot regression vectors",
+      "Compiler-check opt-in reverse ingress and TCP smoke",
+      "Execute loopback ingress status and framing smoke",
+      "Fail closed if reverse ingress configuration vanishes",
+      "Execute complete Oreslang safety contracts",
+      "Compiler-check lexical admission regression",
+      "Execute lexical admission regression",
+      "Compiler-check and execute native policy performance workload",
+    ],
+  },
+}
 uses_count = 0
 jobs.each do |job_name, job_node|
   job = mapping(job_node, "jobs.#{job_name}")
@@ -122,10 +197,13 @@ jobs.each do |job_name, job_node|
   end
   steps = sequence(job.fetch('steps'), "#{job_name}.steps")
   refuse('empty steps') if steps.empty?
+  expected_names = reviewed_steps.fetch(side).fetch(job_name)
+  refuse('privileged step count drift') unless steps.length == expected_names.length
   steps.each_with_index do |step_node, idx|
     step = mapping(step_node, "#{job_name}.step[#{idx}]")
     refuse('unexpected step keys') unless (step.keys - %w[name shell env run uses with]).empty?
     refuse('missing step name') unless step.key?('name')
+    equals(step['name'], expected_names.fetch(idx), "reviewed step order #{idx}")
     equals(step['shell'], shell, 'step shell') if step.key?('shell')
     has_run = step.key?('run')
     has_uses = step.key?('uses')
