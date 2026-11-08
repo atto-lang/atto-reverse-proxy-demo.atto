@@ -93,7 +93,7 @@ mutate() {
   local label="$1" needle="$2" replacement="$3" remainder changed
   local expected=1
   case "$label" in
-    repository-identity|unprotected-main|default-ref) expected=2 ;;
+    repository-identity|unprotected-main|default-ref|comment-spoof-protection) expected=2 ;;
     missing-manifest-approval) expected=3 ;;
   esac
   count_is "$original" "$needle" "$expected" || {
@@ -123,5 +123,18 @@ mutate frozen-commit-drift "EXPECTED_SHA: '$frozen_sha'" "EXPECTED_SHA: '0000000
 mutate missing-manifest-approval 'APPROVED_ORESLANG_RUNTIME_MANIFEST_SHA256' 'UNREVIEWED_ORESLANG_RUNTIME_MANIFEST'
 mutate unpinned-checkout 'actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09' 'actions/checkout@v5'
 mutate manifest-pin-drift '/opt/oreslang-approved/oreslang-runtime.manifest.sha256' '/tmp/oreslang-runtime.manifest.sha256'
-test "$rejected" -eq 13
+# These mutations preserve the original guard *text* while introducing a
+# second authorization path, privilege grant or comment-only spoof. A simple
+# substring counter is insufficient to detect them.
+mutate workflow-id-token '  contents: read' $'  contents: read\n  id-token: write'
+mutate job-token-override '  native-contracts:' $'  native-contracts:\n    permissions:\n      id-token: write'
+mutate third-job $'jobs:\n  protected-main-preflight:' $'jobs:\n  unreviewed-job:\n    runs-on: ubuntu-24.04\n    steps: []\n  protected-main-preflight:'
+mutate hosted-runner-swap '    runs-on: ubuntu-24.04' '    runs-on: self-hosted'
+mutate checkout-step-injection '        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09' $'        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09\n        uses: unreviewed/action@v1'
+mutate loader-preload "  LD_PRELOAD: ''" '  LD_PRELOAD: /tmp/inject.so'
+mutate loader-node-options "  NODE_OPTIONS: ''" '  NODE_OPTIONS: --require=/tmp/inject.js'
+mutate job-env-loader '  native-contracts:' $'  native-contracts:\n    env:\n      LD_PRELOAD: /tmp/inject.so'
+mutate comment-spoof-protection 'github.ref_protected == true' '# github.ref_protected == true'
+mutate duplicate-permissions-mapping $'permissions:\n  contents: read' $'permissions:\n  contents: read\npermissions:\n  contents: read'
+test "$rejected" -eq 23
 echo "SOURCE_FREE_TRUSTED_WORKFLOW_STATIC_MUTATIONS_PASS rejected=$rejected native_guest=NOT_EXECUTED live_protection=NOT_VERIFIED"
