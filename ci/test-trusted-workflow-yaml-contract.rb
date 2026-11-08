@@ -59,7 +59,12 @@ cases = {
   'second-document' => ->(s) { s + "\n---\npermissions: {}\n" },
   'duplicate-checkout-key' => ->(s) { replace_once(s, 'persist-credentials: false', "persist-credentials: false\n          persist-credentials: true", 'with') },
   'extra-privileged-step' => ->(s) { replace_once(s, '      - name: Checkout exact frozen release candidate tree', "      - name: Unreviewed privileged shell\n        run: echo dangerous\n      - name: Checkout exact frozen release candidate tree", 'step-injection') },
-  'reviewed-step-renamed' => ->(s) { replace_once(s, '      - name: Checkout exact frozen release candidate tree', '      - name: Different checkout step', 'step-name') }
+  'reviewed-step-renamed' => ->(s) { replace_once(s, '      - name: Checkout exact frozen release candidate tree', '      - name: Different checkout step', 'step-name') },
+  # These preserve every YAML key, job, step name, permission and frozen ref.
+  # Only the reviewed shell source changes, so AST-only admission would accept.
+  'run-command-drift' => ->(s) { replace_once(s, "echo 'native_precheckout_live_admission=true'", "echo 'native_precheckout_live_admission=altered'", 'command-body') },
+  'run-command-injection' => ->(s) { replace_once(s, "          echo 'native_precheckout_live_admission=true'", "          echo 'native_precheckout_live_admission=true'\n          /usr/bin/printf 'injected-command\\n'", 'command-injection') },
+  'control-comment-drift' => ->(s) { replace_once(s, '# Explicit direct-HTTPS transport', '# Unreviewed direct-HTTPS transport', 'control-comment') }
 }
 count = 0
 cases.each do |name, mutate|
