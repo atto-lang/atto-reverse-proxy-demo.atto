@@ -117,6 +117,15 @@ check_policy() {
   count_is "$content" 'APPROVED_ORESLANG_RUNTIME_MANIFEST_SHA256' 3 || return 1
   count_is "$content" 'actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09' 1 || return 1
   count_is "$content" '/opt/oreslang-approved/oreslang-runtime.manifest.sha256' 1 || return 1
+  # These top-level runtime/checkout controls are independently mandatory.
+  # An intentionally revised blob pin must not legitimize weaker environment
+  # sanitization, longer native execution or persisted checkout credentials.
+  count_is "$content" "  NODE_TLS_REJECT_UNAUTHORIZED: '1'" 1 || return 1
+  count_is "$content" '  GIT_CONFIG_SYSTEM: /dev/null' 1 || return 1
+  count_is "$content" "  JAVA_TOOL_OPTIONS: ''" 1 || return 1
+  count_is "$content" "  GIT_CONFIG_PARAMETERS: ''" 1 || return 1
+  count_is "$content" '    timeout-minutes: 20' 1 || return 1
+  count_is "$content" '          persist-credentials: false' 1 || return 1
   return 0
 }
 check_policy "$workflow" || { echo 'STATIC_ADMISSION_FAILURE: original workflow violates pinned text contract' >&2; exit 1; }
@@ -182,5 +191,14 @@ mutate duplicated-job-if 'github.ref_protected == true' $'github.ref_protected =
 mutate duplicated-native-needs '    needs: protected-main-preflight' $'    needs: []\n    needs: protected-main-preflight'
 mutate duplicated-runner-group '      group: oreslang-trusted-native' $'      group: default\n      group: oreslang-trusted-native'
 mutate duplicated-runner-labels '      labels: [self-hosted, linux, x64, oreslang-jdk25]' $'      labels: [self-hosted]\n      labels: [self-hosted, linux, x64, oreslang-jdk25]'
-test "$rejected" -eq 31
+
+# Explicit semantic controls complement the complete blob pin. These remain
+# mandatory after an independently reviewed workflow/blob revision.
+mutate disable-tls-verification "  NODE_TLS_REJECT_UNAUTHORIZED: '1'" "  NODE_TLS_REJECT_UNAUTHORIZED: '0'"
+mutate mutable-system-git-config '  GIT_CONFIG_SYSTEM: /dev/null' '  GIT_CONFIG_SYSTEM: /tmp/unsafe-gitconfig'
+mutate injected-java-options "  JAVA_TOOL_OPTIONS: ''" "  JAVA_TOOL_OPTIONS: '-javaagent:/tmp/unsafe.jar'"
+mutate injected-git-parameters "  GIT_CONFIG_PARAMETERS: ''" "  GIT_CONFIG_PARAMETERS: 'core.hooksPath=/tmp/hooks'"
+mutate remove-native-timeout '    timeout-minutes: 20' '    timeout-minutes: 999'
+mutate persisted-checkout-credentials '          persist-credentials: false' '          persist-credentials: true'
+test "$rejected" -eq 37
 echo "SOURCE_FREE_TRUSTED_WORKFLOW_STATIC_MUTATIONS_PASS rejected=$rejected native_guest=NOT_EXECUTED live_protection=NOT_VERIFIED"
