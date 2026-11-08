@@ -247,4 +247,5 @@ for side in forward reverse; do
     /usr/bin/grep -Fq 'NOT_RELEASE_AUTHORITY'
 
 done
+/bin/bash "$root/ci/test-evidence-mutation-sensitivity.sh" reverse
 printf 'SOURCE_FREE_NATIVE_EVIDENCE_FORMAT_TESTS_PASS positive_fixtures=3 negative_mutations=%s; native_guest=NOT_EXECUTED\n' "$negative"
