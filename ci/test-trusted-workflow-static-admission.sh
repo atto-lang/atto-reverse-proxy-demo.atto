@@ -50,9 +50,15 @@ original="$(/usr/bin/cat -- "$workflow")"
 rejected=0
 mutate() {
   local label="$1" needle="$2" replacement="$3" remainder changed
-  [[ "$original" == *"$needle"* ]] || { echo "MISSING_SOURCE_ANCHOR: $label" >&2; exit 1; }
-  remainder="${original#*"$needle"}"
-  [[ "$remainder" != *"$needle"* ]] || { echo "AMBIGUOUS_SOURCE_ANCHOR: $label" >&2; exit 1; }
+  local expected=1
+  case "$label" in
+    repository-identity|unprotected-main|default-ref) expected=2 ;;
+    missing-manifest-approval) expected=3 ;;
+  esac
+  count_is "$original" "$needle" "$expected" || {
+    echo "MISSING_OR_AMBIGUOUS_SOURCE_ANCHOR: $label (expected $expected)" >&2
+    exit 1
+  }
   changed="${original/"$needle"/"$replacement"}"
   test "$original" != "$changed" || exit 1
   /usr/bin/printf '%s\n' "$changed" > "$tmp/mutant.yml"
