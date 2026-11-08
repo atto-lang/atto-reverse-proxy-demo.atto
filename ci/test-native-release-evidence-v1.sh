@@ -148,5 +148,103 @@ for side in forward reverse; do
   reject
   { /usr/bin/printf '\357\273\277'; /usr/bin/cat "$tmp/base.json"; } > "$tmp/candidate.json"
   reject
+
+  # A receipt is a closed, fully-typed contract. Every required field and
+  # every member of a step must be present: no partial proof by omission.
+  for mutation in \
+    'del(.schema)' \
+    'del(.repository_id)' \
+    'del(.source_sha)' \
+    'del(.source_tree)' \
+    'del(.control_sha)' \
+    'del(.runtime_manifest_sha256)' \
+    'del(.jdk_major)' \
+    'del(.run_id)' \
+    'del(.run_attempt)' \
+    'del(.job_id)' \
+    'del(.runner_id)' \
+    'del(.status)' \
+    'del(.conclusion)' \
+    'del(.compiler_checks)' \
+    'del(.standalone_contracts)' \
+    'del(.wire_tests)' \
+    'del(.native_negative_mutations)' \
+    'del(.source_free)' \
+    'del(.host_only)' \
+    'del(.release_authorized)' \
+    'del(.steps)' \
+    'del(.steps[0].role)' \
+    'del(.steps[1].number)' \
+    'del(.steps[2].status)' \
+    'del(.steps[0].conclusion)'; do
+    /usr/bin/jq "$mutation" "$tmp/base.json" > "$tmp/candidate.json"
+    reject
+  done
+  # Type confusion, negative counts, invalid digests and fabricated claims
+  # must not turn a source-free format check into execution authorization.
+  for mutation in \
+    '.repository_id="1429955596"' \
+    '.source_sha=null' \
+    '.source_tree=true' \
+    '.control_sha=("a"*39)' \
+    '.control_sha=("A"*40)' \
+    '.runtime_manifest_sha256=("b"*63)' \
+    '.runtime_manifest_sha256=("B"*64)' \
+    '.jdk_major="25"' \
+    '.run_id="101"' \
+    '.run_attempt=-1' \
+    '.job_id=true' \
+    '.runner_id=false' \
+    '.status=true' \
+    '.conclusion=["success"]' \
+    '.compiler_checks="31"' \
+    '.standalone_contracts=true' \
+    '.wire_tests="1"' \
+    '.native_negative_mutations=null' \
+    '.source_free="false"' \
+    '.host_only=0' \
+    '.release_authorized=0' \
+    '.steps="completed"' \
+    '.steps={}' \
+    '.steps=true' \
+    '.steps[0]=null' \
+    '.steps[2]={}' \
+    '.steps[0].number="1"' \
+    '.steps[0].number=-1' \
+    '.steps[0].number=1.5' \
+    '.steps[0].role="compiler "' \
+    '.steps[0].status="running"' \
+    '.steps[2].conclusion=null' \
+    '.steps[1].run_id=101' \
+    '.steps[1].number=.steps[0].number' \
+    '.steps[0].role="contracts"' \
+    '.steps[2].role="wire-fast"' \
+    '.steps |= .[0:2]' \
+    '.steps |= . + [.[0]]' \
+    '.steps |= [.[0],.[1],.[1]]'; do
+    /usr/bin/jq "$mutation" "$tmp/base.json" > "$tmp/candidate.json"
+    reject
+  done
+  # JSON duplicate-key attacks must fail even if the last value appears
+  # benign; parsers differ in whether they bind the first or last value.
+  /usr/bin/sed 's/"runtime_manifest_sha256": /"runtime_manifest_sha256": "forged", "runtime_manifest_sha256": /' \
+    "$tmp/base.json" > "$tmp/candidate.json"
+  reject
+  /usr/bin/sed 's/"conclusion": "success",/"conclusion": "failure", "conclusion": "success",/' \
+    "$tmp/base.json" > "$tmp/candidate.json"
+  reject
+  /usr/bin/sed 's/"number": 1,/"number": 2, "number": 1,/' \
+    "$tmp/base.json" > "$tmp/candidate.json"
+  reject
+  # Positive controls ensure our negative matrix is not vacuous: compact
+  # JSON and a reordered, otherwise identical set of roles remain format-valid
+  # but MUST still say NOT_RELEASE_AUTHORITY (never native proof).
+  /usr/bin/jq -c . "$tmp/base.json" > "$tmp/candidate.json"
+  /bin/bash "$root/ci/native-release-evidence-v1.sh" "$tmp/candidate.json" |
+    /usr/bin/grep -Fq 'NOT_RELEASE_AUTHORITY'
+  /usr/bin/jq '.steps |= reverse' "$tmp/base.json" > "$tmp/candidate.json"
+  /bin/bash "$root/ci/native-release-evidence-v1.sh" "$tmp/candidate.json" |
+    /usr/bin/grep -Fq 'NOT_RELEASE_AUTHORITY'
+
 done
-printf 'SOURCE_FREE_NATIVE_EVIDENCE_FORMAT_TESTS_PASS positive_fixtures=1 negative_mutations=%s; native_guest=NOT_EXECUTED\n' "$negative"
+printf 'SOURCE_FREE_NATIVE_EVIDENCE_FORMAT_TESTS_PASS positive_fixtures=3 negative_mutations=%s; native_guest=NOT_EXECUTED\n' "$negative"
