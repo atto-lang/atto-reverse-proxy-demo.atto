@@ -70,7 +70,7 @@ mutate injected-java-tool-options "  JAVA_TOOL_OPTIONS: ''" "  JAVA_TOOL_OPTIONS
 mutate injected-git-config-parameters "  GIT_CONFIG_PARAMETERS: ''" "  GIT_CONFIG_PARAMETERS: 'core.hooksPath=/tmp/hooks'"
 mutate remove-native-timeout '    timeout-minutes: 20' '    timeout-minutes: 999'
 mutate persist-checkout-credentials '          persist-credentials: false' '          persist-credentials: true'
-mutate insert-preflight-command "          echo 'effective_main_review_rules=true'" "$(printf '%s\\n%s' "          echo 'effective_main_review_rules=true'" '          echo UNREVIEWED_PREFLIGHT_COMMAND')"
+mutate insert-preflight-command "          echo 'effective_main_review_rules=true'" "$(printf '%s\n%s' "          echo 'effective_main_review_rules=true'" '          echo UNREVIEWED_PREFLIGHT_COMMAND')"
 mutate inject-native-shell-step '      - name: Compile complete frozen Oreslang source inventory' $'      - name: Unreviewed native command\n        run: echo UNREVIEWED_NATIVE_COMMAND\n      - name: Compile complete frozen Oreslang source inventory'
 test "$rejected" -eq 8 || exit 1
 echo "SOURCE_FREE_TRUSTED_WORKFLOW_BLOB_TESTS_PASS rejected=$rejected native_guest=NOT_EXECUTED live_protection=NOT_VERIFIED"
