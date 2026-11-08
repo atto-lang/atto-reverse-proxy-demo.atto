@@ -2,6 +2,7 @@
 # Source-only, fail-closed structural admission for an independently reviewed
 # privileged workflow. NOT live GitHub governance or release authority.
 require 'psych'
+require 'digest'
 
 abort 'usage: ruby trusted-workflow-yaml-contract.rb WORKFLOW.yml forward|reverse' unless ARGV.length == 2
 file, side = ARGV
@@ -229,4 +230,13 @@ jobs.each do |job_name, job_node|
   end
 end
 refuse('missing or duplicated checkout') unless uses_count == 1
+# Fail closed on changes to any executable run body, action input or comment
+# within the reviewed trusted workflow. A matching step name is NOT a code pin.
+# This is a source-only Git blob identity check, not a live GitHub API verdict.
+reviewed_blobs = {
+  'forward' => 'a1d1af6bd6786b2abc456ae9fd30ee892775f969',
+  'reverse' => '46b07f2ca60b742e03b0a28ac5736a5be1df68ff'
+}
+actual_blob = Digest::SHA1.hexdigest("blob #{bytes.bytesize}\0".b + bytes.b)
+refuse('unreviewed trusted workflow blob or command drift') unless actual_blob == reviewed_blobs.fetch(side)
 puts "SOURCE_FREE_TRUSTED_YAML_SEMANTICS_PASS side=#{side} native_guest=NOT_EXECUTED live_protection=NOT_VERIFIED"
