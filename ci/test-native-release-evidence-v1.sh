@@ -248,4 +248,5 @@ for side in forward reverse; do
 
 done
 /bin/bash "$root/ci/test-evidence-mutation-sensitivity.sh" reverse
+/bin/bash "$root/ci/test-trusted-workflow-static-admission.sh" reverse
 printf 'SOURCE_FREE_NATIVE_EVIDENCE_FORMAT_TESTS_PASS positive_fixtures=3 negative_mutations=%s; native_guest=NOT_EXECUTED\n' "$negative"
