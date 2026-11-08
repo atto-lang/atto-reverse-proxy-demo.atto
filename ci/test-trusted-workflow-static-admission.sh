@@ -26,6 +26,23 @@ count_is() {
   done
   [[ "$count" -eq "$expected" ]]
 }
+strict_job_if() {
+  local file="$1" job="$2" expected="$3" actual
+  # Fail on duplicated/alternate job-level "if:" clauses and any condition
+  # token drift, including an appended "|| true" after an expected guard.
+  # This is an exact source-only contract, NOT a general YAML/GitHub parser.
+  actual="$(/usr/bin/awk -v job="$job" '
+    $0 == "  " job ":" { in_job=1; next }
+    in_job && /^  [[:alnum:]_-]+:[[:space:]]*$/ {exit}
+    in_job && /^    if: >-$/ {count++; capture=1; next}
+    in_job && /^    if:/ {invalid=1}
+    capture && /^      [^[:space:]#]/ {print; next}
+    capture && /^      / {invalid=1; next}
+    capture && !/^      / {capture=0}
+    END { if (count != 1 || invalid) exit 1 }
+  ' "$file")" || return 1
+  [[ "$actual" == "$expected" ]]
+}
 check_policy() {
   local file="$1" content trigger permissions_block job_names preflight native
   # Ignore comments: missing/disabled policy gates cannot be spoofed by comments.
@@ -66,6 +83,22 @@ check_policy() {
     count_is "$preflight" "$guard" 1 || return 1
     count_is "$native" "$guard" 1 || return 1
   done
+  # Bind guards to the *actual* job-level if-expression. Literal substring
+  # counts alone accepted dangerous trailing "|| true" and duplicate-if
+  # variants that retained all expected guard text.
+  local expected_if
+  expected_if="$(/usr/bin/printf "      github.event_name == 'workflow_dispatch' &&\n      github.repository_id == '%s' &&\n      github.ref == 'refs/heads/main' &&\n      github.ref_protected == true" "$repository_id")"
+  strict_job_if "$file" protected-main-preflight "$expected_if" || return 1
+  strict_job_if "$file" native-contracts "$expected_if" || return 1
+  # Bind native admission to its own dependency/runner mapping, rejecting
+  # duplicate YAML keys even when a later entry still has approved text.
+  count_is "$native" $'\n    needs:' 1 || return 1
+  count_is "$native" $'\n    needs: protected-main-preflight\n' 1 || return 1
+  count_is "$preflight" $'\n    runs-on: ubuntu-24.04\n' 1 || return 1
+  count_is "$native" $'\n    runs-on:' 1 || return 1
+  count_is "$native" $'\n      group:' 1 || return 1
+  count_is "$native" $'\n      labels:' 1 || return 1
+  count_is "$native" $'\n    runs-on:\n      group: oreslang-trusted-native\n      labels: [self-hosted, linux, x64, oreslang-jdk25]\n' 1 || return 1
   for var in LD_PRELOAD NODE_OPTIONS NODE_EXTRA_CA_CERTS GIT_CONFIG_GLOBAL; do
     count_is "$content" "$var:" 1 || return 1
   done
@@ -93,7 +126,7 @@ mutate() {
   local label="$1" needle="$2" replacement="$3" remainder changed
   local expected=1
   case "$label" in
-    repository-identity|unprotected-main|default-ref|comment-spoof-protection) expected=2 ;;
+    repository-identity|unprotected-main|default-ref|comment-spoof-protection|guard-or-protection|guard-or-repository|guard-or-reference|guard-event-negated|duplicated-job-if) expected=2 ;;
     missing-manifest-approval) expected=3 ;;
   esac
   count_is "$original" "$needle" "$expected" || {
@@ -136,5 +169,18 @@ mutate loader-node-options "  NODE_OPTIONS: ''" '  NODE_OPTIONS: --require=/tmp/
 mutate job-env-loader '  native-contracts:' $'  native-contracts:\n    env:\n      LD_PRELOAD: /tmp/inject.so'
 mutate comment-spoof-protection 'github.ref_protected == true' '# github.ref_protected == true'
 mutate duplicate-permissions-mapping $'permissions:\n  contents: read' $'permissions:\n  contents: read\npermissions:\n  contents: read'
-test "$rejected" -eq 23
+
+# A guard can contain every expected literal yet evaluate to true for
+# unauthorized events after an appended OR. These MUST be rejected.
+mutate guard-or-protection 'github.ref_protected == true' 'github.ref_protected == true || true'
+mutate guard-or-repository "github.repository_id == '$repository_id' &&" "github.repository_id == '$repository_id' || true &&"
+mutate guard-or-reference "github.ref == 'refs/heads/main' &&" "github.ref == 'refs/heads/main' || true &&"
+mutate guard-event-negated "github.event_name == 'workflow_dispatch' &&" "github.event_name != 'workflow_dispatch' &&"
+# Duplicate YAML mapping keys / job-level conditions can change which value
+# a downstream parser sees, even when approved text is still present.
+mutate duplicated-job-if 'github.ref_protected == true' $'github.ref_protected == true\n    if: true'
+mutate duplicated-native-needs '    needs: protected-main-preflight' $'    needs: []\n    needs: protected-main-preflight'
+mutate duplicated-runner-group '      group: oreslang-trusted-native' $'      group: default\n      group: oreslang-trusted-native'
+mutate duplicated-runner-labels '      labels: [self-hosted, linux, x64, oreslang-jdk25]' $'      labels: [self-hosted]\n      labels: [self-hosted, linux, x64, oreslang-jdk25]'
+test "$rejected" -eq 31
 echo "SOURCE_FREE_TRUSTED_WORKFLOW_STATIC_MUTATIONS_PASS rejected=$rejected native_guest=NOT_EXECUTED live_protection=NOT_VERIFIED"
