@@ -57,7 +57,9 @@ cases = {
   'unsafe-alias' => ->(s) { replace_once(s, '  contents: read', '  contents: &scope read', 'anchor') },
   'explicit-tag' => ->(s) { replace_once(s, '  contents: read', '  contents: !!str read', 'tag') },
   'second-document' => ->(s) { s + "\n---\npermissions: {}\n" },
-  'duplicate-checkout-key' => ->(s) { replace_once(s, 'persist-credentials: false', "persist-credentials: false\n          persist-credentials: true", 'with') }
+  'duplicate-checkout-key' => ->(s) { replace_once(s, 'persist-credentials: false', "persist-credentials: false\n          persist-credentials: true", 'with') },
+  'extra-privileged-step' => ->(s) { replace_once(s, '      - name: Checkout exact frozen release candidate tree', "      - name: Unreviewed privileged shell\n        run: echo dangerous\n      - name: Checkout exact frozen release candidate tree", 'step-injection') },
+  'reviewed-step-renamed' => ->(s) { replace_once(s, '      - name: Checkout exact frozen release candidate tree', '      - name: Different checkout step', 'step-name') }
 }
 count = 0
 cases.each do |name, mutate|
