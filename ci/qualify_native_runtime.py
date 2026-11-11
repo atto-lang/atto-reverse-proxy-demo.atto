@@ -63,7 +63,7 @@ def assert_clean_checkout(root: Path, expected_tree: str) -> None:
         if f.is_symlink() or not f.is_file():
             raise ValueError("missing or symlinked committed source: " + path)
         st = f.stat()
-        if not stat.S_ISREG(st.st_mode) or (st.st_mode & 0o022):
+        if not stat.S_ISREG(st.st_mode) or (st.st_mode & 0o022) or st.st_nlink != 1:
             raise ValueError("nonregular or writable committed source: " + path)
         executable = bool(st.st_mode & 0o111)
         if executable != (mode == "100755"):
@@ -239,9 +239,13 @@ def execute(root: Path, launcher: Path, digest: str, tree: str, timeout: int) ->
     print("NATIVE_NEGATIVE_COMPILER_CONTROL_PASS=1/1", flush=True)
 
     for index, path in enumerate(sources, start=1):
+        # Recheck entire working tree immediately before each compiler read;
+        # a one-time preflight permits post-checkout source replacement.
+        preflight(root, launcher, digest, tree)
         run_guest(root, launcher, digest, ["--check", path], timeout)
         print(f"NATIVE_CHECK_PASS={index}/{len(sources)} {path}", flush=True)
     for index, path in enumerate(contracts, start=1):
+        preflight(root, launcher, digest, tree)
         expected = expected_contract_marker(root, path)
         output = run_guest(root, launcher, digest, [path], timeout)
         verify_contract_receipt(output, expected)
@@ -256,7 +260,8 @@ def self_test() -> None:
              "changed_source", "unlisted_source", "legacy_source", "missing_contract",
              "untrusted_mode", "unexecutable_launcher", "untracked_manifest",
              "changed_config", "changed_workflow", "untracked_shell", "ignored_file",
-             "index_poison", "nonatto_symlink", "source_launcher")
+             "index_poison", "nonatto_symlink", "source_launcher",
+             "hardlinked_source", "hardlinked_ci_input")
     for case in cases:
         with TemporaryDirectory(prefix="atto-native-preflight-") as base:
             folder = Path(base)
@@ -315,6 +320,12 @@ def self_test() -> None:
                 (root / "src/main.atto").write_text("changed despite index flag\n")
             elif case == "nonatto_symlink":
                 (root / "ci/alias").symlink_to("pure-contracts.txt")
+            elif case == "hardlinked_source":
+                alias = folder / "outside-source"
+                os.link(root / "src/main.atto", alias)
+            elif case == "hardlinked_ci_input":
+                alias = folder / "outside-manifest"
+                os.link(root / "ci/pure-contracts.txt", alias)
             elif case == "source_launcher":
                 launcher = root / "fake-native"
                 launcher.write_text("#!/bin/sh\nexit 1\n")
