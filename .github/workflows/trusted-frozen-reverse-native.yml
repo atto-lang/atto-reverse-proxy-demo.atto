@@ -130,6 +130,23 @@ jobs:
             echo 'main does not restrict deletion' >&2
             exit 1
           }
+          # A protected branch with no required CI can admit untested changes.
+          # Accept only strict checks bound to a concrete GitHub App integration;
+          # independently audit the configured contexts and bypass actors.
+          /usr/bin/jq -e '
+            any(.[];
+              .type == "required_status_checks" and
+              (.parameters.strict_required_status_checks_policy == true) and
+              (.parameters.required_status_checks |
+                type == "array" and length > 0 and
+                all(.[]; (.context | type == "string" and length > 0) and
+                          (.integration_id | type == "number" and . > 0))
+              )
+            )
+          ' <<<"$rules_json" >/dev/null || {
+            echo 'main lacks strict, app-bound required status checks' >&2
+            exit 1
+          }
           echo 'effective_main_review_rules=true'
           echo "control_plane_sha=$GITHUB_SHA"
   native-contracts:
@@ -196,7 +213,16 @@ jobs:
               (.parameters.required_review_thread_resolution == true)
             ) and
             any(.[]; .type == "non_fast_forward") and
-            any(.[]; .type == "deletion")
+            any(.[]; .type == "deletion") and
+            any(.[];
+              .type == "required_status_checks" and
+              (.parameters.strict_required_status_checks_policy == true) and
+              (.parameters.required_status_checks |
+                type == "array" and length > 0 and
+                all(.[]; (.context | type == "string" and length > 0) and
+                          (.integration_id | type == "number" and . > 0))
+              )
+            )
           ' <<<"$rules_json" >/dev/null || {
             echo 'effective protected-main governance changed before native allocation' >&2
             exit 1

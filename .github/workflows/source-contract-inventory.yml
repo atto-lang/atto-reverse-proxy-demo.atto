@@ -158,6 +158,41 @@ jobs:
           verifier_blob="$(git hash-object --no-filters -- ci/trusted-native-verifier.sh)"
           grep -Fq "test \"\$verifier_blob\" = '$verifier_blob'" .github/workflows/trusted-frozen-reverse-native.yml
           echo "TRUSTED_NATIVE_VERIFIER_SOURCE_HARDENING_PASS private_tmp=1 private_missing_fixture=1 cleanup=1 temp_root=validated verifier_blob=$verifier_blob"
+      - name: Model strict app-bound status check rule (source-free)
+        shell: bash
+        run: |
+          set -euo pipefail
+          workflow='.github/workflows/trusted-frozen-reverse-native.yml'
+          test "$(/usr/bin/grep -Fc '(.parameters.strict_required_status_checks_policy == true)' "$workflow")" -eq 2
+          test "$(/usr/bin/grep -Fc '(.integration_id | type == "number" and . > 0)' "$workflow")" -eq 2
+          policy='any(.[];
+              .type == "required_status_checks" and
+              (.parameters.strict_required_status_checks_policy == true) and
+              (.parameters.required_status_checks |
+                type == "array" and length > 0 and
+                all(.[]; (.context | type == "string" and length > 0) and
+                          (.integration_id | type == "number" and . > 0))
+              )
+            )'
+          valid='[{"type":"required_status_checks","parameters":{"strict_required_status_checks_policy":true,"required_status_checks":[{"context":"CI","integration_id":15368}]}}]'
+          /usr/bin/jq -e "$policy" <<<"$valid" >/dev/null
+          negatives=(
+            'del(.[0])'
+            '.[0].parameters.required_status_checks=[]'
+            '.[0].parameters.strict_required_status_checks_policy=false'
+            '.[0].parameters.required_status_checks[0].context=""'
+            '.[0].parameters.required_status_checks[0].integration_id=null'
+            '.[0].parameters.required_status_checks[0].integration_id=0'
+            '.[0].parameters.required_status_checks[0].integration_id="untrusted"'
+          )
+          for mutation in "${negatives[@]}"; do
+            bad="$(/usr/bin/jq -c "$mutation" <<<"$valid")"
+            if /usr/bin/jq -e "$policy" <<<"$bad" >/dev/null; then
+              echo "SECURITY_FAILURE: status-check rule accepted $mutation" >&2
+              exit 1
+            fi
+          done
+          echo 'STRICT_REQUIRED_STATUS_RULE_MODEL_PASS positive=1 rejected=7; native=NOT_EXECUTED'
       - name: Audit exact checked-out source against pinned head
         shell: bash
         env:
