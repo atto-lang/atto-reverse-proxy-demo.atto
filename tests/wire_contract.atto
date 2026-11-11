@@ -40,7 +40,7 @@ pub routine main(): int {
       "app.example.test").is_ok() ||
     proxy_wire.reverse("GET /api#section HTTP/1.1",
       "app.example.test").is_ok() ||
-    proxy_wire.reverse("GET /api\internal HTTP/1.1",
+    proxy_wire.reverse("GET /api\\internal HTTP/1.1",
       "app.example.test").is_ok() ||
     proxy_wire.reverse("GET /api%00 HTTP/1.1",
       "app.example.test").is_ok() ||
@@ -61,7 +61,7 @@ pub routine main(): int {
     proxy_wire.upstream_origin("https://api.example.test:65535").is_ok() ||
     proxy_wire.upstream_origin("https://api.example.test:443:443").is_ok() ||
     proxy_wire.upstream_origin("HTTPS://api.example.test").is_ok() ||
-    proxy_wire.upstream_origin("http://api.example.test\evil").is_ok() ||
+    proxy_wire.upstream_origin("http://api.example.test\\evil").is_ok() ||
     proxy_wire.upstream_origin("http://api.example.test:9000/path").is_ok(); then
     stdio.println("FAIL reverse upstream origin ambiguity"); return 1;
   fi
