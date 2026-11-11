@@ -143,6 +143,16 @@ jobs:
           grep -Fq 'missing_cfg="$guest_tmp/ores-proxy-missing-config.yaml"' ci/trusted-native-verifier.sh
           grep -Fq 'missing-config sentinel requires exactly one scoped --allow-read' ci/trusted-native-verifier.sh
           grep -Fq 'trap cleanup_guest_tmp EXIT' ci/trusted-native-verifier.sh
+          # An early rejected runtime/config request must not leak a private temp dir
+          # on a long-lived trusted runner. Require cleanup before any validation.
+          tmp_create_line="$(grep -nF 'guest_tmp="$(/usr/bin/mktemp -d -- "$runner_temp_root/oreslang-guest.XXXXXX")"' ci/trusted-native-verifier.sh | /usr/bin/cut -d: -f1)"
+          cleanup_line="$(grep -nF 'trap cleanup_guest_tmp EXIT' ci/trusted-native-verifier.sh | /usr/bin/cut -d: -f1)"
+          tmp_check_line="$(grep -nF 'test -d "$guest_tmp" && test ! -L "$guest_tmp" || exit 1' ci/trusted-native-verifier.sh | /usr/bin/cut -d: -f1)"
+          [[ "$tmp_create_line" =~ ^[0-9]+$ && "$cleanup_line" =~ ^[0-9]+$ && "$tmp_check_line" =~ ^[0-9]+$ ]] &&
+            (( tmp_create_line < cleanup_line && cleanup_line < tmp_check_line )) || {
+            echo 'SECURITY_FAILURE: private guest temp cleanup trap installed too late' >&2
+            exit 1
+          }
           grep -Fq '/usr/bin/rm -rf -- "$guest_tmp"' ci/trusted-native-verifier.sh
           grep -Fq "missing_sentinel='@ORESLANG_MISSING_CONFIG@'" .github/workflows/trusted-frozen-reverse-native.yml
           verifier_blob="$(git hash-object --no-filters -- ci/trusted-native-verifier.sh)"
