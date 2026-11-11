@@ -93,7 +93,7 @@ jobs:
           set -euo pipefail
           find src tests -type f -name '*.atto' -print | LC_ALL=C sort > "$RUNNER_TEMP/oreslang-files.txt"
           diff -u ci/oreslang-files.txt "$RUNNER_TEMP/oreslang-files.txt"
-          find tests -maxdepth 1 -type f -name '*_contract.ores' -print | LC_ALL=C sort > "$RUNNER_TEMP/pure-contracts.txt"
+          find tests -maxdepth 1 -type f -name '*_contract.atto' -print | LC_ALL=C sort > "$RUNNER_TEMP/pure-contracts.txt"
           diff -u ci/pure-contracts.txt "$RUNNER_TEMP/pure-contracts.txt"
           test -z "$(find src tests -type l -name '*.atto' -print -quit)"
       - name: Compiler-check all reviewed AttoLang files

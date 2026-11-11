@@ -9,6 +9,10 @@ on:
       - 'bench/**'
       - 'ci/attolang_source_policy.sh'
       - 'ci/test_attolang_source_policy.sh'
+      - 'ci/check_atto_inventory.py'
+      - 'ci/oreslang-files.txt'
+      - 'ci/pure-contracts.txt'
+      - 'ci/sourcefree_proxy_audit.py'
       - '.github/workflows/attolang-source-policy.yml'
   workflow_dispatch:
 permissions: {}
@@ -39,3 +43,14 @@ jobs:
         run: |
           set -euo pipefail
           bash ci/attolang_source_policy.sh
+      - name: Validate complete AttoLang inventory and negative mutation controls
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 ci/check_atto_inventory.py
+          python3 ci/check_atto_inventory.py --self-test
+      - name: Reverse proxy source-free security audit
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 ci/sourcefree_proxy_audit.py

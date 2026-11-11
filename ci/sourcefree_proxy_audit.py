@@ -41,11 +41,11 @@ def inventory() -> None:
                   for p in (ROOT / directory).rglob("*")),
           "all AttoLang source paths are regular, not symbolic links")
     for path in actual:
-        check(bool(re.fullmatch(r"(src|tests)/[A-Za-z0-9_./-]+\.ores", path)),
+        check(bool(re.fullmatch(r"(src|tests)/[A-Za-z0-9_./-]+\.atto", path)),
               f"canonical path {path}")
     file_list = read("ci/oreslang-files.txt").splitlines()
     check(file_list == actual, "complete sorted source and test inventory")
-    pure = sorted(p for p in actual if re.fullmatch(r"tests/[^/]+_contract\.ores", p))
+    pure = sorted(p for p in actual if re.fullmatch(r"tests/[^/]+_contract\.atto", p))
     check(read("ci/pure-contracts.txt").splitlines() == pure,
           "complete sorted standalone contract inventory")
     check("tests/lexical_admission_contract.atto" in pure,
