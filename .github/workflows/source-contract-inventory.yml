@@ -40,27 +40,61 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          # Release PR #13 still carries a manual broad self-hosted workflow.
-          # It must not silently overwrite the retired stub when the release
-          # is reconciled onto the protected default-main control plane.
+          # No self-hosted runner or guest invoked. Same admission function is applied
+          # to current HEAD and isolated clean/mutated Git fixtures.
           legacy='.github/workflows/native-contracts.yml'
           expected_blob='4f167ddefc97fcead03723f6b7f109663040942e'
-          test -f "$legacy" && test ! -L "$legacy" || {
-            echo 'SECURITY_FAILURE: retired legacy workflow missing or linked' >&2
-            exit 1
+          verify_retired() {
+            local root="$1" file="$legacy" mode actual committed
+            test -f "$root/$file" && test ! -L "$root/$file" || return 1
+            mode="$(/usr/bin/git -C "$root" ls-files --stage -- "$file")" || return 1
+            [[ "$mode" == '100644 '* ]] || return 1
+            actual="$(/usr/bin/git -C "$root" hash-object --no-filters -- "$file")" || return 1
+            committed="$(/usr/bin/git -C "$root" rev-parse "HEAD:$file")" || return 1
+            [[ "$actual" == "$expected_blob" && "$committed" == "$expected_blob" ]]
           }
-          staged_mode="$(/usr/bin/git ls-files --stage -- "$legacy")"
-          [[ "$staged_mode" == '100644 '* ]] || {
-            echo 'SECURITY_FAILURE: retired legacy workflow must be a tracked regular blob' >&2
-            exit 1
-          }
-          actual_blob="$(/usr/bin/git hash-object --no-filters -- "$legacy")"
-          committed_blob="$(/usr/bin/git rev-parse "HEAD:$legacy")"
-          test "$actual_blob" = "$expected_blob" && test "$committed_blob" = "$expected_blob" || {
-            echo 'SECURITY_FAILURE: legacy native workflow resurrected or modified without reviewed retirement policy' >&2
+          verify_retired "$GITHUB_WORKSPACE" || {
+            echo 'SECURITY_FAILURE: legacy native workflow missing, linked, or resurrected' >&2
             exit 1
           }
           echo "LEGACY_NATIVE_WORKFLOW_RETIRED reviewed_blob=$expected_blob"
+          # Real adversarial fixture: a committed broad self-hosted workflow must be
+          # refused, as must uncommitted replacement, symlink, and missing file.
+          test -d "$RUNNER_TEMP"
+          fixture="$(/usr/bin/mktemp -d -- "$RUNNER_TEMP/legacy-native-negative.XXXXXX")"
+          trap '/usr/bin/rm -rf -- "$fixture"' EXIT
+          /usr/bin/git -C "$fixture" init -q
+          /usr/bin/mkdir -p -- "$fixture/.github/workflows"
+          /usr/bin/cp -- "$GITHUB_WORKSPACE/$legacy" "$fixture/$legacy"
+          /usr/bin/git -C "$fixture" add -- "$legacy"
+          /usr/bin/git -C "$fixture" -c user.name='Security fixture' -c user.email='fixture@example.invalid' commit -qm 'approved disabled legacy stub'
+          verify_retired "$fixture" || {
+            echo 'TEST_FAILURE: approved legacy stub was rejected' >&2
+            exit 1
+          }
+          /usr/bin/printf '%s\n' 'name: Unreviewed native workflow' 'on:' '  workflow_dispatch:' 'jobs:' '  native:' '    runs-on: [self-hosted, linux, x64, oreslang-jdk25]' > "$fixture/$legacy"
+          if verify_retired "$fixture"; then
+            echo 'TEST_FAILURE: uncommitted broad self-hosted workflow admitted' >&2
+            exit 1
+          fi
+          /usr/bin/git -C "$fixture" add -- "$legacy"
+          /usr/bin/git -C "$fixture" -c user.name='Security fixture' -c user.email='fixture@example.invalid' commit -qm 'simulate unsafe release merge'
+          if verify_retired "$fixture"; then
+            echo 'TEST_FAILURE: committed broad self-hosted workflow admitted' >&2
+            exit 1
+          fi
+          /usr/bin/rm -- "$fixture/$legacy"
+          /usr/bin/ln -s /dev/null "$fixture/$legacy"
+          if verify_retired "$fixture"; then
+            echo 'TEST_FAILURE: symlinked native workflow admitted' >&2
+            exit 1
+          fi
+          /usr/bin/rm -- "$fixture/$legacy"
+          if verify_retired "$fixture"; then
+            echo 'TEST_FAILURE: missing native workflow admitted' >&2
+            exit 1
+          fi
+          echo 'LEGACY_NATIVE_RETIREMENT_NEGATIVE_FIXTURES_PASS scenarios=4; native_guest=NOT_EXECUTED'
       - name: Reject absent, untracked, empty, nonregular or linked contract inputs
         shell: bash
         run: |
