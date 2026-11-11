@@ -36,6 +36,31 @@ jobs:
           [[ -z "$(git status --porcelain)" ]]
           printf 'EXACT_DEMO_HEAD=%s\n' "$EXPECTED_DEMO_SHA"
           printf 'EXACT_DEMO_TREE=%s\n' "$(git rev-parse HEAD^{tree})"
+      - name: Reject resurrection of legacy PR-head native workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Release PR #13 still carries a manual broad self-hosted workflow.
+          # It must not silently overwrite the retired stub when the release
+          # is reconciled onto the protected default-main control plane.
+          legacy='.github/workflows/native-contracts.yml'
+          expected_blob='4f167ddefc97fcead03723f6b7f109663040942e'
+          test -f "$legacy" && test ! -L "$legacy" || {
+            echo 'SECURITY_FAILURE: retired legacy workflow missing or linked' >&2
+            exit 1
+          }
+          staged_mode="$(/usr/bin/git ls-files --stage -- "$legacy")"
+          [[ "$staged_mode" == '100644 '* ]] || {
+            echo 'SECURITY_FAILURE: retired legacy workflow must be a tracked regular blob' >&2
+            exit 1
+          }
+          actual_blob="$(/usr/bin/git hash-object --no-filters -- "$legacy")"
+          committed_blob="$(/usr/bin/git rev-parse "HEAD:$legacy")"
+          test "$actual_blob" = "$expected_blob" && test "$committed_blob" = "$expected_blob" || {
+            echo 'SECURITY_FAILURE: legacy native workflow resurrected or modified without reviewed retirement policy' >&2
+            exit 1
+          }
+          echo "LEGACY_NATIVE_WORKFLOW_RETIRED reviewed_blob=$expected_blob"
       - name: Reject absent, untracked, empty, nonregular or linked contract inputs
         shell: bash
         run: |
