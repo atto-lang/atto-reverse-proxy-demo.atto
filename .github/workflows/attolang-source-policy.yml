@@ -1,5 +1,10 @@
 name: AttoLang source extension policy
 on:
+  # Temporary exact-tree mirrors in a separate private GitHub test organization.
+  # Never grants network, compiler or self-hosted runner authority.
+  push:
+    branches:
+      - 'ci-mirror/atto-proxy-*'
   pull_request:
     paths:
       - '**/*.ores'
@@ -28,6 +33,13 @@ jobs:
         with:
           persist-credentials: false
           submodules: false
+      - name: Attest local checkout commit, tree and attempt
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "CHECKED_OUT_COMMIT=$(git rev-parse HEAD)"
+          echo "CHECKED_OUT_TREE=$(git rev-parse HEAD^{tree})"
+          echo "CHECKED_OUT_RUN=$GITHUB_RUN_ID/$GITHUB_RUN_ATTEMPT"
       - name: Syntax-check AttoLang policy
         shell: bash
         run: |
