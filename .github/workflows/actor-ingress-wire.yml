@@ -8,6 +8,7 @@ on:
       - 'tests/actor_ingress_tcp_smoke.atto'
       - 'ci/verify_actor_dispatch_receipts.sh'
       - 'ci/test_actor_dispatch_receipts.sh'
+      - 'ci/test_raw_http_ingress.py'
       - 'ci/sourcefree_proxy_audit.py'
       - '.github/workflows/actor-ingress-wire.yml'
   workflow_dispatch:
@@ -169,4 +170,5 @@ jobs:
             tests/actor_ingress_tcp_smoke.atto
           # Assert exact handoff counts after the bounded real-wire client exits.
           /bin/bash --noprofile --norc ci/verify_actor_dispatch_receipts.sh "$log"
+          python3 ci/test_raw_http_ingress.py --port 8080
           cat "$log"

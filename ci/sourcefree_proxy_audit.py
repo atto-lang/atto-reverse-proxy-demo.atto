@@ -360,6 +360,15 @@ def source_guards() -> None:
     check("actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09" in wire
           and "actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961" in wire,
           "real-wire workflow dependencies pinned to reviewed v5 commits")
+    probe = read("ci/test_raw_http_ingress.py")
+    check('MALFORMED = (' in probe and "cl_te_conflict" in probe
+          and "duplicate_host" in probe and "bare_lf" in probe
+          and "encoded_traversal" in probe,
+          "raw HTTP socket regressions preserve smuggling and target negatives")
+    check("python3 ci/test_raw_http_ingress.py --port 8080" in wire
+          and "ci/test_raw_http_ingress.py" in wire
+          and "WIRE_PROBE_SELF_TEST_PASS" in probe,
+          "trusted native actor ingress runs independent raw-socket probe")
     check("if: ${{ false }}" in wire,
           "PR-head actor wire cannot allocate self-hosted runner")
     check("- 'src/**'" in wire and "- 'config/**'" in wire,

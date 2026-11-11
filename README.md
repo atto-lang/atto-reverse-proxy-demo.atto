@@ -42,3 +42,9 @@ The `.atto` migration requires exact source and standalone-test manifests, with 
 ## Expanded regression suite (November 10, 2026)
 
 This draft adds adversarial `.atto` contract vectors for origin-form HTTP grammar, unsafe upstream origins, actor dispatch identity, trusted-registry admission, and rejection of network-capable actor images. The inventory checker has **26 synthetic positive/negative cases**, including manifest ordering/duplication, missing roots, symlinks, legacy suffixes, absolute/traversal manifests, and directory impersonation. Source-only checks do not replace actual AttoLang compiler execution. Keep the trusted native/wire jobs held pending approved runner admission.
+ 
+## Opt-in raw HTTP/1.1 ingress probe
+
+The hardened `ci/test_raw_http_ingress.py` uses only literal loopback `127.0.0.1:8080`. It probes 13 adversarial wire vectors (duplicate Host/Content-Length, CL+TE conflicts, mixed-case transfer coding, content-length zero, folded headers, whitespace before colon, LF framing, NUL, path traversal, absolute-form and fragments) and requires two clean actor requests to return HTTP 200 before/after rejection. It runs after the existing fixed-count actor dispatch receipt verifier, so its traffic cannot contaminate that verifier's expected counts. Unexpected success, unbounded response, and timeouts fail the probe. Only a 400 or prompt connection close is accepted for malformed requests.
+
+`--self-test` exercises eight synthetic verdict cases and **is not native AttoLang execution**. Actual socket tests remain gated on approved runtime provenance and a trusted native runner. No proxy data plane is added.
