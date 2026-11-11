@@ -38,3 +38,7 @@ The Actions workflow now has explicit native Oreslang compile/execute gates for 
 ## AttoLang migration inventory gate (November 2026)
 
 The `.atto` migration requires exact source and standalone-test manifests, with an executable source-only checker (`python3 ci/check_atto_inventory.py`) and eleven local synthetic controls (`--self-test`). The manifest names `ci/oreslang-files.txt` and `ci/pure-contracts.txt` remain compatibility CI identifiers, but their contents contain only `.atto` paths. This gate catches extension drift and inventory omissions; **it does not run the AttoLang compiler, permit network egress, or establish a working HTTP data plane**. The native self-hosted runner hold remains in place pending independently approved exact-head admission and guest execution.
+
+## Expanded regression suite (November 10, 2026)
+
+This draft adds adversarial `.atto` contract vectors for origin-form HTTP grammar, unsafe upstream origins, actor dispatch identity, trusted-registry admission, and rejection of network-capable actor images. The inventory checker has **26 synthetic positive/negative cases**, including manifest ordering/duplication, missing roots, symlinks, legacy suffixes, absolute/traversal manifests, and directory impersonation. Source-only checks do not replace actual AttoLang compiler execution. Keep the trusted native/wire jobs held pending approved runner admission.

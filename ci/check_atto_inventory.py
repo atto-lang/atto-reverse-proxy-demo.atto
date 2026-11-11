@@ -50,7 +50,8 @@ def validate(root: Path) -> tuple[int, int]:
 def self_test() -> None:
     cases = ("baseline", "stale_source", "stale_contract", "missing_source",
              "missing_contract", "duplicate_source", "unknown_source",
-             "wrong_case", "legacy_source", "symlink_source", "non_contract")
+             "wrong_case", "legacy_source", "symlink_source", "non_contract",
+             "manifest_unsorted", "manifest_duplicate_contract", "manifest_unknown_contract", "manifest_empty_source", "manifest_empty_contract", "manifest_symlink_source", "manifest_symlink_contract", "missing_source_root", "missing_test_root", "symlink_nested_directory", "uppercase_legacy", "manifest_traversal", "manifest_absolute", "directory_source", "directory_test")
     for case in cases:
         with TemporaryDirectory(prefix="atto-inventory-") as tmp:
             root = Path(tmp)
@@ -80,6 +81,40 @@ def self_test() -> None:
                 (root / "src/link.atto").symlink_to("main.atto")
             elif case == "non_contract":
                 (root / "tests/new_contract.atto").write_text("pub routine x(): int { return 0; }\n")
+            elif case == "manifest_unsorted":
+                (root / "ci/oreslang-files.txt").write_text("tests/basic_contract.atto\nsrc/main.atto\n")
+            elif case == "manifest_duplicate_contract":
+                (root / "ci/pure-contracts.txt").write_text("tests/basic_contract.atto\ntests/basic_contract.atto\n")
+            elif case == "manifest_unknown_contract":
+                (root / "ci/pure-contracts.txt").write_text("tests/unknown_contract.atto\n")
+            elif case == "manifest_empty_source":
+                (root / "ci/oreslang-files.txt").write_text("")
+            elif case == "manifest_empty_contract":
+                (root / "ci/pure-contracts.txt").write_text("")
+            elif case == "manifest_symlink_source":
+                (root / "ci/oreslang-files.txt").unlink()
+                (root / "ci/oreslang-files.txt").symlink_to("pure-contracts.txt")
+            elif case == "manifest_symlink_contract":
+                (root / "ci/pure-contracts.txt").unlink()
+                (root / "ci/pure-contracts.txt").symlink_to("oreslang-files.txt")
+            elif case == "missing_source_root":
+                (root / "src/main.atto").unlink()
+                (root / "src").rmdir()
+            elif case == "missing_test_root":
+                (root / "tests/basic_contract.atto").unlink()
+                (root / "tests").rmdir()
+            elif case == "symlink_nested_directory":
+                (root / "src/alias").symlink_to(root / "tests", target_is_directory=True)
+            elif case == "uppercase_legacy":
+                (root / "tests/legacy.ORES").write_text("x\n")
+            elif case == "manifest_traversal":
+                (root / "ci/oreslang-files.txt").write_text("src/../src/main.atto\ntests/basic_contract.atto\n")
+            elif case == "manifest_absolute":
+                (root / "ci/oreslang-files.txt").write_text("/src/main.atto\ntests/basic_contract.atto\n")
+            elif case == "directory_source":
+                (root / "src/rogue.atto").mkdir()
+            elif case == "directory_test":
+                (root / "tests/rogue.atto").mkdir()
             accepted = True
             try:
                 validate(root)
