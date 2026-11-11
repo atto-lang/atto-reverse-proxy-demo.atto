@@ -369,6 +369,18 @@ def source_guards() -> None:
           and "ci/test_raw_http_ingress.py" in wire
           and "WIRE_PROBE_SELF_TEST_PASS" in probe,
           "trusted native actor ingress runs independent raw-socket probe")
+    post_receipts = read("ci/verify_raw_probe_receipts.py")
+    check('python3 ci/verify_raw_probe_receipts.py "$log"' in wire
+          and wire.index('python3 ci/test_raw_http_ingress.py --port 8080') <
+              wire.index('python3 ci/verify_raw_probe_receipts.py "$log"'),
+          "raw malformed traffic is followed by actor dispatch/claim recount")
+    check("POST_PROBE_RECEIPT_SELF_TEST_PASS" in post_receipts
+          and 'counts["DISPATCH_HELLO"] != 5' in post_receipts
+          and 'counts["CLAIM_HELLO"] != 5' in post_receipts,
+          "post-probe verification rejects hidden actor dispatch")
+    check('GOOD_BODY not in body' in read("ci/test_raw_http_ingress.py")
+          and 'expected == 200 and GOOD_BODY not in body' in read("ci/test_raw_http_ingress.py"),
+          "live HTTP 200 must prove actual actor response body")
     check("if: ${{ false }}" in wire,
           "PR-head actor wire cannot allocate self-hosted runner")
     check("- 'src/**'" in wire and "- 'config/**'" in wire,

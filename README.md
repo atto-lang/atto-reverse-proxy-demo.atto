@@ -52,3 +52,7 @@ The hardened `ci/test_raw_http_ingress.py` uses only literal loopback `127.0.0.1
 ## Exact-tree source-only CI mirror
 
 The source-policy workflow accepts pushes to the narrowly scoped `ci-mirror/atto-proxy-*` branch namespace, permitting execution from a separate **private** organization with funded GitHub-hosted Actions. It checks out only the mirror's own tree (no private upstream checkout, cross-org `GITHUB_TOKEN`, or secrets). The job prints the checked-out commit, tree and run attempt. The source repo's PR branch retains its normal `pull_request` checks. All native/self-hosted runner holds remain intact. An executed source-only pass **never** counts as compiler or live-wire evidence.
+
+## Post-adversarial actor dispatch audit
+
+The raw HTTP probe now requires the actual HelloV1 response body (not just a status line), consumes a bounded complete response instead of stopping after headers, and rejects partial wire replies. It adds HTTP/1.0 and contradictory Connection vectors (15 malformed cases). The independent `ci/verify_raw_probe_receipts.py` then recounts supervisor dispatch and actor claim markers after the adversarial traffic: the two legitimate clean requests must yield exactly two extra Hello dispatch/claims, with no extra fallback or stream dispatch. Both host checkers have synthetic negative self-tests; these **do not** establish native guest execution. The native ingress workflow retains the explicit self-hosted security hold.

@@ -9,6 +9,7 @@ on:
       - 'ci/verify_actor_dispatch_receipts.sh'
       - 'ci/test_actor_dispatch_receipts.sh'
       - 'ci/test_raw_http_ingress.py'
+      - 'ci/verify_raw_probe_receipts.py'
       - 'ci/sourcefree_proxy_audit.py'
       - '.github/workflows/actor-ingress-wire.yml'
   workflow_dispatch:
@@ -171,4 +172,7 @@ jobs:
           # Assert exact handoff counts after the bounded real-wire client exits.
           /bin/bash --noprofile --norc ci/verify_actor_dispatch_receipts.sh "$log"
           python3 ci/test_raw_http_ingress.py --port 8080
+          # Count actor claims again AFTER the raw malformed requests.
+          # Only two extra canonical Hello requests may reach the actor.
+          python3 ci/verify_raw_probe_receipts.py "$log"
           cat "$log"

@@ -7,7 +7,8 @@ import socket
 import sys
 
 HOST = "127.0.0.1"
-MAX_RECEIPT = 16384
+MAX_RECEIPT = 65536
+GOOD_BODY = b"hello from native AttoLang actor service"
 TIMEOUT = 2.0
 GOOD = b"GET /actor HTTP/1.1\r\nHost: worker.example.test\r\nConnection: close\r\n\r\n"
 
@@ -27,11 +28,15 @@ MALFORMED = (
     ("dot_traversal", b"GET /actor/../actor HTTP/1.1\r\nHost: worker.example.test\r\nConnection: close\r\n\r\n"),
     ("absolute_form", b"GET http://worker.example.test/actor HTTP/1.1\r\nHost: worker.example.test\r\nConnection: close\r\n\r\n"),
     ("fragment", b"GET /actor#other HTTP/1.1\r\nHost: worker.example.test\r\nConnection: close\r\n\r\n"),
+    ("http_1_0", b"GET /actor HTTP/1.0\r\nHost: worker.example.test\r\nConnection: close\r\n\r\n"),
+    ("duplicate_connection", b"GET /actor HTTP/1.1\r\nHost: worker.example.test\r\nConnection: close\r\nConnection: keep-alive\r\n\r\n"),
 )
 
 def status(receipt: bytes) -> int | None:
     if not receipt:
         return None
+    if b"\r\n\r\n" not in receipt:
+        raise AssertionError("partial HTTP response headers must not pass")
     line = receipt.split(b"\r\n", 1)[0]
     parts = line.split(b" ", 2)
     if len(parts) < 2 or parts[0] != b"HTTP/1.1" or len(parts[1]) != 3 or not parts[1].isdigit():
@@ -46,6 +51,11 @@ def verdict(receipt: bytes, expected: int, allow_close: bool = False) -> None:
         raise AssertionError("missing successful response")
     if result != expected:
         raise AssertionError(f"expected HTTP {expected}, got HTTP {result}")
+    body = receipt.split(b"\r\n\r\n", 1)[1]
+    if expected == 200 and GOOD_BODY not in body:
+        raise AssertionError("HTTP 200 lacked the exact AttoLang actor response body")
+    if expected == 400 and GOOD_BODY in body:
+        raise AssertionError("rejected request leaked an actor response body")
 
 def exchange(port: int, payload: bytes) -> bytes:
     with socket.create_connection((HOST, port), timeout=TIMEOUT) as conn:
@@ -57,25 +67,32 @@ def exchange(port: int, payload: bytes) -> bytes:
                 chunk = conn.recv(4096)
             except socket.timeout as exc:
                 raise AssertionError("server did not respond or close within timeout") from exc
+            except ConnectionResetError:
+                # Peer reset is a closed connection; a partial response still
+                # fails in status(), and an empty drop is only valid on denial.
+                break
             if not chunk:
                 break
             data.extend(chunk)
-            if b"\r\n\r\n" in data:
-                break
         if len(data) >= MAX_RECEIPT:
             raise AssertionError("server exceeded response header byte budget")
         return bytes(data)
 
 def self_test() -> None:
     cases = (
-        (b"HTTP/1.1 200 OK\r\n\r\n", 200, False, True),
+        (b"HTTP/1.1 200 OK\r\n\r\n" + GOOD_BODY, 200, False, True),
         (b"HTTP/1.1 400 Bad Request\r\n\r\n", 400, True, True),
         (b"", 400, True, True),
         (b"", 200, False, False),
-        (b"HTTP/1.1 200 OK\r\n\r\n", 400, True, False),
+        (b"HTTP/1.1 200 OK\r\n\r\n" + GOOD_BODY, 400, True, False),
         (b"HTTP/1.0 400 Bad Request\r\n\r\n", 400, True, False),
         (b"HTTP/1.1 503 Unavailable\r\n\r\n", 400, True, False),
         (b"junk\r\n\r\n", 400, True, False),
+        (b"HTTP/1.1 200 OK\r\n\r\n", 200, False, False),
+        (b"HTTP/1.1 200 OK\r\n\r\n" + b"some other actor", 200, False, False),
+        (b"HTTP/1.1 400 Bad Request\r\n\r\n" + GOOD_BODY, 400, True, False),
+        (b"HTTP/1.1 400 Bad Request\r\n", 400, True, False),
+        (b"HTTP/1.1 400 Bad Request\n\n", 400, True, False),
     )
     for idx, (receipt, expected, allow_close, should_pass) in enumerate(cases):
         passed = True
