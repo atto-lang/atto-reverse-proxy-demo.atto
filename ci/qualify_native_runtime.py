@@ -80,7 +80,14 @@ def preflight(root: Path, launcher: Path, digest: str, expected_tree: str) -> tu
     return inventory(root)
 
 
-def run_guest(root: Path, launcher: Path, digest: str, args: list[str], timeout: int) -> None:
+def verify_contract_receipt(output: bytes) -> None:
+    if not re.search(rb"(?m)^PASS [^\r\n]{1,240}\r?$", output):
+        raise ValueError("native contract did not emit a standalone PASS marker")
+    if re.search(rb"(?m)^FAIL(?:\s|$)", output):
+        raise ValueError("native contract printed FAIL despite zero exit status")
+
+
+def run_guest(root: Path, launcher: Path, digest: str, args: list[str], timeout: int) -> bytes:
     # A staged/mutated native executable must not be used between invocations.
     if launcher.is_symlink() or hashlib.sha256(launcher.read_bytes()).hexdigest() != digest.lower():
         raise ValueError("native executable changed since preflight")
@@ -97,6 +104,7 @@ def run_guest(root: Path, launcher: Path, digest: str, args: list[str], timeout:
     if result.returncode != 0:
         tail = (result.stdout + result.stderr)[-2048:].decode("utf-8", "replace")
         raise ValueError(f"guest invocation failed rc={result.returncode} args={args!r}; tail={tail!r}")
+    return result.stdout
 
 
 def execute(root: Path, launcher: Path, digest: str, tree: str, timeout: int) -> None:
@@ -118,7 +126,8 @@ def execute(root: Path, launcher: Path, digest: str, tree: str, timeout: int) ->
         run_guest(root, launcher, digest, ["--check", path], timeout)
         print(f"NATIVE_CHECK_PASS={index}/{len(sources)} {path}", flush=True)
     for index, path in enumerate(contracts, start=1):
-        run_guest(root, launcher, digest, [path], timeout)
+        stdout = run_guest(root, launcher, digest, [path], timeout)
+        verify_contract_receipt(stdout)
         print(f"NATIVE_CONTRACT_PASS={index}/{len(contracts)} {path}", flush=True)
     # No generated or mutated reviewed sources may be laundered as guest receipts.
     preflight(root, launcher, digest, tree)
@@ -179,6 +188,23 @@ def self_test() -> None:
                 raise AssertionError(f"preflight misclassified synthetic case: {case}")
             print(f"PASS synthetic native preflight: {case}", flush=True)
     print(f"NATIVE_PREFLIGHT_SYNTHETIC_PASS={len(cases)}/{len(cases)}; NOT NATIVE COMPILER EVIDENCE")
+    receipts = (
+        (b"PASS native contract\n", True),
+        (b"log\nPASS native contract\r\n", True),
+        (b"PASS native contract\nFAIL leaked\n", False),
+        (b"PASS\n", False),
+        (b"not a PASS contract\n", False),
+        (b"", False),
+    )
+    for payload, expected in receipts:
+        accepted = True
+        try:
+            verify_contract_receipt(payload)
+        except ValueError:
+            accepted = False
+        if accepted != expected:
+            raise AssertionError("synthetic success marker verifier misclassified output")
+    print(f"NATIVE_CONTRACT_RECEIPT_SYNTHETIC_PASS={len(receipts)}/{len(receipts)}; NOT NATIVE")
 
 
 if __name__ == "__main__":
