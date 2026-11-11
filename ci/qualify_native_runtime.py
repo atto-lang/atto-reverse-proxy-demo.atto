@@ -356,7 +356,7 @@ def self_test() -> None:
     with TemporaryDirectory(prefix="atto-host-constraints-") as tmp:
         root = Path(tmp)
         launcher = root / "fake-host-program"
-        launcher.write_text("#!/bin/sh\nprintf 'ENV %s\\n' \"\${GITHUB_TOKEN:-unset}\"")
+        launcher.write_text("#!/bin/sh\nif /usr/bin/env | /bin/grep -q '^GITHUB_TOKEN='; then echo 'ENV leaked'; else echo 'ENV unset'; fi\n")
         launcher.chmod(0o700)
         with TemporaryDirectory(prefix="atto-env-") as scratch:
             rc, output = bounded_invoke(root, launcher, [], 3, minimal_env(Path(scratch)))
