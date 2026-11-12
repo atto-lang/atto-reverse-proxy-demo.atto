@@ -13,9 +13,12 @@ jobs:
         with:
           persist-credentials: false
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Verify isolated stdlib policy imports (source-free negative fixtures)
+        shell: bash
+        run: bash ci/test-safe-defaults-import-isolation.sh
       - name: Validate flags-2-env admission contract
         run: |
-          python3 - <<'PY'
+          python3 -I - <<'PY'
           import tomllib
           from pathlib import Path
           p = Path(".cli-flags.toml")
