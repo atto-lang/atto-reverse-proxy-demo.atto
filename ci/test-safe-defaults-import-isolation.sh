@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-# Host-only negative test: PR checkout must not shadow stdlib policy imports.
+# TRUSTED LOCAL DEVELOPMENT ONLY: this file must NEVER execute from a PR checkout.
+# The hosted workflow runs its own reviewed inline probe BEFORE checkout.
+# Keep this helper for manual, trusted source-free regression checks.
 set -euo pipefail
 root="$(cd -- "$(dirname -- "$0")/.." && pwd -P)"
 workflow="$root/.github/workflows/safe-defaults.yml"
