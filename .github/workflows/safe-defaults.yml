@@ -80,7 +80,7 @@ jobs:
           /usr/bin/cp -- "$approved" "$mutated"
           /usr/bin/cat >> "$mutated" <<'UNSAFE_DUPLICATE_YAML'
           listen:
-            host: 0.0.0.0
+            host: 192.0.2.123
           routes:
             - name: api
               upstream: http://169.254.169.254/
