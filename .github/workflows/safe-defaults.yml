@@ -9,13 +9,36 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
+      - name: Verify isolated stdlib imports before untrusted PR checkout
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Trusted inline workflow code: no PR checkout or PR-owned shell script
+          # may execute before the import-isolation probes.
+          test -x /usr/bin/python3
+          umask 077
+          tmp="$(/usr/bin/mktemp -d)"
+          trap '/usr/bin/rm -rf -- "$tmp"' EXIT
+          printf '%s\n' 'open("shadowed-tomllib", "w").close()' 'raise RuntimeError("untrusted tomllib imported")' > "$tmp/tomllib.py"
+          printf '%s\n' 'open("shadowed-pathlib", "w").close()' 'raise RuntimeError("untrusted pathlib imported")' > "$tmp/pathlib.py"
+          printf '%s\n' 'open("shadowed-sitecustomize", "w").close()' 'raise RuntimeError("untrusted startup hook")' > "$tmp/sitecustomize.py"
+          (
+            cd "$tmp"
+            PYTHONPATH="$tmp" PYTHONHOME="$tmp" /usr/bin/python3 -I - <<'PY'
+          import pathlib
+          import tomllib
+          assert callable(tomllib.loads)
+          assert pathlib.Path('.').is_dir()
+          PY
+          )
+          for marker in shadowed-tomllib shadowed-pathlib shadowed-sitecustomize; do
+            test ! -e "$tmp/$marker" || { echo "SECURITY_FAILURE: imported $marker" >&2; exit 1; }
+          done
+          echo 'SAFE_DEFAULTS_IMPORT_ISOLATION_PASS negative_vectors=3 source_free=1 native_guest=NOT_EXECUTED'
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           persist-credentials: false
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
-      - name: Verify isolated stdlib policy imports (source-free negative fixtures)
-        shell: bash
-        run: bash ci/test-safe-defaults-import-isolation.sh
       - name: Enforce exact flags-2-env fields and exercise negative fixtures
         shell: bash
         run: |
