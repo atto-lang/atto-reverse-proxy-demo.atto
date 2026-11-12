@@ -16,24 +16,57 @@ jobs:
       - name: Verify isolated stdlib policy imports (source-free negative fixtures)
         shell: bash
         run: bash ci/test-safe-defaults-import-isolation.sh
-      - name: Validate flags-2-env admission contract
+      - name: Enforce exact flags-2-env fields and exercise negative fixtures
+        shell: bash
         run: |
+          set -euo pipefail
           python3 -I - <<'PY'
           import tomllib
           from pathlib import Path
+          
+          EXPECTED_HELP = "Absolute trusted path to a proxy YAML configuration file."
+          EXPECTED_FIELDS = {"env", "aliases", "type", "help"}
+          
+          def validate(raw):
+              data = tomllib.loads(raw)
+              if set(data) != {"flags"}:
+                  raise ValueError("unreviewed top-level TOML sections")
+              flags = data["flags"]
+              if not isinstance(flags, dict) or set(flags) != {"config-yaml"}:
+                  raise ValueError("unreviewed CLI flags")
+              row = flags["config-yaml"]
+              if not isinstance(row, dict) or set(row) != EXPECTED_FIELDS:
+                  raise ValueError("unreviewed CLI option fields")
+              if (row["env"] != "ores_proxy_conf_yaml"
+                      or row["type"] != "string"
+                      or row["aliases"] != ["config-yaml", "conf"]
+                      or row["help"] != EXPECTED_HELP):
+                  raise ValueError("CLI flag admission contract changed")
+          
           p = Path(".cli-flags.toml")
           if p.is_symlink() or not p.is_file():
               raise SystemExit(".cli-flags.toml must be a regular file")
-          data = tomllib.loads(p.read_text())
-          flags = data.get("flags", {})
-          if set(flags) != {"config-yaml"}:
-              raise SystemExit(f"unexpected CLI flags: {sorted(flags)}")
-          row = flags["config-yaml"]
-          if row.get("env") != "ores_proxy_conf_yaml" or row.get("type") != "string":
-              raise SystemExit("config-yaml flags-2-env contract changed")
-          if row.get("aliases") != ["config-yaml", "conf"]:
-              raise SystemExit("unexpected config aliases")
-          print("FLAGS_2_ENV_CONTRACT_PASS")
+          original = p.read_text(encoding="utf-8")
+          validate(original)
+          mutations = {
+              "rogue-default": original + 'default = "/tmp/unreviewed-config.yaml"\n',
+              "rogue-extra-field": original + "unsafe = true\n",
+              "rogue-top-level": original + "[proxy]\nallow_private = true\n",
+              "rogue-new-flag": original + '[flags.bypass]\nenv = "ALLOW_ALL"\n',
+              "help-drift": original.replace(EXPECTED_HELP, "Choose any file"),
+              "env-drift": original.replace("ores_proxy_conf_yaml", "ores_proxy_config"),
+              "alias-drift": original.replace('"conf"', '"unrestricted"'),
+              "duplicate-key": original + 'env = "override"\n',
+          }
+          for label, mutated in mutations.items():
+              if mutated == original:
+                  raise SystemExit(f"TEST_FAILURE: fixture did not mutate: {label}")
+              try:
+                  validate(mutated)
+              except (ValueError, tomllib.TOMLDecodeError):
+                  continue
+              raise SystemExit(f"SECURITY_FAILURE: admitted unreviewed CLI mutation: {label}")
+          print(f"FLAGS_2_ENV_STRICT_PASS negative_fixtures={len(mutations)} source_free=1 native_guest=NOT_EXECUTED")
           PY
       - name: Enforce byte-exact reviewed example config and reject YAML ambiguity
         shell: bash
