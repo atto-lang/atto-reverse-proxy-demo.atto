@@ -161,6 +161,13 @@ rm "$test_repo/src"
 mv "$test_repo/src-original" "$test_repo/src"
 rm -rf "$external_dir"
 check_ok
+# Hardlinks retain exact Git blob bytes and ordinary permissions but allow
+# writes via an external alias after source admission: reject before execution.
+external_hardlink="$test_repo.external-hardlink"
+ln -- "$test_repo/src/hello.ores" "$external_hardlink"
+check_bad
+rm -- "$external_hardlink"
+check_ok
 # A staged Python interpreter cannot be hidden by a benign worktree file.
 printf 'safe\n' > "$test_repo/src/disguised.txt"
 git -C "$test_repo" add src/disguised.txt
@@ -232,6 +239,16 @@ fi
 rm "$pinned_repo/docs/ignored.txt"
 EXPECTED_DEMO_SHA="$pinned_sha" bash "$pinned_repo/ci/source-policy.sh" > /dev/null || {
   echo 'TEST_FAILURE: pinned checkout failed after fixture recovery' >&2; exit 1;
+}
+# Exact-head audit must also reject the same cross-checkout hardlink alias.
+external_pinned_hardlink="$test_repo.pinned-external-hardlink"
+ln -- "$pinned_repo/docs/allowed.txt" "$external_pinned_hardlink"
+if EXPECTED_DEMO_SHA="$pinned_sha" bash "$pinned_repo/ci/source-policy.sh" >/dev/null 2>&1; then
+  echo 'TEST_FAILURE: pinned source admitted externally aliased tracked inode' >&2; exit 1
+fi
+rm -- "$external_pinned_hardlink"
+EXPECTED_DEMO_SHA="$pinned_sha" bash "$pinned_repo/ci/source-policy.sh" >/dev/null || {
+  echo 'TEST_FAILURE: pinned source did not recover after hardlink removal' >&2; exit 1
 }
 # A checkout with core.filemode=false must not hide executable-bit drift.
 # The policy explicitly forces core.filemode=true for its HEAD comparisons.
@@ -308,4 +325,4 @@ GIT_INDEX_FILE="$test_repo/.git/empty-index-from-caller" \
 # A well-formed but stale external expected-HEAD claim must be rejected.
 EXPECTED_DEMO_SHA="$(printf '0%.0s' {1..40})" check_bad
 check_ok
-printf 'SOURCE_POLICY_NEGATIVE_TESTS_PASS scenarios=35\n'
+printf 'SOURCE_POLICY_NEGATIVE_TESTS_PASS scenarios=37\n'

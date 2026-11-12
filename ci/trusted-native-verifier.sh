@@ -60,6 +60,11 @@ test "$untracked_bytes" -eq 0 || { echo "untracked or ignored source introduced"
 checkout_root="$(/usr/bin/realpath -e -- "$GITHUB_WORKSPACE")"
 "${source_git[@]}" ls-files -z -- | while IFS= read -r -d "" tracked_file; do
   test -f "$tracked_file" && test ! -L "$tracked_file" || exit 1
+  # A tracked file with an external hardlink alias can be rewritten after
+  # this verification pass without changing its checkout path. Fail closed.
+  test "$(/usr/bin/stat -c %h -- "$tracked_file")" = 1 || {
+    echo 'frozen tracked source has multiple hardlinks' >&2; exit 1;
+  }
   test "$(/usr/bin/realpath -e -- "$tracked_file")" = "$checkout_root/$tracked_file" || { echo "frozen tracked file escapes checkout through parent symlink" >&2; exit 1; }
   "${source_git[@]}" show "HEAD:$tracked_file" | /usr/bin/cmp -s -- "$tracked_file" - || { echo "frozen source bytes changed" >&2; exit 1; }
   # Check committed executable mode even if index marks file assume-unchanged.

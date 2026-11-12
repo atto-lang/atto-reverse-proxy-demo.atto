@@ -133,6 +133,8 @@ jobs:
         run: |
           set -euo pipefail
           bash -n ci/trusted-native-verifier.sh
+          grep -Fq "frozen tracked source has multiple hardlinks" ci/trusted-native-verifier.sh
+          grep -Fq "frozen tracked source has multiple hardlinks" .github/workflows/trusted-frozen-reverse-native.yml
           grep -Fq 'guest_tmp="$(/usr/bin/mktemp -d -- "$runner_temp_root/oreslang-guest.XXXXXX")"' ci/trusted-native-verifier.sh
           grep -Fq '"TMPDIR=$guest_tmp"' ci/trusted-native-verifier.sh
           grep -Fq 'runner_temp_root="$(/usr/bin/realpath -e -- "$RUNNER_TEMP")"' ci/trusted-native-verifier.sh

@@ -381,7 +381,7 @@ jobs:
             echo 'root-owned manifest pin disagrees with independently approved Actions variable' >&2; exit 1;
           }
           verifier_blob="$(/usr/bin/env -u GIT_DIR -u GIT_WORK_TREE -u GIT_COMMON_DIR -u GIT_INDEX_FILE -u GIT_OBJECT_DIRECTORY -u GIT_ALTERNATE_OBJECT_DIRECTORIES -u GIT_NAMESPACE -u GIT_CONFIG -u GIT_CONFIG_COUNT -u GIT_CONFIG_PARAMETERS GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null /usr/bin/git hash-object --no-filters -- "$verifier")"
-          test "$verifier_blob" = '3adc52c23341ef48c636558f70a4fa83a253366a' || {
+          test "$verifier_blob" = '22d6aaca365942cac818c09da7036397341fa948' || {
             echo 'root-owned verifier does not match reviewed Git blob' >&2; exit 1;
           }
           /usr/bin/timeout 15s "$verifier" --version || /usr/bin/timeout 15s "$verifier" --build-info || /usr/bin/timeout 15s "$verifier" --help
@@ -430,6 +430,12 @@ jobs:
           while IFS= read -r -d '' tracked_file; do
             test -f "$tracked_file" && test ! -L "$tracked_file" || {
               echo 'frozen checkout has missing or linked tracked file' >&2
+              exit 1
+            }
+            # Git blob checks alone cannot detect writable aliases outside
+            # this checkout. Reject any tracked inode with multiple hardlinks.
+            test "$(/usr/bin/stat -c %h -- "$tracked_file")" = 1 || {
+              echo 'frozen tracked source has multiple hardlinks' >&2
               exit 1
             }
             # A skip-worktree index bit can hide a replaced directory from

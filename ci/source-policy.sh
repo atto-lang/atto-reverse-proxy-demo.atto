@@ -88,6 +88,15 @@ while IFS= read -r -d '' entry; do
   [[ "$actual_blob" == "$object" ]] || {
     echo "POLICY_FAILURE: staged blob differs from audited worktree: $path" >&2; exit 2;
   }
+  # A second hardlink outside the checkout can rewrite this trusted inode
+  # after blob admission without changing its pathname or committed SHA.
+  # Frozen-source policy must not admit externally aliasable tracked files.
+  hardlink_count="$(/usr/bin/stat -c %h -- "$path")" || {
+    echo "POLICY_FAILURE: cannot stat tracked link count: $path" >&2; exit 2;
+  }
+  [[ "$hardlink_count" == 1 ]] || {
+    echo "POLICY_FAILURE: tracked file has external hardlink alias: $path" >&2; exit 2;
+  }
   # Git's assume-unchanged/skip-worktree flags can hide executable-bit drift
   # from diff even with core.filemode=true. The object hash covers bytes,
   # not filesystem mode; check the leaf directly against the staged Git mode.
