@@ -17,6 +17,15 @@ if (( size > 1048576 )); then
   echo 'actor receipt log exceeds 1 MiB bound' >&2
   exit 65
 fi
+# Fixed markers come from stdio.println, so the final record must end
+# in a newline. GNU grep -x and Bash read also count an unterminated
+# final marker, allowing a truncated log to look like a complete receipt.
+# Reject that ambiguous boundary before performing independent count reads.
+if (( size == 0 )) ||
+  [[ "$(/usr/bin/tail -c 1 -- "$log" | /usr/bin/od -An -tu1 | /usr/bin/tr -d '[:space:]')" != 10 ]]; then
+  echo 'actor receipt log ends with an incomplete record' >&2
+  exit 65
+fi
 # Full-line markers only; the guest never includes request-controlled bytes.
 hello=$(/usr/bin/grep -Fxc 'ORES_PROXY_TEST_DISPATCH_HELLO' -- "$log" || true)
 hello_claim=$(/usr/bin/grep -Fxc 'ORES_PROXY_TEST_CLAIM_HELLO' -- "$log" || true)
