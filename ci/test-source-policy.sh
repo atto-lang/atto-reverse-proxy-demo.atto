@@ -293,11 +293,11 @@ SOURCE_POLICY_MODE=rest-legacy bash "$legacy_repo/ci/source-policy.sh" >/dev/nul
   echo 'TEST_FAILURE: unpinned legacy fixture compatibility regressed' >&2; exit 1
 }
 if SOURCE_POLICY_MODE=rest-legacy EXPECTED_DEMO_SHA="$legacy_sha" \
-  bash "$legacy_repo/ci/source-policy.sh" > "$legacy_repo/rejection.log" 2>&1; then
+  bash "$legacy_repo/ci/source-policy.sh" > "$test_repo/legacy-rejection.log" 2>&1; then
   echo 'TEST_FAILURE: SHA-pinned audit accepted migration-only Python exemption' >&2
   exit 1
 fi
-grep -Fq 'POLICY_FAILURE: SHA-pinned source policy requires strict mode' "$legacy_repo/rejection.log" || {
+grep -Fq 'POLICY_FAILURE: SHA-pinned source policy requires strict mode' "$test_repo/legacy-rejection.log" || {
   echo 'TEST_FAILURE: pinned legacy exemption failed for wrong reason' >&2; exit 1
 }
 # A harmless extension cannot make mutated worktree bytes match the pinned index.
