@@ -85,7 +85,19 @@ jobs:
             ([.tree[] | select(.path == ".github/workflows/trusted-frozen-reverse-native.yml")] |
               length == 1 and .[0].type == "blob" and .[0].mode == "100644") and
             all(.tree[] | select(.path | startswith(".github/workflows/"));
-              .type == "blob" and .mode == "100644")
+              .type == "blob" and .mode == "100644" and
+              # A newly named regular workflow is also dangerous: it can
+              # restore self-hosted PR execution under a different filename.
+              # Changes to this allowlist require a reviewed first-stage
+              # control-plane PR before a second PR adds a new workflow.
+              (.path as $p | ([
+                ".github/workflows/native-contracts.yml",
+                ".github/workflows/safe-defaults.yml",
+                ".github/workflows/source-contract-inventory.yml",
+                ".github/workflows/trusted-frozen-reverse-native.yml",
+                ".github/workflows/upstream-source-hygiene.yml",
+                ".github/workflows/trusted-native-legacy-merge-guard.yml"
+              ] | index($p)) != null))
           '
           /usr/bin/jq -e "$policy" <<<"$tree_json" >/dev/null || {
             echo 'SECURITY_FAILURE: candidate resurrects legacy native workflow or lacks trusted control plane' >&2
@@ -109,7 +121,8 @@ jobs:
             '.tree += [.tree[0]]' \
             'del(.tree[1])' \
             '.tree[1].mode="120000"' \
-            '.tree += [{path:".github/workflows/unreviewed.yml",type:"commit",mode:"160000",sha:"a"}]'; do
+            '.tree += [{path:".github/workflows/unreviewed.yml",type:"commit",mode:"160000",sha:"a"}]' \
+            '.tree += [{path:".github/workflows/unreviewed.yml",type:"blob",mode:"100644",sha:("a"*40)}]'; do
             bad="$(/usr/bin/jq "$mutation" <<<"$positive")"
             if /usr/bin/jq -e "$policy" <<<"$bad" >/dev/null; then
               echo 'SECURITY_FAILURE: adversarial Git tree accepted' >&2
@@ -117,6 +130,6 @@ jobs:
             fi
             negative=$((negative+1))
           done
-          test "$negative" = 9
+          test "$negative" = 10
           echo "TRUSTED_NATIVE_LEGACY_GUARD_PASS pr=$PR_NUMBER head=$EVENT_HEAD_SHA tree=$tree_sha negative=$negative"
           echo 'CONTROL_PLANE_ONLY: native Oreslang compiler/guest NOT_EXECUTED'
