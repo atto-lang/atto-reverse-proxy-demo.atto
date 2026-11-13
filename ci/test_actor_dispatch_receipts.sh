@@ -65,6 +65,9 @@ emit_valid; remove_first "$sc"; expect_fail missing_stream_claim
 emit_valid; printf '%s\n' "$sc" >> "$log"; expect_fail stream_claim_exceeds_dispatch
 emit_valid; printf '%s\n' 'ORES_PROXY_TEST_DISPATCH_UNKNOWN' >> "$log"; expect_fail unknown_dispatch_marker
 emit_valid; printf '%s\n' 'ORES_PROXY_TEST_CLAIM_UNKNOWN' >> "$log"; expect_fail unknown_claim_marker
+# GNU grep -x counts a complete marker without a final newline;
+# stdio.println receipts are newline-delimited, so that log is truncated.
+emit_valid; /usr/bin/truncate -s -1 -- "$log"; expect_fail unterminated_final_receipt
 emit_valid; /usr/bin/ln -s "$log" "$scratch/symlink"
 if /bin/bash --noprofile --norc "$verifier" "$scratch/symlink" > /dev/null 2>&1; then
   echo 'FAIL accepted symlinked receipt log' >&2; exit 1
@@ -75,4 +78,4 @@ if /bin/bash --noprofile --norc "$verifier" "$scratch/missing" > /dev/null 2>&1;
   echo 'FAIL accepted missing receipt log' >&2; exit 1
 fi
 echo 'PASS rejected synthetic actor receipts: missing_log'
-echo 'SOURCE_FREE_ACTOR_CLAIM_RECEIPT_TESTS_PASS=24/24; NATIVE_ORESLANG_NOT_EXECUTED'
+echo 'SOURCE_FREE_ACTOR_CLAIM_RECEIPT_TESTS_PASS=25/25; NATIVE_ORESLANG_NOT_EXECUTED'
