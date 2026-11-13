@@ -220,37 +220,87 @@ pub async routine main(): int {
     return 1;
   fi
 
-  // read_line_async is sufficient for these explicitly textual fixture
-  // payloads, but not a general binary-safe HTTP chunk decoder.
-  let bool first_body = false;
-  let bool second_body = false;
-  let bool terminal_chunk = false;
-  for (let i = 0; i < 48; i++) {
-    val body_line = await streaming.read_line_async();
-    if body_line.is_none(); then break; fi
-    val String line = body_line.unwrap().trim();
-    if line == "stage-one"; then
-      if first_body || second_body; then
-        await streaming.close_async();
-        stdio.println("FAIL duplicate or reordered first body stage");
-        return 1;
-      fi
-      first_body = true;
-    elif line == "stage-two"; then
-      if !first_body || second_body; then
-        await streaming.close_async();
-        stdio.println("FAIL missing or reordered second body stage");
-        return 1;
-      fi
-      second_body = true;
-    elif line == "0" && second_body; then
-      terminal_chunk = true;
-      break;
+  // The adapter may coalesce both writes into one 20-byte chunk or keep
+  // the two 10-byte stage writes as separate chunks. Accept only those two
+  // documented shapes; never ignore chunk-size lines or chunk boundaries.
+  val first_chunk_line = await streaming.read_line_async();
+  if first_chunk_line.is_none(); then
+    await streaming.close_async();
+    stdio.println("FAIL streaming chunk size missing");
+    return 1;
+  fi
+  val String first_chunk = first_chunk_line.unwrap().trim();
+  if first_chunk == "14"; then
+    val coalesced_first = await streaming.read_line_async();
+    val coalesced_second = await streaming.read_line_async();
+    val coalesced_boundary = await streaming.read_line_async();
+    if coalesced_first.is_none() || coalesced_second.is_none() ||
+      coalesced_boundary.is_none(); then
+      await streaming.close_async();
+      stdio.println("FAIL truncated coalesced streaming chunk");
+      return 1;
     fi
-  }
+    if coalesced_first.unwrap().trim() != "stage-one" ||
+      coalesced_second.unwrap().trim() != "stage-two" ||
+      coalesced_boundary.unwrap().trim() != ""; then
+      await streaming.close_async();
+      stdio.println("FAIL coalesced chunk length, payload or boundary");
+      return 1;
+    fi
+  elif first_chunk == "a" || first_chunk == "A"; then
+    val first_stage = await streaming.read_line_async();
+    val first_boundary = await streaming.read_line_async();
+    val second_chunk_line = await streaming.read_line_async();
+    if first_stage.is_none() || first_boundary.is_none() ||
+      second_chunk_line.is_none(); then
+      await streaming.close_async();
+      stdio.println("FAIL truncated first streaming chunk");
+      return 1;
+    fi
+    val String second_chunk = second_chunk_line.unwrap().trim();
+    if first_stage.unwrap().trim() != "stage-one" ||
+      first_boundary.unwrap().trim() != "" ||
+      (second_chunk != "a" && second_chunk != "A"); then
+      await streaming.close_async();
+      stdio.println("FAIL first chunk length, payload or boundary");
+      return 1;
+    fi
+    val second_stage = await streaming.read_line_async();
+    val second_boundary = await streaming.read_line_async();
+    if second_stage.is_none() || second_boundary.is_none(); then
+      await streaming.close_async();
+      stdio.println("FAIL truncated second streaming chunk");
+      return 1;
+    fi
+    if second_stage.unwrap().trim() != "stage-two" ||
+      second_boundary.unwrap().trim() != ""; then
+      await streaming.close_async();
+      stdio.println("FAIL second chunk payload or boundary");
+      return 1;
+    fi
+  else
+    await streaming.close_async();
+    stdio.println("FAIL unexpected streaming chunk size");
+    return 1;
+  fi
+  val terminal_chunk_line = await streaming.read_line_async();
+  val trailer_end_line = await streaming.read_line_async();
+  if terminal_chunk_line.is_none() || trailer_end_line.is_none(); then
+    await streaming.close_async();
+    stdio.println("FAIL missing terminal chunk or trailer terminator");
+    return 1;
+  fi
+  if terminal_chunk_line.unwrap().trim() != "0" ||
+    trailer_end_line.unwrap().trim() != ""; then
+    await streaming.close_async();
+    stdio.println("FAIL invalid terminal chunk or unexpected trailers");
+    return 1;
+  fi
+  // Connection: close must leave no extra bytes after the terminal chunk.
+  val trailing_line = await streaming.read_line_async();
   await streaming.close_async();
-  if !first_body || !second_body || !terminal_chunk; then
-    stdio.println("FAIL streaming body order or terminating chunk");
+  if !trailing_line.is_none(); then
+    stdio.println("FAIL bytes after terminal streaming chunk");
     return 1;
   fi
   // A YAML service binding is not authority to dynamically load guest code.

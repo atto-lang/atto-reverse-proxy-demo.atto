@@ -10,7 +10,7 @@ records the AttoLang compiler binary digest and JDK25, checks both AttoLang
 programs, launches `src/serve_reverse.atto` in a subprocess on
 `127.0.0.1:8080`, and calls `tests/actor_ingress_tcp_smoke.atto` as a
 separate native AttoLang client. The client checks:
-- HTTP 200 for the allowlisted statically compiled local AttoLang actor service, plus a separate streaming actor response with chunked HTTP/1.1 transfer framing, no conflicting Content-Length, both text body stages in order, and a terminal zero-length chunk
+- HTTP 200 for the allowlisted statically compiled local AttoLang actor service, plus a separate streaming actor response with chunked HTTP/1.1 framing: either one coalesced 0x14 (20-byte) chunk or two stage-aligned 0x0a (10-byte) chunks, exact ordered payload, each chunk boundary, a zero-length terminal chunk, an empty trailer section, and EOF with no trailing bytes; Content-Length is forbidden
 - HTTP 501 for an admitted but unimplemented outbound HTTP upstream
 - HTTP 405 with an empty response body for HEAD on local actor and fallback upstream routes, before route or actor dispatch; the demo has no proven HEAD metadata/response-body suppression contract
 - Raw-framing negative vectors (zero/empty Content-Length, conflicting duplicate Content-Length, Content-Length plus Transfer-Encoding, duplicate Host, mixed-case Transfer-Encoding) require HTTP 400 or a transport-initiated close, **never** local actor dispatch; a subsequent clean GET must still receive HTTP 200. The guest's scalar `exchange.header()` cannot itself validate duplicate raw fields, so these remain transport-level acceptance requirements until native execution proves them
@@ -53,7 +53,7 @@ single-owner exchange handoff. The bounded readiness loop and EXIT cleanup
 ensure the test fails explicitly instead of silently passing when the server
 never starts. If runner admission is queued, **no program has executed**.
 
-The wire client explicitly separates HTTP headers from the body before accepting the two text stage markers. It fails on absent/incorrect chunked transfer headers, conflicting Content-Length, duplicate/reordered stages, or a missing terminal chunk. Its line-oriented fixture check is **not** a general binary-safe RFC 9112 chunk parser and does not validate trailers or malicious chunk extensions.
+The native wire client explicitly separates headers from body and validates the chunk-size lines and CRLF boundaries for the two supported adapter shapes: one coalesced 0x14 (20-byte) chunk, or two stage-aligned 0x0a (10-byte) chunks. It requires the exact `stage-one\nstage-two\n` payload, a zero-length terminal chunk, an empty trailer section and EOF with no trailing bytes. The source-free Python model executes positive and malformed synthetic vectors for those same shapes; it is **not** a live AttoLang result. The native client remains line-oriented and is **not** a general binary-safe RFC 9112 chunk parser: arbitrary chunk segmentation, trailers and chunk extensions are intentionally outside this narrow fixture contract.
 
 The streaming proof exercises the existing server-side `exchange.start/write/finish` guest API and a separate native AttoLang TCP client. It does not turn the Java host-only outbound HTTP proof into a guest API. The test **does not** validate remote upstream HTTP streaming, authenticating
 CONNECT, content framing under malicious inputs, true GraalVM AOT, or LLVM.

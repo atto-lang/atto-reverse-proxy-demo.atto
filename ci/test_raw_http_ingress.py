@@ -10,6 +10,7 @@ HOST = "127.0.0.1"
 MAX_RECEIPT = 65536
 GOOD_BODY = b"hello from native AttoLang actor service"
 TIMEOUT = 2.0
+STREAM_PAYLOAD = b"stage-one\nstage-two\n"
 GOOD = b"GET /actor HTTP/1.1\r\nHost: worker.example.test\r\nConnection: close\r\n\r\n"
 
 # Only literal loopback is used. An unexpected 2xx/3xx/5xx response fails all
@@ -78,6 +79,123 @@ def exchange(port: int, payload: bytes) -> bytes:
             raise AssertionError("server exceeded response header byte budget")
         return bytes(data)
 
+def decode_textual_chunked_body(body: bytes) -> bytes:
+    """Decode only the two documented textual fixture segmentations."""
+    offset = 0
+    chunks: list[int] = []
+    decoded = bytearray()
+    while True:
+        line_end = body.find(b"\r\n", offset)
+        if line_end < 0:
+            raise AssertionError("missing CRLF after chunk-size line")
+        size_line = body[offset:line_end]
+        offset = line_end + 2
+        if size_line == b"0":
+            if body[offset:offset + 2] != b"\r\n":
+                raise AssertionError("trailers are outside this fixture contract")
+            offset += 2
+            if offset != len(body):
+                raise AssertionError("bytes after terminal chunk")
+            break
+        if size_line not in (b"a", b"A", b"14"):
+            raise AssertionError("unexpected chunk size or extension")
+        size = int(size_line, 16)
+        if offset + size + 2 > len(body):
+            raise AssertionError("truncated chunk data")
+        decoded.extend(body[offset:offset + size])
+        offset += size
+        if body[offset:offset + 2] != b"\r\n":
+            raise AssertionError("missing chunk-data CRLF boundary")
+        offset += 2
+        chunks.append(size)
+        if len(chunks) > 2:
+            raise AssertionError("too many chunks")
+    if tuple(chunks) not in ((20,), (10, 10)):
+        raise AssertionError("unsupported chunk segmentation")
+    if bytes(decoded) != STREAM_PAYLOAD:
+        raise AssertionError("stream payload bytes or order mismatch")
+    return bytes(decoded)
+
+
+def verify_streaming_response(receipt: bytes) -> bytes:
+    if status(receipt) != 200:
+        raise AssertionError("expected HTTP/1.1 200 streaming response")
+    head, body = receipt.split(b"\r\n\r\n", 1)
+    transfer: list[bytes] = []
+    content_lengths: list[bytes] = []
+    for line in head.split(b"\r\n")[1:]:
+        if b":" not in line:
+            raise AssertionError("malformed streaming response header")
+        name, value = line.split(b":", 1)
+        name = name.strip().lower()
+        value = value.strip().lower()
+        if name == b"transfer-encoding":
+            transfer.append(value)
+        elif name == b"content-length":
+            content_lengths.append(value)
+    if transfer != [b"chunked"] or content_lengths:
+        raise AssertionError("expected one chunked coding and no Content-Length")
+    return decode_textual_chunked_body(body)
+
+
+def streaming_self_test() -> None:
+    def receipt(body: bytes, headers: bytes =
+                b"Transfer-Encoding: chunked\r\nConnection: close",
+                status_line: bytes = b"HTTP/1.1 200 OK") -> bytes:
+        return status_line + b"\r\n" + headers + b"\r\n\r\n" + body
+
+    valid = (
+        ("coalesced", b"14\r\n" + STREAM_PAYLOAD + b"\r\n0\r\n\r\n"),
+        ("two_chunks", b"a\r\nstage-one\n\r\na\r\nstage-two\n\r\n0\r\n\r\n"),
+        ("uppercase_hex", b"A\r\nstage-one\n\r\nA\r\nstage-two\n\r\n0\r\n\r\n"),
+    )
+    invalid = (
+        ("missing_size", b"stage-one\nstage-two\n0\r\n\r\n",
+         b"Transfer-Encoding: chunked\r\nConnection: close", b"HTTP/1.1 200 OK"),
+        ("wrong_size", b"9\r\nstage-one\n\r\n0\r\n\r\n",
+         b"Transfer-Encoding: chunked\r\nConnection: close", b"HTTP/1.1 200 OK"),
+        ("wrong_second_chunk_size", b"a\r\nstage-one\n\r\nbogus\r\nstage-two\n\r\n0\r\n\r\n",
+         b"Transfer-Encoding: chunked\r\nConnection: close", b"HTTP/1.1 200 OK"),
+        ("missing_chunk_boundary", b"14\r\n" + STREAM_PAYLOAD + b"0\r\n\r\n",
+         b"Transfer-Encoding: chunked\r\nConnection: close", b"HTTP/1.1 200 OK"),
+        ("truncated_data", b"14\r\nstage-one\nstage-two\r\n0\r\n\r\n",
+         b"Transfer-Encoding: chunked\r\nConnection: close", b"HTTP/1.1 200 OK"),
+        ("missing_terminal", b"14\r\n" + STREAM_PAYLOAD + b"\r\n",
+         b"Transfer-Encoding: chunked\r\nConnection: close", b"HTTP/1.1 200 OK"),
+        ("trailer", b"14\r\n" + STREAM_PAYLOAD + b"\r\n0\r\nX: y\r\n\r\n",
+         b"Transfer-Encoding: chunked\r\nConnection: close", b"HTTP/1.1 200 OK"),
+        ("extra_after_terminal", b"14\r\n" + STREAM_PAYLOAD + b"\r\n0\r\n\r\nextra",
+         b"Transfer-Encoding: chunked\r\nConnection: close", b"HTTP/1.1 200 OK"),
+        ("reordered", b"14\r\nstage-two\nstage-one\n\r\n0\r\n\r\n",
+         b"Transfer-Encoding: chunked\r\nConnection: close", b"HTTP/1.1 200 OK"),
+        ("wrong_headers_cl", b"14\r\n" + STREAM_PAYLOAD + b"\r\n0\r\n\r\n",
+         b"Transfer-Encoding: chunked\r\nContent-Length: 20", b"HTTP/1.1 200 OK"),
+        ("duplicate_te", b"14\r\n" + STREAM_PAYLOAD + b"\r\n0\r\n\r\n",
+         b"Transfer-Encoding: chunked\r\nTransfer-Encoding: chunked", b"HTTP/1.1 200 OK"),
+        ("non_chunked", b"14\r\n" + STREAM_PAYLOAD + b"\r\n0\r\n\r\n",
+         b"Transfer-Encoding: gzip, chunked", b"HTTP/1.1 200 OK"),
+        ("wrong_status", b"14\r\n" + STREAM_PAYLOAD + b"\r\n0\r\n\r\n",
+         b"Transfer-Encoding: chunked", b"HTTP/1.1 201 Created"),
+        ("chunk_extension", b"a;foo=bar\r\nstage-one\n\r\n0\r\n\r\n",
+         b"Transfer-Encoding: chunked", b"HTTP/1.1 200 OK"),
+        ("unsupported_split", b"5\r\nstage\r\nf\r\n-one\nstage-two\n\r\n0\r\n\r\n",
+         b"Transfer-Encoding: chunked", b"HTTP/1.1 200 OK"),
+    )
+    for name, body in valid:
+        if verify_streaming_response(receipt(body)) != STREAM_PAYLOAD:
+            raise AssertionError(f"valid streaming response rejected: {name}")
+    for name, body, headers, status_line in invalid:
+        accepted = True
+        try:
+            verify_streaming_response(receipt(body, headers, status_line))
+        except AssertionError:
+            accepted = False
+        if accepted:
+            raise AssertionError(f"invalid streaming response accepted: {name}")
+    total = len(valid) + len(invalid)
+    print(f"STREAM_CHUNK_SELF_TEST_PASS={total}/{total}; SOURCE_FREE_MODEL_ONLY")
+
+
 def self_test() -> None:
     cases = (
         (b"HTTP/1.1 200 OK\r\n\r\n" + GOOD_BODY, 200, False, True),
@@ -102,6 +220,7 @@ def self_test() -> None:
             passed = False
         if passed != should_pass:
             raise AssertionError(f"raw-wire probe self-test vector {idx} did not discriminate")
+    streaming_self_test()
     print(f"WIRE_PROBE_SELF_TEST_PASS={len(cases)}/{len(cases)}; NOT NATIVE EXECUTION")
 
 def live(port: int) -> None:
