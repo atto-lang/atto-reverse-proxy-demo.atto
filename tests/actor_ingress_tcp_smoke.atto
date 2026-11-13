@@ -229,8 +229,8 @@ pub async routine main(): int {
     stdio.println("FAIL streaming chunk size missing");
     return 1;
   fi
-  val String first_chunk = first_chunk_line.unwrap().trim();
-  if first_chunk == "14"; then
+  val String first_chunk = first_chunk_line.unwrap();
+  if first_chunk == "14" || first_chunk == "14\r"; then
     val coalesced_first = await streaming.read_line_async();
     val coalesced_second = await streaming.read_line_async();
     val coalesced_boundary = await streaming.read_line_async();
@@ -240,14 +240,18 @@ pub async routine main(): int {
       stdio.println("FAIL truncated coalesced streaming chunk");
       return 1;
     fi
-    if coalesced_first.unwrap().trim() != "stage-one" ||
-      coalesced_second.unwrap().trim() != "stage-two" ||
-      coalesced_boundary.unwrap().trim() != ""; then
+    if (coalesced_first.unwrap() != "stage-one" &&
+      coalesced_first.unwrap() != "stage-one\r") ||
+      (coalesced_second.unwrap() != "stage-two" &&
+      coalesced_second.unwrap() != "stage-two\r") ||
+      (coalesced_boundary.unwrap() != "" &&
+      coalesced_boundary.unwrap() != "\r"); then
       await streaming.close_async();
       stdio.println("FAIL coalesced chunk length, payload or boundary");
       return 1;
     fi
-  elif first_chunk == "a" || first_chunk == "A"; then
+  elif first_chunk == "a" || first_chunk == "a\r" ||
+    first_chunk == "A" || first_chunk == "A\r"; then
     val first_stage = await streaming.read_line_async();
     val first_boundary = await streaming.read_line_async();
     val second_chunk_line = await streaming.read_line_async();
@@ -257,10 +261,13 @@ pub async routine main(): int {
       stdio.println("FAIL truncated first streaming chunk");
       return 1;
     fi
-    val String second_chunk = second_chunk_line.unwrap().trim();
-    if first_stage.unwrap().trim() != "stage-one" ||
-      first_boundary.unwrap().trim() != "" ||
-      (second_chunk != "a" && second_chunk != "A"); then
+    val String second_chunk = second_chunk_line.unwrap();
+    if (first_stage.unwrap() != "stage-one" &&
+      first_stage.unwrap() != "stage-one\r") ||
+      (first_boundary.unwrap() != "" &&
+      first_boundary.unwrap() != "\r") ||
+      (second_chunk != "a" && second_chunk != "a\r" &&
+      second_chunk != "A" && second_chunk != "A\r"); then
       await streaming.close_async();
       stdio.println("FAIL first chunk length, payload or boundary");
       return 1;
@@ -272,8 +279,10 @@ pub async routine main(): int {
       stdio.println("FAIL truncated second streaming chunk");
       return 1;
     fi
-    if second_stage.unwrap().trim() != "stage-two" ||
-      second_boundary.unwrap().trim() != ""; then
+    if (second_stage.unwrap() != "stage-two" &&
+      second_stage.unwrap() != "stage-two\r") ||
+      (second_boundary.unwrap() != "" &&
+      second_boundary.unwrap() != "\r"); then
       await streaming.close_async();
       stdio.println("FAIL second chunk payload or boundary");
       return 1;
@@ -290,8 +299,10 @@ pub async routine main(): int {
     stdio.println("FAIL missing terminal chunk or trailer terminator");
     return 1;
   fi
-  if terminal_chunk_line.unwrap().trim() != "0" ||
-    trailer_end_line.unwrap().trim() != ""; then
+  if (terminal_chunk_line.unwrap() != "0" &&
+    terminal_chunk_line.unwrap() != "0\r") ||
+    (trailer_end_line.unwrap() != "" &&
+    trailer_end_line.unwrap() != "\r"); then
     await streaming.close_async();
     stdio.println("FAIL invalid terminal chunk or unexpected trailers");
     return 1;

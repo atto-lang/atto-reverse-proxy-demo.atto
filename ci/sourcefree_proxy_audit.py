@@ -338,6 +338,15 @@ def source_guards() -> None:
           and 'trailer_end_line.unwrap().trim() != ""' in smoke
           and '!trailing_line.is_none()' in smoke,
           "native streaming fixture checks coalesced/per-stage chunk sizes, boundaries, terminal and EOF")
+    streaming = section(smoke, "// The adapter may coalesce", "// A YAML service binding")
+    check(".trim()" not in streaming
+          and 'first_chunk == "14\\r"' in streaming
+          and 'first_chunk == "a\\r"' in streaming
+          and 'first_chunk == "A\\r"' in streaming
+          and 'coalesced_first.unwrap() == "stage-one\\r"' in streaming
+          and 'first_boundary.unwrap() == "\\r"' in streaming
+          and 'terminal_chunk_line.unwrap() == "0\\r"' in streaming,
+          "native streaming fixture rejects whitespace padding; only optional CR is tolerated")
     stream_model = read("ci/test_raw_http_ingress.py")
     check("def decode_textual_chunked_body" in stream_model
           and "def verify_streaming_response" in stream_model
@@ -346,7 +355,9 @@ def source_guards() -> None:
     check(all(case in stream_model for case in (
               "missing_size", "wrong_size", "wrong_second_chunk_size",
               "missing_chunk_boundary", "truncated_data", "missing_terminal",
-              "trailer", "extra_after_terminal", "reordered", "duplicate_te")),
+              "trailer", "extra_after_terminal", "reordered", "duplicate_te",
+              "whitespace_size", "whitespace_payload",
+              "whitespace_boundary", "whitespace_terminal")),
           "source-free stream model retains malformed chunk framing negatives")
     check('FAIL encoded noncanonical path not refused' in smoke
           and 'FAIL unknown route should not dispatch' in smoke
