@@ -1,0 +1,122 @@
+# Read-only protected-main PR integrity check; never checkout or execute PR code.
+# This check must be independently approved and configured as a required check
+# from the expected GitHub App. It is not a substitute for native guest tests.
+name: Trusted Legacy Native Workflow Merge Guard
+on:
+  pull_request_target:
+    types: [opened, reopened, synchronize, edited, ready_for_review]
+    branches: [main]
+permissions:
+  contents: read
+  pull-requests: read
+jobs:
+  legacy-native-integrity:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Refuse restoration of unapproved native runner workflows
+        shell: /bin/bash --noprofile --norc -p -e -o pipefail {0}
+        env:
+          GH_READ_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          EVENT_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          EVENT_HEAD_REPO_ID: ${{ github.event.pull_request.head.repo.id }}
+          EVENT_BASE_REPO_ID: ${{ github.event.pull_request.base.repo.id }}
+          EVENT_BASE_REF: ${{ github.event.pull_request.base.ref }}
+          EVENT_REF_PROTECTED: ${{ github.ref_protected }}
+          LD_PRELOAD: ''
+          LD_LIBRARY_PATH: ''
+          LD_AUDIT: ''
+          BASH_ENV: ''
+          ENV: ''
+          GIT_CONFIG_GLOBAL: /dev/null
+          GIT_CONFIG_SYSTEM: /dev/null
+        run: |
+          set -euo pipefail
+          export PATH=/usr/bin:/bin:/usr/sbin:/sbin
+          hash -r
+          test "$GITHUB_EVENT_NAME" = pull_request_target
+          test "$GITHUB_REPOSITORY" = 'ores-truffle-oreslang/oreslang-reverse-proxy-demo.ores'
+          test "$GITHUB_REPOSITORY_ID" = '1429954649'
+          test "$GITHUB_REF" = 'refs/heads/main'
+          test "$EVENT_REF_PROTECTED" = true
+          test "$EVENT_BASE_REF" = main
+          test "$EVENT_HEAD_REPO_ID" = 1429954649
+          test "$EVENT_BASE_REPO_ID" = 1429954649
+          [[ "$PR_NUMBER" =~ ^[1-9][0-9]*$ ]]
+          [[ "$EVENT_HEAD_SHA" =~ ^[a-f0-9]{40}$ ]]
+          test -n "$GH_READ_TOKEN"
+          test -x /usr/bin/jq
+          test -x /usr/bin/curl
+          fetch_api() {
+            /usr/bin/curl -q --fail --silent --show-error --retry 0 \
+              --proto '=https' --noproxy '*' --proxy '' \
+              --cacert /etc/ssl/certs/ca-certificates.crt \
+              --connect-timeout 5 --max-time 15 \
+              -H "Authorization: Bearer $GH_READ_TOKEN" \
+              -H 'Accept: application/vnd.github+json' "$1"
+          }
+          base_url='https://api.github.com/repos/ores-truffle-oreslang/oreslang-reverse-proxy-demo.ores'
+          branch_json="$(fetch_api "$base_url/branches/main")"
+          /usr/bin/jq -e --arg sha "$GITHUB_SHA" \
+            '(.protected == true) and (.commit.sha == $sha)' <<<"$branch_json" >/dev/null || {
+              echo 'SECURITY_FAILURE: no protected trusted-main workflow ref' >&2; exit 1;
+            }
+          pr_json="$(fetch_api "$base_url/pulls/$PR_NUMBER")"
+          /usr/bin/jq -e --arg sha "$EVENT_HEAD_SHA" --argjson number "$PR_NUMBER" '
+            .number == $number and .state == "open" and
+            .head.sha == $sha and .head.repo.id == 1429954649 and
+            .base.ref == "main" and .base.repo.id == 1429954649
+          ' <<<"$pr_json" >/dev/null || {
+            echo 'SECURITY_FAILURE: PR identity, head or base drifted' >&2; exit 1;
+          }
+          commit_json="$(fetch_api "$base_url/git/commits/$EVENT_HEAD_SHA")"
+          tree_sha="$(/usr/bin/jq -er '.tree.sha | select(type == "string" and test("^[a-f0-9]{40}$"))' <<<"$commit_json")"
+          tree_json="$(fetch_api "$base_url/git/trees/$tree_sha?recursive=1")"
+          # Git tree metadata is untrusted candidate DATA. Never execute a
+          # workflow, source file, script or checked-out PR tree on this job.
+          # Git blob identity and mode must both be the reviewed retired stub.
+          policy='
+            .truncated == false and (.tree | type == "array") and
+            ([.tree[] | select(.path == ".github/workflows/native-contracts.yml")] |
+              length == 1 and
+              .[0].type == "blob" and .[0].mode == "100644" and
+              .[0].sha == "4f167ddefc97fcead03723f6b7f109663040942e") and
+            ([.tree[] | select(.path == ".github/workflows/trusted-frozen-reverse-native.yml")] |
+              length == 1 and .[0].type == "blob" and .[0].mode == "100644") and
+            all(.tree[] | select(.path | startswith(".github/workflows/"));
+              .type == "blob" and .mode == "100644")
+          '
+          /usr/bin/jq -e "$policy" <<<"$tree_json" >/dev/null || {
+            echo 'SECURITY_FAILURE: candidate resurrects legacy native workflow or lacks trusted control plane' >&2
+            exit 1
+          }
+          # Synthetic negative mutations exercise the SAME policy expression
+          # on read-only data; no script from the PR is ever executed.
+          positive="$(/usr/bin/jq -n '{
+            truncated:false, tree:[
+              {path:".github/workflows/native-contracts.yml",type:"blob",mode:"100644",sha:"4f167ddefc97fcead03723f6b7f109663040942e"},
+              {path:".github/workflows/trusted-frozen-reverse-native.yml",type:"blob",mode:"100644",sha:"806d11bb8cbc63186005df7eb2a917f58d5f0bdc"}
+            ]}')"
+          /usr/bin/jq -e "$policy" <<<"$positive" >/dev/null
+          negative=0
+          for mutation in \
+            '.tree[0].sha="713240e7dbdbb368ff1017132c8249ae107ac3fe"' \
+            '.tree[0].mode="120000"' \
+            '.tree[0].type="tree"' \
+            '.truncated=true' \
+            'del(.tree[0])' \
+            '.tree += [.tree[0]]' \
+            'del(.tree[1])' \
+            '.tree[1].mode="120000"' \
+            '.tree += [{path:".github/workflows/unreviewed.yml",type:"commit",mode:"160000",sha:"a"}]'; do
+            bad="$(/usr/bin/jq "$mutation" <<<"$positive")"
+            if /usr/bin/jq -e "$policy" <<<"$bad" >/dev/null; then
+              echo 'SECURITY_FAILURE: adversarial Git tree accepted' >&2
+              exit 1
+            fi
+            negative=$((negative+1))
+          done
+          test "$negative" = 9
+          echo "TRUSTED_NATIVE_LEGACY_GUARD_PASS pr=$PR_NUMBER head=$EVENT_HEAD_SHA tree=$tree_sha negative=$negative"
+          echo 'CONTROL_PLANE_ONLY: native Oreslang compiler/guest NOT_EXECUTED'
