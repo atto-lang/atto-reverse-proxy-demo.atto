@@ -14,7 +14,7 @@ jobs:
       (github.event_name == 'pull_request' &&
        github.event.pull_request.head.repo.id == 1429954649 &&
        github.event.pull_request.base.repo.id == 1429954649)
-      || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
+      || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.ref_protected == true)
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
@@ -121,8 +121,23 @@ jobs:
           done
           test -z "$(find src tests config -type l -print -quit)"
           echo 'TRACKED_SOURCE_CONTRACT_INVENTORY_PASS required_files=11'
-      - name: Exercise source-policy negative fixtures
-        shell: bash
+      # PR-head source is untrusted data, not executable CI control code.
+      # bash -n parses without executing expansions, functions, or commands.
+      # Execute audit scripts only from a protected-main workflow_dispatch.
+      # This hosted contract is NOT release approval or native evidence.
+      - name: Parse untrusted PR audit scripts without running them
+        if: github.event_name == 'pull_request'
+        shell: /bin/bash --noprofile --norc -p -e -o pipefail {0}
+        run: |
+          set -euo pipefail
+          for script in ci/source-policy.sh ci/test-source-policy.sh ci/native-release-evidence-v1.sh ci/test-native-release-evidence-v1.sh ci/trusted-native-verifier.sh; do
+            test -f "$script" && test ! -L "$script" || exit 1
+            /bin/bash -n "$script"
+          done
+          echo 'PR_HEAD_AUDIT_SCRIPTS_SYNTAX_ONLY; scripts NOT_EXECUTED; native_guest=NOT_EXECUTED'
+      - name: Exercise source-policy negative fixtures (protected main only)
+        if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.ref_protected == true
+        shell: /bin/bash --noprofile --norc -p -e -o pipefail {0}
         run: |
           set -euo pipefail
           bash -n ci/source-policy.sh
@@ -195,15 +210,17 @@ jobs:
             fi
           done
           echo 'STRICT_REQUIRED_STATUS_RULE_MODEL_PASS positive=1 rejected=7; native=NOT_EXECUTED'
-      - name: Audit exact checked-out source against pinned head
-        shell: bash
+      - name: Audit exact checked-out source against pinned head (protected main only)
+        if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.ref_protected == true
+        shell: /bin/bash --noprofile --norc -p -e -o pipefail {0}
         env:
           EXPECTED_DEMO_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
           set -euo pipefail
           bash ci/source-policy.sh
-      - name: Validate shared native evidence format (source-free negative fixtures only)
-        shell: bash
+      - name: Validate shared native evidence format (protected main only)
+        if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.ref_protected == true
+        shell: /bin/bash --noprofile --norc -p -e -o pipefail {0}
         run: |
           set -euo pipefail
           bash -n ci/native-release-evidence-v1.sh
