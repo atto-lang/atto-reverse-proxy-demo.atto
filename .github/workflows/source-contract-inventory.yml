@@ -132,8 +132,25 @@ jobs:
           set -euo pipefail
           for script in ci/source-policy.sh ci/test-source-policy.sh ci/native-release-evidence-v1.sh ci/test-native-release-evidence-v1.sh ci/trusted-native-verifier.sh; do
             test -f "$script" && test ! -L "$script" || exit 1
-            /bin/bash -n "$script"
+            # -p refuses startup hooks and exported shell functions.
+            /bin/bash -p -n "$script"
           done
+          # Mutated PR script is untrusted INPUT. Never execute it. Regression
+          # covers both a simple command and command-substitution side effect,
+          # plus an inherited BASH_ENV startup payload.
+          fixture="$(/usr/bin/mktemp -d -- "$RUNNER_TEMP/pr-script-noexec.XXXXXX")"
+          trap '/usr/bin/rm -rf -- "$fixture"' EXIT
+          /usr/bin/printf '%s\n' '#!/bin/bash' \
+            'touch "${MALICIOUS_MARKER:?}"' \
+            'v="$(touch "${MALICIOUS_MARKER:?}")"' > "$fixture/pr-owned.sh"
+          /usr/bin/printf '%s\n' 'touch "${MALICIOUS_MARKER:?}"' > "$fixture/attack-env.sh"
+          MALICIOUS_MARKER="$fixture/payload-executed" BASH_ENV="$fixture/attack-env.sh" \
+            /bin/bash -p -n "$fixture/pr-owned.sh"
+          test ! -e "$fixture/payload-executed" || {
+            echo 'SECURITY_FAILURE: PR-owned audit script executed during syntax-only check' >&2
+            exit 1
+          }
+          echo 'PR_HEAD_AUDIT_NOEXEC_NEGATIVE_PASS shell_payload=2 bash_env=1; native_guest=NOT_EXECUTED'
           echo 'PR_HEAD_AUDIT_SCRIPTS_SYNTAX_ONLY; scripts NOT_EXECUTED; native_guest=NOT_EXECUTED'
       - name: Exercise source-policy negative fixtures (protected main only)
         if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.ref_protected == true
