@@ -13,25 +13,21 @@ jobs:
         with:
           persist-credentials: false
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
-      - name: Validate flags-2-env admission contract
+      - name: Validate flags-2-env admission contract in Rust
+        shell: bash
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
-          python3 - <<'PY'
-          import tomllib
-          from pathlib import Path
-          p = Path(".cli-flags.toml")
-          if p.is_symlink() or not p.is_file():
-              raise SystemExit(".cli-flags.toml must be a regular file")
-          data = tomllib.loads(p.read_text())
-          flags = data.get("flags", {})
-          if set(flags) != {"config-yaml"}:
-              raise SystemExit(f"unexpected CLI flags: {sorted(flags)}")
-          row = flags["config-yaml"]
-          if row.get("env") != "ores_proxy_conf_yaml" or row.get("type") != "string":
-              raise SystemExit("config-yaml flags-2-env contract changed")
-          if row.get("aliases") != ["config-yaml", "conf"]:
-              raise SystemExit("unexpected config aliases")
-          print("FLAGS_2_ENV_CONTRACT_PASS")
-          PY
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          git diff --quiet
+          git diff --cached --quiet
+          tmp="$(mktemp -d)"
+          trap 'rm -rf -- "$tmp"' EXIT
+          rustc --edition=2021 -D warnings --test ci/flags_contract.rs -o "$tmp/flags_tests"
+          "$tmp/flags_tests"
+          rustc --edition=2021 -D warnings ci/flags_contract.rs -o "$tmp/flags_contract"
+          "$tmp/flags_contract" .cli-flags.toml
       - name: Validate reverse-proxy example stays loopback and protected
         shell: bash
         run: |
