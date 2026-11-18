@@ -2,6 +2,10 @@
 
 Reverse proxy implementation demonstrating AttoLang networking and concurrency.
 
+## Naming migration and language authority
+
+This repository is maintained at [atto-lang/atto-reverse-proxy-demo.atto](https://github.com/atto-lang/atto-reverse-proxy-demo.atto); use `https://github.com/atto-lang/atto-reverse-proxy-demo.atto.git` for Git remotes and canonical `.atto` source examples. The normative language contract is [atto-spec](https://github.com/atto-lang/atto-spec), with executable guest evidence tracked by [atto-platform-conformance](https://github.com/atto-lang/atto-platform-conformance). Follow current ownership, borrowing, effects, actor, and syntax rules there; do not infer implemented features from a README or unexecuted CI.
+
 ## Demonstration focus
 
 Reverse proxy routing, forwarding, and connection lifecycle.
@@ -32,6 +36,6 @@ This README describes the demonstration's intended purpose. Current executable c
 
 **Security and portability boundary:** Authenticate ingress where needed, bound requests and retries, defend header confusion/request smuggling, isolate upstream credentials and test cancel-vs-close.
 
-AttoLang is the public name; preserve existing Oreslang/.ores compatibility and use canonical .atto for new portable library source. This README defines scope, not feature readiness.
+AttoLang is the canonical project name; new source, examples and documentation use `.atto` and the `atto-lang` repository organization. This README defines scope, not feature readiness.
 
 **Acceptance:** name exact source SHA/tree, runtime/toolchain, positive and negative checks and execution receipt before claiming support. Host-only tests and empty CI steps do not prove guest execution.
