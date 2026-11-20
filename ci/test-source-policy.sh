@@ -1,0 +1,166 @@
+#!/usr/bin/env bash
+# Adversarial hermetic tests of the exact policy gate used in CI.
+set -euo pipefail
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
+test_repo="$(mktemp -d)"
+trap 'rm -rf "$test_repo"' EXIT
+git init -q "$test_repo"
+git -C "$test_repo" config user.name "Policy test"
+git -C "$test_repo" config user.email "policy@example.invalid"
+mkdir -p "$test_repo/docs" "$test_repo/src"
+printf '00_abc\n' > "$test_repo/src/hello.ores"
+printf 'a%.0s' {1..40} > "$test_repo/SOURCE_REF"
+printf '\n' >> "$test_repo/SOURCE_REF"
+git -C "$test_repo" add .
+check_ok() {
+  SOURCE_POLICY_ROOT="$test_repo" SOURCE_POLICY_MODE="${1:-strict}" bash "$root/ci/source-policy.sh" > /dev/null
+}
+check_bad() {
+  if SOURCE_POLICY_ROOT="$test_repo" SOURCE_POLICY_MODE="${1:-strict}" bash "$root/ci/source-policy.sh" > /dev/null 2>&1; then
+    echo "TEST_FAILURE: expected source policy rejection" >&2; exit 1
+  fi
+}
+check_ok
+mkdir -p "$test_repo/nested space"
+printf 'placeholder\n' > "$test_repo/nested space/unsafe.PY"
+git -C "$test_repo" add .
+check_bad
+git -C "$test_repo" rm -q -f -- "nested space/unsafe.PY"
+printf 'placeholder\n' > "$test_repo/src/escape.ipynb"
+git -C "$test_repo" add .
+check_bad
+git -C "$test_repo" rm -q -f -- src/escape.ipynb
+printf '#!/usr/bin/env python3\n' > "$test_repo/runner"
+git -C "$test_repo" add .
+check_bad
+git -C "$test_repo" rm -q -f -- runner
+# GNU env -S strips quotes and concatenates quoted interpreter fragments.
+# All of these execute Python on Linux, despite the original shebang regex.
+for interpreter in "'python3'" '"python3"' "'py''thon3'"; do
+  printf '#!/usr/bin/env -S %s\n' "$interpreter" > "$test_repo/quoted-interpreter"
+  git -C "$test_repo" add quoted-interpreter
+  check_bad
+  git -C "$test_repo" rm -q -f -- quoted-interpreter
+done
+# The stricter guard must not reject unrelated interpreters.
+printf '#!/usr/bin/env node\n' > "$test_repo/node-interpreter"
+git -C "$test_repo" add node-interpreter
+check_ok
+git -C "$test_repo" rm -q -f -- node-interpreter
+ln -s hello.ores "$test_repo/src/alias.ores"
+git -C "$test_repo" add .
+check_bad
+git -C "$test_repo" rm -q -f -- src/alias.ores
+printf 'bad\n' > "$test_repo/SOURCE_REF"
+git -C "$test_repo" add .
+check_bad
+printf 'a%.0s' {1..40} > "$test_repo/SOURCE_REF"
+printf '\n' >> "$test_repo/SOURCE_REF"
+git -C "$test_repo" add .
+check_ok
+mkdir -p "$test_repo/scripts"
+printf 'legacy\n' > "$test_repo/scripts/benchmark.py"
+git -C "$test_repo" add .
+check_bad
+check_ok rest-legacy
+printf 'new\n' > "$test_repo/scripts/new_tool.py"
+git -C "$test_repo" add .
+check_bad rest-legacy
+# Reset the earlier negative fixtures before testing valid-source baselines.
+git -C "$test_repo" rm -q -f -- scripts/new_tool.py scripts/benchmark.py
+check_ok
+# A valid-looking but untracked SOURCE_REF cannot establish provenance.
+git -C "$test_repo" rm -q --cached -- SOURCE_REF
+check_bad
+git -C "$test_repo" add SOURCE_REF
+check_ok
+# Optional SOURCE_REF cannot be replaced by a tracked symlink, even if its target is valid.
+mv "$test_repo/SOURCE_REF" "$test_repo/saved_ref"
+ln -s saved_ref "$test_repo/SOURCE_REF"
+git -C "$test_repo" add -A
+check_bad
+rm "$test_repo/SOURCE_REF"
+mv "$test_repo/saved_ref" "$test_repo/SOURCE_REF"
+git -C "$test_repo" add -A
+check_ok
+# Symlinks are rejected regardless of file extension.
+ln -s hello.ores "$test_repo/src/alias.txt"
+git -C "$test_repo" add .
+check_bad
+git -C "$test_repo" rm -q -f -- src/alias.txt
+check_ok
+# A tracked SOURCE_REF deleted only from the working tree must fail closed.
+rm "$test_repo/SOURCE_REF"
+check_bad
+printf 'a%.0s' {1..40} > "$test_repo/SOURCE_REF"
+printf '\n' >> "$test_repo/SOURCE_REF"
+git -C "$test_repo" add SOURCE_REF
+check_ok
+# A different tracked source deleted only from the working tree must also fail.
+rm "$test_repo/src/hello.ores"
+check_bad
+printf '00_abc\n' > "$test_repo/src/hello.ores"
+git -C "$test_repo" add src/hello.ores
+check_ok
+# An inherited empty index must not hide a tracked forbidden source. This
+# reproduces the prior zero-file policy bypass when SOURCE_REF is optional.
+git -C "$test_repo" rm -q -f -- SOURCE_REF
+printf 'print(1)\n' > "$test_repo/src/hidden.py"
+git -C "$test_repo" add src/hidden.py
+GIT_INDEX_FILE="$test_repo/.git/nonexistent-index" check_bad
+git -C "$test_repo" rm -q -f -- src/hidden.py
+check_ok
+# A corrupted real index must fail instead of being masked by process substitution.
+cp "$test_repo/.git/index" "$test_repo/index-backup"
+printf 'corrupt-index\n' > "$test_repo/.git/index"
+check_bad
+mv "$test_repo/index-backup" "$test_repo/.git/index"
+check_ok
+# A symlinked parent to identical external bytes bypassed leaf -L checks.
+external_dir="$test_repo.external"
+mkdir -p "$external_dir"
+cp "$test_repo/src/hello.ores" "$external_dir/hello.ores"
+mv "$test_repo/src" "$test_repo/src-original"
+ln -s "$external_dir" "$test_repo/src"
+check_bad
+rm "$test_repo/src"
+mv "$test_repo/src-original" "$test_repo/src"
+rm -rf "$external_dir"
+check_ok
+# A staged Python interpreter cannot be hidden by a benign worktree file.
+printf 'safe\n' > "$test_repo/src/disguised.txt"
+git -C "$test_repo" add src/disguised.txt
+check_ok
+forged_blob="$(printf '#!/usr/bin/env python3\nprint(1)\n' | git -C "$test_repo" hash-object -w --stdin)"
+git -C "$test_repo" update-index --cacheinfo "100644,$forged_blob,src/disguised.txt"
+check_bad
+git -C "$test_repo" add src/disguised.txt
+check_ok
+git -C "$test_repo" rm -q -f -- src/disguised.txt
+check_ok
+# A harmless extension cannot make mutated worktree bytes match the pinned index.
+printf 'changed after staging\n' > "$test_repo/src/hello.ores"
+check_bad
+printf '00_abc\n' > "$test_repo/src/hello.ores"
+check_ok
+# Neither a foreign Git repository nor caller-supplied Git config may redirect
+# the audit away from the pinned checkout's own index and object database.
+poison_repo="$(mktemp -d)"
+git init -q "$poison_repo"
+GIT_DIR="$poison_repo/.git" GIT_WORK_TREE="$poison_repo" check_ok
+GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.bare GIT_CONFIG_VALUE_0=true check_ok
+rm -rf -- "$poison_repo"
+# Inherited Git identity, replacement-object and index controls must not
+# redirect the audit to caller-provided metadata or an empty index.
+GIT_INDEX_FILE="$test_repo/.git/empty-index-from-caller" check_ok
+GIT_OBJECT_DIRECTORY="$test_repo/.git/nonexistent-object-store" check_ok
+GIT_ALTERNATE_OBJECT_DIRECTORIES="$test_repo/nonexistent-alternate" check_ok
+GIT_REPLACE_REF_BASE="refs/replace/foreign" check_ok
+GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.bare GIT_CONFIG_VALUE_0=true check_ok
+# A stale expected-HEAD pin remains a refusal even with malicious Git controls.
+GIT_INDEX_FILE="$test_repo/.git/empty-index-from-caller" \
+  EXPECTED_DEMO_SHA="$(printf '0%.0s' {1..40})" check_bad
+# A well-formed but stale external expected-HEAD claim must be rejected.# A well-formed but stale external expected-HEAD claim must be rejected.
+EXPECTED_DEMO_SHA="$(printf '0%.0s' {1..40})" check_bad
+check_ok
+printf 'SOURCE_POLICY_NEGATIVE_TESTS_PASS scenarios=20\n'

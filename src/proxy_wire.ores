@@ -1,0 +1,111 @@
+// Small, strict Oreslang-only HTTP/1.1 admission boundary.
+// Not a full wire parser: the eventual transport must verify CRLF framing,
+// header multiplicity, limits, transfer coding and normalized authority BEFORE
+// passing these extracted request-line and Host values to this module.
+// No network authority or outbound capability is granted by these helpers.
+import module proxy_yaml from "./proxy_yaml";
+import module route_policy from "./route_policy";
+
+define module proxy_wire as
+  pub define class Target as
+    pub val String method;
+    pub val String authority;
+    pub val String path;
+    pub val bool tunnel;
+  end
+
+  fnc strict_path(String path): bool {
+    if !path.starts_with("/") || path.starts_with("//") ||
+      path.contains_literal("//") || path.contains_literal("..") ||
+      path.contains_literal("%") || path.contains_literal("\\") ||
+      path.contains_literal("?") || path.contains_literal("#") ||
+      path.contains_literal(" ") || path.contains_literal("\r") ||
+      path.contains_literal("\n") || path.contains_literal("\t") ||
+      path.contains_literal("\u0000"); then
+      return false;
+    fi
+    for (const segment of path.split_literal("/")) {
+      if segment == "." || segment == ".."; then return false; fi
+    }
+    return true;
+  }
+
+  // Reverse proxy v0 accepts only bodyless origin-form GET/HEAD with canonical
+  // lowercase DNS Host. No query, encoded path, Host port or URL rewrites.
+  pub fnc reverse(String request_line, String host): Result<Target, String> {
+    val parts = request_line.split_literal(" ");
+    if parts.size != 3 || parts.get(2) != "HTTP/1.1" ||
+      !(parts.get(0) == "GET" || parts.get(0) == "HEAD") ||
+      !proxy_yaml.valid_domain(host) ||
+      !strict_path(parts.get(1)); then
+      return Err("unsupported or noncanonical reverse HTTP request");
+    fi
+    return Ok(new Target(parts.get(0), host, parts.get(1), false));
+  }
+
+  // A recognized CONNECT request is NOT permission to open a tunnel. The
+  // network adapter must enforce authenticated ingress, verified TLS boundary,
+  // pinned DNS/IP ACLs, no redirects, deadlines and bidirectional byte limits.
+  pub fnc connect(String request_line, String host_header): Result<Target, String> {
+    val parts = request_line.split_literal(" ");
+    if parts.size != 3 || parts.get(0) != "CONNECT" ||
+      parts.get(2) != "HTTP/1.1"; then
+      return Err("unsupported forward request line");
+    fi
+    val String target = parts.get(1);
+    val authority = target.split_literal(":");
+    if authority.size != 2 || authority.get(1) != "443" ||
+      host_header != target || !proxy_yaml.valid_domain(authority.get(0)) ||
+      target.contains_literal("%") || target.contains_literal("@") ||
+      target.contains_literal("/") || target.contains_literal("\\") ||
+      target.contains_literal("[") || target.contains_literal("]") ||
+      target.contains_literal("\r") || target.contains_literal("\n") ||
+      target.contains_literal("\t"); then
+      return Err("CONNECT requires canonical DNS-host:443 and identical Host");
+    fi
+    return Ok(new Target("CONNECT", authority.get(0), "", true));
+  }
+
+  // Pure *configuration* filter. MUST NOT be used as a network-level permit:
+  // DNS/IP validation and authenticated request admission are still missing.
+  pub fnc configured_connect(borrow proxy_yaml.Config config,
+                             borrow Target parsed): bool {
+    if !parsed.tunnel || parsed.method != "CONNECT"; then return false; fi
+    return route_policy.configured_domain(config, parsed.authority);
+  }
+
+  // A reverse upstream is an *origin*, not an absolute request target.
+  // Validation here is for metadata compilation, not DNS/IP or TLS authority.
+  pub fnc upstream_origin(String url): Result<String, String> {
+    val scheme = url.split_literal("://");
+    if scheme.size != 2 ||
+      !(scheme.get(0) == "http" || scheme.get(0) == "https"); then
+      return Err("upstream requires explicit http/https origin");
+    fi
+    val String authority = scheme.get(1);
+    if authority == "" || authority.contains_literal("/") ||
+      authority.contains_literal("?") || authority.contains_literal("#") ||
+      authority.contains_literal("@") || authority.contains_literal("%") ||
+      authority.contains_literal("\\") || authority.contains_literal(" ") ||
+      authority.contains_literal("\r") || authority.contains_literal("\n") ||
+      authority.contains_literal("\t") || authority.contains_literal("[") ||
+      authority.contains_literal("]"); then
+      return Err("noncanonical upstream origin");
+    fi
+    val host_port = authority.split_literal(":");
+    if host_port.size == 1; then
+      if !proxy_yaml.valid_domain(host_port.get(0)); then
+        return Err("upstream DNS name invalid");
+      fi
+      return Ok(authority);
+    fi
+    if host_port.size != 2 ||
+      !(host_port.get(1) == "80" || host_port.get(1) == "443" ||
+        host_port.get(1) == "9000") ||
+      !(proxy_yaml.valid_domain(host_port.get(0)) ||
+        host_port.get(0) == "127.0.0.1"); then
+      return Err("upstream origin/port outside v0 allowlist");
+    fi
+    return Ok(authority);
+  }
+end

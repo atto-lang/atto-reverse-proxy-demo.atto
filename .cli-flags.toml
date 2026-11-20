@@ -1,0 +1,6 @@
+# Native Oreslang proxy flags-2-env contract.
+[flags.config-yaml]
+env = "ores_proxy_conf_yaml"
+aliases = ["config-yaml", "conf"]
+type = "string"
+help = "Absolute trusted path to a proxy YAML configuration file."

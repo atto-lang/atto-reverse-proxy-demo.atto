@@ -1,0 +1,65 @@
+// Native Oreslang semantic tests for SoA, AoSoA tile mapping and ECS IDs.
+// No timer/throughput claim: the fast native arena engine is still pending.
+import module data_layout from "../src/data_layout";
+
+pub routine main(): int {
+  val slots = new data_layout.SoaRequests(3);
+  val first = slots.append(7, 3, 10, 42, 0);
+  val second = slots.append(7, 3, 11, 91, 1);
+  val third = slots.append(8, 4, 10, 5, 2);
+  if first.is_err() || second.is_err() || third.is_err(); then
+    stdio.println("FAIL SoA fill"); return 1;
+  fi
+  if slots.size() != 3 || slots.count_route(10) != 2 ||
+    slots.count_route(11) != 1 || slots.bytes_inflight() != 138; then
+    stdio.println("FAIL SoA column scans"); return 1;
+  fi
+  val a = first.unwrap();
+  val b = second.unwrap();
+  val c = third.unwrap();
+  if !slots.accepts(a) || !slots.accepts(b) || !slots.accepts(c); then
+    stdio.println("FAIL valid ticket"); return 1;
+  fi
+  val detail = slots.view(b);
+  if detail.is_err(); then stdio.println("FAIL SoA view"); return 1; fi
+  val row = detail.unwrap();
+  if row.connection_slot != 3 || row.route_slot != 11 ||
+    row.pending_bytes != 91 || row.component_mask != 1; then
+    stdio.println("FAIL SoA transpose"); return 1;
+  fi
+  if slots.accepts(new data_layout.Ticket(a.slot, a.incarnation, 8)) ||
+    slots.accepts(new data_layout.Ticket(a.slot, b.incarnation, 7)) ||
+    slots.accepts(new data_layout.Ticket(100, a.incarnation, 7)); then
+    stdio.println("FAIL stale ticket rejected"); return 1;
+  fi
+  if slots.append(8, 2, 3, 0, 0).is_ok() ||
+    slots.append(0, 2, 3, 0, 0).is_ok(); then
+    stdio.println("FAIL bounded admission"); return 1;
+  fi
+
+  val left = data_layout.tile_address(31, 32, 128);
+  val right = data_layout.tile_address(32, 32, 128);
+  val last = data_layout.tile_address(127, 64, 128);
+  if left.is_err() || right.is_err() || last.is_err(); then
+    stdio.println("FAIL tile admission"); return 1;
+  fi
+  if left.unwrap().tile != 0 || left.unwrap().lane != 31 ||
+    right.unwrap().tile != 1 || right.unwrap().lane != 0 ||
+    last.unwrap().tile != 1 || last.unwrap().lane != 63; then
+    stdio.println("FAIL AoSoA tile boundaries"); return 1;
+  fi
+  if data_layout.tile_address(128, 32, 128).is_ok() ||
+    data_layout.tile_address(-1, 32, 128).is_ok() ||
+    data_layout.tile_address(1, 0, 128).is_ok() ||
+    data_layout.tile_address(1, 17, 128).is_ok(); then
+    stdio.println("FAIL tile bounds"); return 1;
+  fi
+  if !data_layout.ecs_component_live(19, 19, true) ||
+    data_layout.ecs_component_live(19, 20, true) ||
+    data_layout.ecs_component_live(19, 19, false) ||
+    data_layout.ecs_component_live(0, 0, true); then
+    stdio.println("FAIL ECS generation"); return 1;
+  fi
+  stdio.println("PASS SoA/AoSoA/ECS layout contracts; no network benchmark");
+  return 0;
+}

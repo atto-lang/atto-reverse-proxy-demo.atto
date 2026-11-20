@@ -1,0 +1,49 @@
+name: Reverse proxy source contracts
+on:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  inventory:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Verify exact source tree
+        shell: bash
+        env:
+          EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+      - name: Reject missing, empty or linked contract inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          for file in \
+            src/main.ores \
+            src/proxy_wire.ores \
+            src/header_policy.ores \
+            src/slot_pool.ores \
+            src/serve_reverse.ores \
+            tests/wire_contract.ores \
+            tests/header_policy_contract.ores \
+            tests/slot_pool_contract.ores \
+            tests/ingress_tcp_smoke.ores \
+            config/example.yaml \
+            .cli-flags.toml
+          do
+            test -f "$file"
+            test -s "$file"
+            test ! -L "$file"
+          done
+          test -z "$(find src tests config -type l -print -quit)"
+      - name: Preserve non-production verdict
+        run: echo 'SOURCE_INVENTORY_ONLY; native compile/execute, upstream forwarding and network proof NOT_EXECUTED.'

@@ -1,0 +1,50 @@
+// Exact-generation policy manifest regression; no live HTTP adapter.
+import module generation from "../src/generation";
+import module middleware_manifest from "../src/middleware_manifest";
+
+pub routine main(): int {
+  val String document = "version: ores.proxy/v1\nmode: reverse\nlisten:\n  host: 127.0.0.1\n  port: 8080\nruntime:\n  carriers: 20\n  actors: 100\n  max_inflight: 1024\n" +
+    "middleware:\n  - name: gate\n    kind: trace\n  - name: auth\n    kind: require_header\n    header: x-auth\n" +
+    "routes:\n  - name: api\n    host: api.example.test\n    path_prefix: /api\n    upstream: http://127.0.0.1:9000\n    middleware: gate,auth\n";
+  val opened = generation.open(document, "reverse");
+  if opened.is_err(); then stdio.println("FAIL initial configuration"); return 1; fi
+  val control = opened.unwrap();
+  val old = control.snapshot().unwrap();
+  val bound_old = middleware_manifest.bind_reverse_route(rt borrow old, "api.example.test", "/api/x");
+  if bound_old.is_err(); then stdio.println("FAIL initial route bind"); return 1; fi
+  val old_plan = bound_old.unwrap();
+  if old_plan.epoch != 1 || old_plan.first_kind() != "trace" ||
+    !old_plan.permitted("x-auth", "present") ||
+    old_plan.permitted("x-auth", ""); then
+    stdio.println("FAIL initial generation admission"); return 1;
+  fi
+  if middleware_manifest.bind_reverse_route(rt borrow old, "api.example.test", "/apix").is_ok(); then
+    stdio.println("FAIL route prefix boundary"); return 1;
+  fi
+  val String changed = document.replace_literal("kind: trace", "kind: deny");
+  if control.prepare(changed).is_err(); then stdio.println("FAIL stage"); return 1; fi
+  // Publication must reject stale generation tokens.
+  if control.publish(0).is_ok(); then stdio.println("FAIL stale token"); return 1; fi
+  val published = control.publish(1);
+  if published.is_err(); then stdio.println("FAIL publish"); return 1; fi
+  val now = published.unwrap();
+  val bound_now = middleware_manifest.bind_reverse_route(rt borrow now, "api.example.test", "/api/x");
+  if bound_now.is_err(); then stdio.println("FAIL next route bind"); return 1; fi
+  val next_plan = bound_now.unwrap();
+  if next_plan.epoch != 2 || next_plan.first_kind() != "deny" ||
+    next_plan.permitted("x-auth", "present"); then
+    stdio.println("FAIL changed middleware"); return 1;
+  fi
+  if old_plan.epoch != 1 || old_plan.first_kind() != "trace" ||
+    !old_plan.permitted("x-auth", "present"); then
+    stdio.println("FAIL old generation changed"); return 1;
+  fi
+  if middleware_manifest.bind(rt borrow now, "actor", "unknown").is_ok(); then
+    stdio.println("FAIL unknown actor middleware"); return 1;
+  fi
+  if middleware_manifest.bind(rt borrow now, "actor", "gate,gate").is_ok(); then
+    stdio.println("FAIL repeated middleware in chain"); return 1;
+  fi
+  stdio.println("PASS reverse generation-pinned route/actor middleware manifests");
+  return 0;
+}

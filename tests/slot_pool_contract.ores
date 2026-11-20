@@ -1,0 +1,64 @@
+// Bounded multi-slot Oreslang pool, backpressure, stale and cross-slot tests.
+// Pure single-owner snapshots only; no concurrent network execution.
+import module slot_pool from "../src/slot_pool";
+
+pub routine main(): int {
+  if slot_pool.create(0).is_ok() || slot_pool.create(1025).is_ok(); then
+    stdio.println("FAIL capacity admission"); return 1;
+  fi
+  val empty = slot_pool.create(2).unwrap();
+  if !empty.quiescent() || empty.live_slots() != 0; then
+    stdio.println("FAIL initial pool"); return 1;
+  fi
+  val x = empty.admit(10).unwrap();
+  val y = x.state.admit(10).unwrap();
+  if x.handle.slot == y.handle.slot ||
+    x.handle.nonce == y.handle.nonce || y.state.live_slots() != 2; then
+    stdio.println("FAIL disjoint reservations"); return 1;
+  fi
+  if y.state.admit(11).is_ok(); then
+    stdio.println("FAIL bound exceeded"); return 1;
+  fi
+  val one = y.state.pin(rt borrow x.handle).unwrap();
+  val two = one.state.pin(rt borrow y.handle).unwrap();
+  val canceled = two.state.close(rt borrow x.handle).unwrap();
+  if canceled.retiring_slots() != 1 || canceled.admit(12).is_ok(); then
+    stdio.println("FAIL pinned cancellation backpressure"); return 1;
+  fi
+  // Same serial and incarnation may appear on distinct slots; the pool-global
+  // nonce must still prevent routing receipt A to slot B.
+  val forged = new slot_pool.Receipt(y.handle.slot,
+    one.receipt.nonce, one.receipt.claim);
+  if canceled.settle(rt borrow forged).is_ok(); then
+    stdio.println("FAIL cross-slot completion"); return 1;
+  fi
+  val settled_one = canceled.settle(rt borrow one.receipt);
+  if settled_one.is_err(); then
+    stdio.println("FAIL original receipt"); return 1;
+  fi
+  val drained = settled_one.unwrap();
+  if drained.retiring_slots() != 0 || drained.live_slots() != 1; then
+    stdio.println("FAIL one slot reclaimed"); return 1;
+  fi
+  val z = drained.admit(11).unwrap();
+  if z.handle.slot != x.handle.slot ||
+    z.handle.nonce == x.handle.nonce ||
+    z.state.permits(rt borrow x.handle); then
+    stdio.println("FAIL reused physical slot identity"); return 1;
+  fi
+  if z.state.close(rt borrow x.handle).is_ok() ||
+    z.state.settle(rt borrow one.receipt).is_ok(); then
+    stdio.println("FAIL late callbacks after reuse"); return 1;
+  fi
+  val closed_y = z.state.close(rt borrow y.handle).unwrap();
+  if closed_y.quiescent(); then
+    stdio.println("FAIL outstanding I/O joined too early"); return 1;
+  fi
+  val settled_y = closed_y.settle(rt borrow two.receipt).unwrap();
+  val finished = settled_y.close(rt borrow z.handle).unwrap();
+  if !finished.quiescent() || finished.live_slots() != 0; then
+    stdio.println("FAIL bounded pool drains"); return 1;
+  fi
+  stdio.println("PASS bounded pool, pinned drain, nonce and slot reuse");
+  return 0;
+}
