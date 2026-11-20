@@ -1,0 +1,55 @@
+// Oreslang-only external-client real TCP ingress smoke.
+// Run separately from src/serve_reverse.ores with NET permission for
+// 127.0.0.1:8080. It verifies HTTP status lines, NOT upstream forwarding.
+// Configuration example expects Host api.example.test and x-internal-token.
+pub async routine main(): int {
+  val allowed = await network.connect_async("127.0.0.1", 8080);
+  await allowed.write_text_async(
+    "GET /api HTTP/1.1\r\nHost: api.example.test\r\nx-internal-token: demo\r\nConnection: close\r\n\r\n"
+  );
+  val status_allowed = await allowed.read_line_async();
+  await allowed.close_async();
+  if status_allowed.is_none() ||
+    !status_allowed.unwrap().starts_with("HTTP/1.1 501"); then
+    stdio.println("FAIL admitted request must be visibly unimplemented (501)");
+    return 1;
+  fi
+
+  val denied = await network.connect_async("127.0.0.1", 8080);
+  await denied.write_text_async(
+    "GET /api HTTP/1.1\r\nHost: api.example.test\r\nConnection: close\r\n\r\n"
+  );
+  val status_denied = await denied.read_line_async();
+  await denied.close_async();
+  if status_denied.is_none() ||
+    !status_denied.unwrap().starts_with("HTTP/1.1 403"); then
+    stdio.println("FAIL required header denial");
+    return 1;
+  fi
+
+  val missing = await network.connect_async("127.0.0.1", 8080);
+  await missing.write_text_async(
+    "GET /missing HTTP/1.1\r\nHost: api.example.test\r\nConnection: close\r\n\r\n"
+  );
+  val status_missing = await missing.read_line_async();
+  await missing.close_async();
+  if status_missing.is_none() ||
+    !status_missing.unwrap().starts_with("HTTP/1.1 404"); then
+    stdio.println("FAIL absent route");
+    return 1;
+  fi
+
+  val malformed = await network.connect_async("127.0.0.1", 8080);
+  await malformed.write_text_async(
+    "GET /api%2fadmin HTTP/1.1\r\nHost: api.example.test\r\nx-internal-token: demo\r\nConnection: close\r\n\r\n"
+  );
+  val status_malformed = await malformed.read_line_async();
+  await malformed.close_async();
+  if status_malformed.is_none() ||
+    !status_malformed.unwrap().starts_with("HTTP/1.1 400"); then
+    stdio.println("FAIL encoded-path rejection");
+    return 1;
+  fi
+  stdio.println("PASS native Oreslang loopback ingress status contract");
+  return 0;
+}

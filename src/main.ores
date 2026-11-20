@@ -1,0 +1,44 @@
+// Oreslang-native CLI entrypoint. Intentional fail-closed control-plane MVP.
+// It validates YAML but DOES NOT start a proxy listener or claim forwarding.
+// flags-2-env is invoked by the external CLI caller; this file uses the env ABI.
+import module proxy_yaml from "./proxy_yaml";
+import module config_path from "./config_path";
+
+pub routine main(): int {
+  val selected = env.get("ores_proxy_conf_yaml");
+  if selected.is_none(); then
+    stdio.println("ERROR: ores_proxy_conf_yaml is required");
+    return 64;
+  fi
+  val String path = selected.unwrap();
+  if path == ""; then
+    stdio.println("ERROR: empty ores_proxy_conf_yaml");
+    return 64;
+  fi
+  if !config_path.valid(path); then
+    stdio.println("ERROR: ores_proxy_conf_yaml must name a canonical absolute POSIX path");
+    return 65;
+  fi
+  try {
+    if fs.is_symlink(path); then
+      stdio.println("ERROR: symlinked configuration forbidden");
+      return 65;
+    fi
+    if !fs.exists(path) || fs.is_dir(path); then
+      stdio.println("ERROR: configuration is not a regular file");
+      return 65;
+    fi
+    val source = fs.read_text(path);
+    val result = proxy_yaml.parse(source, "reverse");
+    if result.is_err(); then
+      stdio.println("ERROR: proxy YAML invalid for reverse");
+      return 65;
+    fi
+    // An explicit nonzero exit avoids treating 'config valid' as 'proxy ready'.
+    stdio.println("VALIDATED reverse YAML; data-plane unavailable (fail closed)");
+    return 78;
+  } catch (failure) {
+    stdio.println("ERROR: configuration admission failed");
+    return 74;
+  }
+}

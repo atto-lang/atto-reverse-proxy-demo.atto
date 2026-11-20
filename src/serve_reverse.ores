@@ -1,0 +1,98 @@
+// Opt-in loopback-only ingress proof. Routes and middleware operate on a
+// single parsed snapshot in the Oreslang supervisor. No outbound proxy call.
+// Always responds 501 to admitted routes, so it cannot masquerade as a proxy.
+// This is NOT src/main.ores and is intentionally NOT a production entrypoint.
+import module proxy_yaml from "./proxy_yaml";
+import module proxy_wire from "./proxy_wire";
+import module route_policy from "./route_policy";
+
+// Reusable actor lifecycle: pooled handlers return after each request and do
+// not self.end(). HTTP transport owns the FD and single-use claim generation.
+define isoactor UpstreamUnavailable as
+  receive(ActorMail<String> mail): void {
+    val exchange = http.claim(mail.value);
+    await exchange.respond(501, "text/plain; charset=utf-8",
+      "Upstream forwarding unavailable in this runtime");
+    return;
+  }
+end
+
+pub async routine main(): int {
+  val selected = env.get("ores_proxy_conf_yaml");
+  if selected.is_none(); then
+    stdio.println("ERROR: ores_proxy_conf_yaml required");
+    return 64;
+  fi
+  val String path = selected.unwrap();
+  if path == ""; then return 64; fi
+  if fs.is_symlink(path) || !fs.exists(path) || fs.is_dir(path); then
+    stdio.println("ERROR: nonregular configuration");
+    return 65;
+  fi
+  val parsed = proxy_yaml.parse(fs.read_text(path), "reverse");
+  if parsed.is_err(); then
+    stdio.println("ERROR: invalid proxy config");
+    return 65;
+  fi
+  val config = parsed.unwrap();
+
+  // Port conversion and source-configurable bind scopes are not yet admitted.
+  // Never accidentally expose this transport proof on a public listener.
+  if config.listen_host != "127.0.0.1" || config.listen_port != "8080" ||
+    config.actor_pool != "100" || config.max_inflight != "1024"; then
+    stdio.println("ERROR: ingress proof only supports loopback:8080 and bounded 100/1024 profile");
+    return 78;
+  fi
+
+  val unavailable = http.handler("UpstreamUnavailable").pooled(100);
+  val server = http.listen("127.0.0.1", 8080, 1024, 65536, 30000);
+  stdio.println("INCOMPLETE reverse proxy ingress; loopback only; 501 upstream response");
+  loop {
+    val exchange = await server.accept();
+    val String host = exchange.header("Host");
+    val String request_line = exchange.method + " " + exchange.target + " HTTP/1.1";
+    val admitted = proxy_wire.reverse(request_line, host);
+    if admitted.is_err(); then
+      exchange.respond(400, "text/plain; charset=utf-8", "Noncanonical request");
+      continue;
+    fi
+    val matched = route_policy.select(rt borrow config, host, exchange.target);
+    if matched.is_err(); then
+      exchange.respond(404, "text/plain; charset=utf-8", "No route");
+      continue;
+    fi
+    val target = matched.unwrap();
+    if proxy_wire.upstream_origin(target.upstream).is_err(); then
+      exchange.respond(502, "text/plain; charset=utf-8", "Invalid upstream origin");
+      continue;
+    fi
+
+    let bool permit = true;
+    if target.middleware != ""; then
+      for (const name of target.middleware.split_literal(",")) {
+        let bool present = false;
+        for (const rule of config.middleware) {
+          if rule.name == name; then
+            present = true;
+            if rule.kind == "deny"; then permit = false; fi
+            if rule.kind == "require_header" &&
+              exchange.header(rule.header) == ""; then
+              permit = false;
+            fi
+            if !(rule.kind == "deny" || rule.kind == "require_header" ||
+              rule.kind == "trace"); then
+              permit = false;
+            fi
+          fi
+        }
+        if !present; then permit = false; fi
+      }
+    fi
+    if !permit; then
+      exchange.respond(403, "text/plain; charset=utf-8", "Request denied");
+      continue;
+    fi
+    unavailable.dispatch(exchange);
+  }
+  return 0;
+}

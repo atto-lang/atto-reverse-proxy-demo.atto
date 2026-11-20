@@ -1,0 +1,77 @@
+// Pure routing decisions over a validated immutable configuration snapshot.
+// URI normalization and Host admission MUST be completed by the transport.
+import module proxy_yaml from "./proxy_yaml";
+define module route_policy as
+  pub fnc prefix_match(String configured, String path): bool {
+    if !path.starts_with("/") || path.starts_with("//"); then return false; fi
+    if configured == "/"; then return true; fi
+    if path == configured; then return true; fi
+    if configured.ends_with("/"); then return path.starts_with(configured); fi
+    return path.starts_with(configured + "/");
+  }
+
+  // Prefer the most-specific boundary-safe prefix, regardless of YAML order.
+  // Return a separate Route value rather than exposing a mutable config alias.
+  // The future hot path should compile this table to SoA prefix indices.
+  pub fnc select(borrow proxy_yaml.Config snapshot, String host, String path):
+      Result<proxy_yaml.Route, String> {
+    let String best_prefix = "";
+    let String best_name = "";
+    let String best_host = "";
+    let String best_upstream = "";
+    let String best_middleware = "";
+    for (const route of snapshot.routes) {
+      if route.host == host && prefix_match(route.path_prefix, path); then
+        if best_prefix == "" || prefix_match(best_prefix, route.path_prefix); then
+          best_prefix = route.path_prefix;
+          best_name = route.name;
+          best_host = route.host;
+          best_upstream = route.upstream;
+          best_middleware = route.middleware;
+        fi
+      fi
+    }
+    if best_prefix == ""; then return Err("no configured reverse route"); fi
+    return Ok(new proxy_yaml.Route(best_name, best_host,
+      best_prefix, best_upstream, best_middleware));
+  }
+
+  // This is a domain-name filter, NOT an SSRF security boundary.
+  // A transport must resolve and pin ALL destination addresses before connect.
+  // Deny IP literals, IPv6 bracket forms, userinfo, encoded separators and
+  // CNAME/DNS rebinding bypasses at the network capability boundary.
+  pub fnc configured_domain(borrow proxy_yaml.Config snapshot, String candidate): bool {
+    if snapshot.mode != "forward" || !proxy_yaml.valid_domain(candidate); then
+      return false;
+    fi
+    for (const item of snapshot.allow_domains.split_literal(",")) {
+      val String domain = item.trim();
+      if domain != "" && (candidate == domain ||
+        candidate.ends_with("." + domain)); then return true; fi
+    }
+    return false;
+  }
+  // Strict syntactic CONNECT admission, not an outbound connection grant.
+  // The transport must additionally pin DNS answers and reject private IP
+  // ranges, rebinds, redirects, non-TLS tunnels and unauthorized egress.
+  pub fnc configured_connect(borrow proxy_yaml.Config snapshot,
+                             String method, String authority): bool {
+    if snapshot.mode != "forward" || method != "CONNECT" ||
+      authority.contains_literal("@") || authority.contains_literal("/") ||
+      authority.contains_literal("%") || authority.contains_literal("?") ||
+      authority.contains_literal("#") || authority.contains_literal(" ") ||
+      authority.contains_literal("[") || authority.contains_literal("]"); then
+      return false;
+    fi
+    val parts = authority.split_literal(":");
+    if parts.size != 2; then return false; fi
+    val String hostname = parts.get(0);
+    val String port = parts.get(1);
+    if port != "443" || !proxy_yaml.valid_domain(hostname); then return false; fi
+    for (const item of snapshot.allow_domains.split_literal(",")) {
+      if hostname == item || hostname.ends_with("." + item); then return true; fi
+    }
+    return false;
+  }
+
+end
