@@ -1,0 +1,37 @@
+// Execute separately from src/serve_reverse.ores with config/worker-example.yaml.
+// This is a real TCP integration candidate, not a unit test and not CI-executed
+// without a safely launched listener. The caller needs loopback NET permission.
+pub async routine main(): int {
+  val actor = await network.connect_async("127.0.0.1", 8080);
+  await actor.write_text_async(
+    "GET /actor HTTP/1.1\r\nHost: worker.example.test\r\nConnection: close\r\n\r\n");
+  val response = await actor.read_line_async();
+  await actor.close_async();
+  if response.is_none() || !response.unwrap().starts_with("HTTP/1.1 200"); then
+    stdio.println("FAIL local actor service should return 200");
+    return 1;
+  fi
+
+  val origin = await network.connect_async("127.0.0.1", 8080);
+  await origin.write_text_async(
+    "GET /api HTTP/1.1\r\nHost: worker.example.test\r\nx-demo-token: present\r\nConnection: close\r\n\r\n");
+  val not_supported = await origin.read_line_async();
+  await origin.close_async();
+  if not_supported.is_none() ||
+    !not_supported.unwrap().starts_with("HTTP/1.1 501"); then
+    stdio.println("FAIL unimplemented external HTTP upstream must not succeed");
+    return 1;
+  fi
+
+  val denied = await network.connect_async("127.0.0.1", 8080);
+  await denied.write_text_async(
+    "GET /api HTTP/1.1\r\nHost: worker.example.test\r\nConnection: close\r\n\r\n");
+  val refused = await denied.read_line_async();
+  await denied.close_async();
+  if refused.is_none() || !refused.unwrap().starts_with("HTTP/1.1 403"); then
+    stdio.println("FAIL missing declarative header should be refused");
+    return 1;
+  fi
+  stdio.println("PASS native Oreslang actor-service TCP smoke");
+  return 0;
+}

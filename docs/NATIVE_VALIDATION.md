@@ -40,6 +40,8 @@ Do **not** silently skip missing executables or replace commands with grep-only/
 
 ## Gates after source compilation
 
+`tests/network_admission_contract.ores` is the first executable reverse pre-dial invariant: an upstream descriptor is produced only when the request-slot lease belongs to the same immutable generation, rate and breaker state permit, the selected route's exact HTTP(S) origin matches the resolved endpoint, and trusted resolver/network policy marks that endpoint pinned and allowed. The descriptor is not a network capability and cannot substitute for a real resolver/transport test. **A matching route is not proof of middleware admission.** Until an opaque, generation-pinned request-header/middleware receipt exists, `authorize_reverse` must reject every route carrying a nonempty middleware chain, including `deny` and `require_header`. The native contract now includes two negative fixtures that ensure those routes cannot mint a pre-dial descriptor, even when route, lease, DNS, rate and breaker checks would otherwise pass. This intentionally blocks some otherwise valid configured routes; it is not full middleware support.
+
 Real HTTP/1.1 wire tests, correct reverse proxy response status/header/trailer streaming, forward CONNECT, TLS and destination IP pinning, request-smuggling/SSRF adversarial inputs, generation-pinned in-flight requests, actor cancellation/drain and bounded mailbox backpressure must pass before any release. LLVM, Graal AOT and hybrid must independently report verified support or explicit unsupported behavior.
 
 ## Runtime dependency and policy limitations
@@ -47,7 +49,6 @@ Real HTTP/1.1 wire tests, correct reverse proxy response status/header/trailer s
 The outbound HTTP/CONNECT transport required for a serving proxy is tracked in [Java backend issue #1942](https://github.com/ores-truffle-oreslang/oreslang-source.java/issues/1942). Route and CONNECT policy helpers make **syntactic and declarative decisions only**, not network access grants. Upstream numeric port/IP range checks, TLS identity, pinned DNS, egress restrictions and real HTTP smuggling defenses remain transport release gates.
 
 The `config_path` module enforces a canonical absolute POSIX spelling for `ores_proxy_conf_yaml`. It cannot prevent concurrent file replacement, ancestor symlinks or TOCTOU attacks; only a capability-based descriptor API can close that gap. Do not authorize hostile configuration paths based on this helper alone.
-
 
 ## Reviewed verification inventory
 
@@ -60,9 +61,4 @@ The workflow first regenerates both inventories from the checked-out tree and di
 
 Integration fixtures that require a separately running listener or another process are compiler-checked through the complete source inventory but are not falsely treated as standalone pure tests. They need their own orchestration gate before any transport claim is promoted.
 
-
-## Orchestrated loopback ingress gate
-
-After all reviewed source files compiler-check and all pure contracts execute, CI now starts `src/serve_reverse.ores` as the real loopback listener with only the exact config read, config environment, and `127.0.0.1:8080` network permissions. It waits for listener readiness, then executes `tests/ingress_tcp_smoke.ores` as a separate Oreslang process with only loopback network authority.
-
-The client verifies 501 for an admitted route whose upstream transport is intentionally unavailable, 403 for missing required middleware input, 404 for an absent route, and 400 for an encoded noncanonical path. CI then proves the server is still alive and tears it down. This is ingress/ownership/wire-status evidence only; it does not implement or claim upstream forwarding.
+The actor-service TCP smoke and upstream wire behavior remain separate integration gates. Source-free inventory checks are not native runtime evidence.
