@@ -15,6 +15,8 @@ import module service_bindings from "./service_bindings";
 define isoactor UpstreamUnavailable as
   receive(ActorMail<String> mail): void {
     val exchange = http.claim(mail.value);
+    // Actor-side marker: only emitted after the single-use exchange claim.
+    stdio.println("ORES_PROXY_TEST_CLAIM_FALLBACK");
     await exchange.respond(501, "text/plain; charset=utf-8",
       "Upstream forwarding unavailable in this runtime");
     return;
@@ -26,8 +28,25 @@ end
 define isoactor HelloV1 as
   receive(ActorMail<String> mail): void {
     val exchange = http.claim(mail.value);
+    // Actor-side marker: only emitted after the single-use exchange claim.
+    stdio.println("ORES_PROXY_TEST_CLAIM_HELLO");
     await exchange.respond(200, "text/plain; charset=utf-8",
       "hello from native Oreslang actor service");
+    return;
+  }
+end
+
+// Native Oreslang streaming actor path. Transport-owned byte credits and
+// response commit are managed by HttpExchange; each write is awaited.
+define isoactor StreamV1 as
+  receive(ActorMail<String> mail): void {
+    val exchange = http.claim(mail.value);
+    // Actor-side marker: only emitted after the single-use exchange claim.
+    stdio.println("ORES_PROXY_TEST_CLAIM_STREAM");
+    await exchange.start(200, "text/plain; charset=utf-8");
+    await exchange.write("stage-one\n");
+    await exchange.write("stage-two\n");
+    await exchange.finish();
     return;
   }
 end
@@ -56,11 +75,13 @@ pub async routine main(): int {
   val snapshot = new generation.Snapshot(1, config);
 
   // Trusted code-image registry is independent of YAML service declarations.
-  // No configured target can create an actor image or grant network authority.
+  // Only these two pre-registered local actors are bindable; no network grant.
   let Array<service_bindings.CodeImage> trusted_images =
     new Array<service_bindings.CodeImage>();
   trusted_images.add(new service_bindings.CodeImage(
     "hello-v1", "abi-v1", false));
+  trusted_images.add(new service_bindings.CodeImage(
+    "stream-v1", "abi-v1", false));
   val trusted_result = service_bindings.registry(trusted_images);
   if trusted_result.is_err(); then
     stdio.println("ERROR: trusted actor image registry invalid");
@@ -76,16 +97,27 @@ pub async routine main(): int {
     return 78;
   fi
 
-  // Keep the total reusable HTTP actor allocation within the YAML actors=100
-  // budget: 50 actor-service handlers + 50 unavailable-upstream handlers.
-  // Pooled actor count is NOT HTTP admission or the carrier thread count.
-  val unavailable = http.handler("UpstreamUnavailable").pooled(50);
+  // Exactly 100 maximum lazily created reusable actors across three pools.
+  // This is separate from transport admission and the carrier-thread budget.
+  val unavailable = http.handler("UpstreamUnavailable").pooled(25);
   val hello = http.handler("HelloV1").pooled(50);
+  val stream = http.handler("StreamV1").pooled(25);
   val server = http.listen("127.0.0.1", 8080, 1024, 65536, 30000);
   stdio.println("EXPERIMENTAL loopback actor ingress; HTTP upstream forwarding returns 501");
+  // Fixed, input-free markers record attempted handoffs for the test harness.
+  // They do not prove actor receipt, cancellation, or loan retirement.
   loop {
     val exchange = await server.accept();
     val String host = exchange.header("Host");
+    // This experimental actor ingress accepts bodyless requests only.
+    // Fail closed on declared payload framing before routing or actor dispatch.
+    // The transport must separately reject duplicate/conflicting headers before accept().
+    if exchange.header("Content-Length") != "" ||
+      exchange.header("Transfer-Encoding") != ""; then
+      await exchange.respond(400, "text/plain; charset=utf-8",
+        "Request payload framing unsupported");
+      continue;
+    fi
     val String request_line = exchange.method + " " + exchange.target + " HTTP/1.1";
     val admitted = proxy_wire.reverse(request_line, host);
     if admitted.is_err(); then
@@ -93,6 +125,13 @@ pub async routine main(): int {
       continue;
     fi
     val request = admitted.unwrap();
+    // The experimental adapter has no proven HEAD response semantics for
+    // either local actor services or the fallback upstream-unavailable actor.
+    // Reject HEAD before middleware, route selection or actor ownership handoff.
+    if request.method != "GET"; then
+      await exchange.respond(405, "text/plain; charset=utf-8", "");
+      continue;
+    fi
     val matched = route_policy.select(rt borrow config,
       request.authority, request.path);
     if matched.is_err(); then
@@ -133,14 +172,6 @@ pub async routine main(): int {
       continue;
     fi
     if proxy_yaml.valid_service_ref(target.upstream); then
-      // HEAD response framing is not yet proven through the guest actor adapter.
-      // Keep public actor services GET-only until actor-owned request metadata
-      // can enforce bodyless HEAD semantics after http.claim().
-      if request.method != "GET"; then
-        await exchange.respond(405, "text/plain; charset=utf-8",
-          "Actor service currently requires GET");
-        continue;
-      fi
       val bound = service_bindings.reverse_route(rt borrow snapshot,
         rt borrow trusted_services, request.authority, request.path);
       if bound.is_err(); then
@@ -149,13 +180,19 @@ pub async routine main(): int {
         continue;
       fi
       val actor_binding = bound.unwrap();
-      // Re-check the generation, exact code image and no-NET invariant at the
-      // final supervisor-to-actor handoff. The runtime still owes the matching
-      // actor-local receipt check once typed http.handler metadata is available.
+      // Final caller-side dispatch fence: the actor image must be local-only,
+      // exact-target and from this immutable generation. The remaining runtime
+      // gap is the matching actor-owned receipt check after http.claim().
       if service_bindings.local_dispatch_allowed(rt borrow actor_binding,
           rt borrow snapshot, "hello-v1"); then
-        hello.dispatch(exchange);
-      elif actor_binding.target == "hello-v1"; then
+        stdio.println("ORES_PROXY_TEST_DISPATCH_HELLO");
+        hello.dispatch(rt borrow mut exchange);
+      elif service_bindings.local_dispatch_allowed(rt borrow actor_binding,
+          rt borrow snapshot, "stream-v1"); then
+        stdio.println("ORES_PROXY_TEST_DISPATCH_STREAM");
+        stream.dispatch(rt borrow mut exchange);
+      elif actor_binding.target == "hello-v1" ||
+        actor_binding.target == "stream-v1"; then
         await exchange.respond(503, "text/plain; charset=utf-8",
           "Stale or overprivileged actor binding");
       else
@@ -164,7 +201,8 @@ pub async routine main(): int {
       fi
       continue;
     fi
-    unavailable.dispatch(exchange);
+    stdio.println("ORES_PROXY_TEST_DISPATCH_FALLBACK");
+    unavailable.dispatch(rt borrow mut exchange);
   }
   return 0;
 }

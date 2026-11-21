@@ -11,9 +11,13 @@ services:
   - name: greeting
     kind: actor
     target: hello-v1
+  - name: streaming
+    kind: actor
+    target: stream-v1
+  - name: unavailable
+    kind: actor
+    target: not-registered
 middleware:
-  - name: trace
-    kind: trace
   - name: required
     kind: require_header
     header: x-demo-token
@@ -22,7 +26,14 @@ routes:
     host: worker.example.test
     path_prefix: /actor
     upstream: service://greeting
-    middleware: trace
+  - name: streaming-route
+    host: worker.example.test
+    path_prefix: /stream
+    upstream: service://streaming
+  - name: unregistered-route
+    host: worker.example.test
+    path_prefix: /unregistered
+    upstream: service://unavailable
   - name: origin
     host: worker.example.test
     path_prefix: /api

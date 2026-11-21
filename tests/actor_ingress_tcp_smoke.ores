@@ -12,6 +12,158 @@ pub async routine main(): int {
     return 1;
   fi
 
+  // Declared HTTP request bodies must never reach a local actor. A transport
+  // may reject malformed framing by closing the connection before dispatch;
+  // if it returns a response, it must be the explicit bad-request response.
+  val content_length = await network.connect_async("127.0.0.1", 8080);
+  await content_length.write_text_async(
+    "GET /actor HTTP/1.1\r\nHost: worker.example.test\r\nContent-Length: 1\r\nConnection: close\r\n\r\nx");
+  val content_length_status = await content_length.read_line_async();
+  await content_length.close_async();
+  if !content_length_status.is_none(); then
+    if !content_length_status.unwrap().starts_with("HTTP/1.1 400"); then
+      stdio.println("FAIL body-framed actor request admitted (Content-Length)");
+      return 1;
+    fi
+  fi
+
+  val transfer_encoding = await network.connect_async("127.0.0.1", 8080);
+  await transfer_encoding.write_text_async(
+    "GET /actor HTTP/1.1\r\nHost: worker.example.test\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n1\r\nx\r\n0\r\n\r\n");
+  val transfer_encoding_status = await transfer_encoding.read_line_async();
+  await transfer_encoding.close_async();
+  if !transfer_encoding_status.is_none(); then
+    if !transfer_encoding_status.unwrap().starts_with("HTTP/1.1 400"); then
+      stdio.println("FAIL body-framed actor request admitted (Transfer-Encoding)");
+      return 1;
+    fi
+  fi
+
+  // Raw HTTP framing regressions. The transport may close without a status
+  // or explicitly reply 400, but a normalized-header shortcut must never
+  // reach the HelloV1 actor. These are not proof of actor task retirement.
+  val zero_length = await network.connect_async("127.0.0.1", 8080);
+  await zero_length.write_text_async(
+    "GET /actor HTTP/1.1\r\nHost: worker.example.test\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+  val zero_length_status = await zero_length.read_line_async();
+  await zero_length.close_async();
+  if !zero_length_status.is_none(); then
+    if !zero_length_status.unwrap().starts_with("HTTP/1.1 400"); then
+      stdio.println("FAIL Content-Length zero must not dispatch actor");
+      return 1;
+    fi
+  fi
+
+  val empty_length = await network.connect_async("127.0.0.1", 8080);
+  await empty_length.write_text_async(
+    "GET /actor HTTP/1.1\r\nHost: worker.example.test\r\nContent-Length:\r\nConnection: close\r\n\r\n");
+  val empty_length_status = await empty_length.read_line_async();
+  await empty_length.close_async();
+  if !empty_length_status.is_none(); then
+    if !empty_length_status.unwrap().starts_with("HTTP/1.1 400"); then
+      stdio.println("FAIL Empty Content-Length must not dispatch actor");
+      return 1;
+    fi
+  fi
+
+  val duplicate_length = await network.connect_async("127.0.0.1", 8080);
+  await duplicate_length.write_text_async(
+    "GET /actor HTTP/1.1\r\nHost: worker.example.test\r\nContent-Length: 1\r\nContent-Length: 0\r\nConnection: close\r\n\r\nx");
+  val duplicate_length_status = await duplicate_length.read_line_async();
+  await duplicate_length.close_async();
+  if !duplicate_length_status.is_none(); then
+    if !duplicate_length_status.unwrap().starts_with("HTTP/1.1 400"); then
+      stdio.println("FAIL Conflicting duplicate Content-Length must not dispatch actor");
+      return 1;
+    fi
+  fi
+
+  val length_and_encoding = await network.connect_async("127.0.0.1", 8080);
+  await length_and_encoding.write_text_async(
+    "GET /actor HTTP/1.1\r\nHost: worker.example.test\r\nContent-Length: 1\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n1\r\nx\r\n0\r\n\r\n");
+  val length_and_encoding_status = await length_and_encoding.read_line_async();
+  await length_and_encoding.close_async();
+  if !length_and_encoding_status.is_none(); then
+    if !length_and_encoding_status.unwrap().starts_with("HTTP/1.1 400"); then
+      stdio.println("FAIL Content-Length plus Transfer-Encoding must not dispatch actor");
+      return 1;
+    fi
+  fi
+
+  val duplicate_host = await network.connect_async("127.0.0.1", 8080);
+  await duplicate_host.write_text_async(
+    "GET /actor HTTP/1.1\r\nHost: worker.example.test\r\nHost: second.example.test\r\nConnection: close\r\n\r\n");
+  val duplicate_host_status = await duplicate_host.read_line_async();
+  await duplicate_host.close_async();
+  if !duplicate_host_status.is_none(); then
+    if !duplicate_host_status.unwrap().starts_with("HTTP/1.1 400"); then
+      stdio.println("FAIL Duplicate Host fields must not dispatch actor");
+      return 1;
+    fi
+  fi
+
+  val mixed_case_te = await network.connect_async("127.0.0.1", 8080);
+  await mixed_case_te.write_text_async(
+    "GET /actor HTTP/1.1\r\nHost: worker.example.test\r\ntRaNsFeR-EnCoDiNg: chunked\r\nConnection: close\r\n\r\n1\r\nx\r\n0\r\n\r\n");
+  val mixed_case_te_status = await mixed_case_te.read_line_async();
+  await mixed_case_te.close_async();
+  if !mixed_case_te_status.is_none(); then
+    if !mixed_case_te_status.unwrap().starts_with("HTTP/1.1 400"); then
+      stdio.println("FAIL Mixed-case transfer coding must not dispatch actor");
+      return 1;
+    fi
+  fi
+
+  // After framing rejections, fresh complete requests must still reach
+  // the local service rather than leaking into a rejected request's body.
+  val post_framing = await network.connect_async("127.0.0.1", 8080);
+  await post_framing.write_text_async(
+    "GET /actor HTTP/1.1\r\nHost: worker.example.test\r\nConnection: close\r\n\r\n");
+  val post_framing_status = await post_framing.read_line_async();
+  await post_framing.close_async();
+  if post_framing_status.is_none() ||
+    !post_framing_status.unwrap().starts_with("HTTP/1.1 200"); then
+    stdio.println("FAIL actor service unavailable after framing denial");
+    return 1;
+  fi
+
+  // Actor services are deliberately GET-only until http.handler can carry
+  // actor-owned request metadata and prove bodyless HEAD semantics after claim.
+  val actor_head = await network.connect_async("127.0.0.1", 8080);
+  await actor_head.write_text_async(
+    "HEAD /actor HTTP/1.1\r\nHost: worker.example.test\r\nConnection: close\r\n\r\n");
+  val actor_head_status = await actor_head.read_line_async();
+  await actor_head.close_async();
+  if actor_head_status.is_none() ||
+    !actor_head_status.unwrap().starts_with("HTTP/1.1 405"); then
+    stdio.println("FAIL HEAD reached local actor service");
+    return 1;
+  fi
+
+  val stream_head = await network.connect_async("127.0.0.1", 8080);
+  await stream_head.write_text_async(
+    "HEAD /stream HTTP/1.1\r\nHost: worker.example.test\r\nConnection: close\r\n\r\n");
+  val stream_head_status = await stream_head.read_line_async();
+  await stream_head.close_async();
+  if stream_head_status.is_none() ||
+    !stream_head_status.unwrap().starts_with("HTTP/1.1 405"); then
+    stdio.println("FAIL HEAD reached streaming actor service");
+    return 1;
+  fi
+
+  // The non-service fallback must also reject HEAD: a 501 actor response
+  // includes a body and cannot establish RFC-correct HEAD wire semantics.
+  val upstream_head = await network.connect_async("127.0.0.1", 8080);
+  await upstream_head.write_text_async(
+    "HEAD /api HTTP/1.1\r\nHost: worker.example.test\r\nx-demo-token: present\r\nConnection: close\r\n\r\n");
+  val upstream_head_status = await upstream_head.read_line_async();
+  await upstream_head.close_async();
+  if upstream_head_status.is_none() ||
+    !upstream_head_status.unwrap().starts_with("HTTP/1.1 405"); then
+    stdio.println("FAIL HEAD reached fallback upstream actor");
+    return 1;
+  fi
+
   val origin = await network.connect_async("127.0.0.1", 8080);
   await origin.write_text_async(
     "GET /api HTTP/1.1\r\nHost: worker.example.test\r\nx-demo-token: present\r\nConnection: close\r\n\r\n");
@@ -32,6 +184,134 @@ pub async routine main(): int {
     stdio.println("FAIL missing declarative header should be refused");
     return 1;
   fi
-  stdio.println("PASS native Oreslang actor-service TCP smoke");
+  // Prove actual HTTP/1.1 chunked body bytes from the guest StreamV1 actor,
+  // not just status-line dispatch. Connection: close gives bounded EOF.
+  val streaming = await network.connect_async("127.0.0.1", 8080);
+  await streaming.write_text_async(
+    "GET /stream HTTP/1.1\r\nHost: worker.example.test\r\nConnection: close\r\n\r\n");
+  val streamed_status = await streaming.read_line_async();
+  if streamed_status.is_none() ||
+    !streamed_status.unwrap().starts_with("HTTP/1.1 200"); then
+    await streaming.close_async();
+    stdio.println("FAIL native streaming actor status"); return 1;
+  fi
+  // Do not count header text as body evidence. The guest streaming API
+  // must send HTTP/1.1 chunked framing without a conflicting Content-Length.
+  let bool headers_done = false;
+  let bool chunked = false;
+  let bool length_header = false;
+  for (let i = 0; i < 32; i++) {
+    val header = await streaming.read_line_async();
+    if header.is_none(); then break; fi
+    val String line = header.unwrap().trim();
+    if line == ""; then headers_done = true; break; fi
+    if line == "Transfer-Encoding: chunked" ||
+      line == "transfer-encoding: chunked"; then
+      chunked = true;
+    fi
+    if line.starts_with("Content-Length:") ||
+      line.starts_with("content-length:"); then
+      length_header = true;
+    fi
+  }
+  if !headers_done || !chunked || length_header; then
+    await streaming.close_async();
+    stdio.println("FAIL streaming actor HTTP chunked headers");
+    return 1;
+  fi
+
+  // read_line_async is sufficient for these explicitly textual fixture
+  // payloads, but not a general binary-safe HTTP chunk decoder.
+  let bool first_body = false;
+  let bool second_body = false;
+  let bool terminal_chunk = false;
+  for (let i = 0; i < 48; i++) {
+    val body_line = await streaming.read_line_async();
+    if body_line.is_none(); then break; fi
+    val String line = body_line.unwrap().trim();
+    if line == "stage-one"; then
+      if first_body || second_body; then
+        await streaming.close_async();
+        stdio.println("FAIL duplicate or reordered first body stage");
+        return 1;
+      fi
+      first_body = true;
+    elif line == "stage-two"; then
+      if !first_body || second_body; then
+        await streaming.close_async();
+        stdio.println("FAIL missing or reordered second body stage");
+        return 1;
+      fi
+      second_body = true;
+    elif line == "0" && second_body; then
+      terminal_chunk = true;
+      break;
+    fi
+  }
+  await streaming.close_async();
+  if !first_body || !second_body || !terminal_chunk; then
+    stdio.println("FAIL streaming body order or terminating chunk");
+    return 1;
+  fi
+  // A YAML service binding is not authority to dynamically load guest code.
+  // Unknown target names must remain unavailable rather than spawning actors.
+  val forbidden = await network.connect_async("127.0.0.1", 8080);
+  await forbidden.write_text_async(
+    "GET /unregistered HTTP/1.1\r\nHost: worker.example.test\r\nConnection: close\r\n\r\n");
+  val forbidden_status = await forbidden.read_line_async();
+  await forbidden.close_async();
+  if forbidden_status.is_none() ||
+    !forbidden_status.unwrap().starts_with("HTTP/1.1 503"); then
+    stdio.println("FAIL unregistered actor code image must not execute");
+    return 1;
+  fi
+  // An invalid encoded target must be rejected before route dispatch.
+  // The serving actor must remain usable after rejecting the request.
+  val invalid = await network.connect_async("127.0.0.1", 8080);
+  await invalid.write_text_async(
+    "GET /%2e%2e/actor HTTP/1.1\r\nHost: worker.example.test\r\nConnection: close\r\n\r\n");
+  val bad_path = await invalid.read_line_async();
+  await invalid.close_async();
+  if bad_path.is_none() || !bad_path.unwrap().starts_with("HTTP/1.1 400"); then
+    stdio.println("FAIL encoded noncanonical path not refused");
+    return 1;
+  fi
+
+  // An unconfigured route is not a license to bind or execute another actor.
+  val unmatched = await network.connect_async("127.0.0.1", 8080);
+  await unmatched.write_text_async(
+    "GET /not-configured HTTP/1.1\r\nHost: worker.example.test\r\nConnection: close\r\n\r\n");
+  val unknown_route = await unmatched.read_line_async();
+  await unmatched.close_async();
+  if unknown_route.is_none() ||
+    !unknown_route.unwrap().starts_with("HTTP/1.1 404"); then
+    stdio.println("FAIL unknown route should not dispatch");
+    return 1;
+  fi
+
+  // The client abandons streaming work after sending a complete request.
+  // This is a bounded connection survivability test, NOT proof that a state
+  // loan or task has physically retired. The runner enforces total timeout.
+  for (let i = 0; i < 4; i++) {
+    val dropped = await network.connect_async("127.0.0.1", 8080);
+    await dropped.write_text_async(
+      "GET /stream HTTP/1.1\r\nHost: worker.example.test\r\nConnection: close\r\n\r\n");
+    await dropped.close_async();
+  }
+
+  // A fresh request must still be dispatched, rather than getting trapped
+  // behind abandoned streaming sessions or exhausting the bounded pool.
+  val recovered = await network.connect_async("127.0.0.1", 8080);
+  await recovered.write_text_async(
+    "GET /actor HTTP/1.1\r\nHost: worker.example.test\r\nConnection: close\r\n\r\n");
+  val recovered_status = await recovered.read_line_async();
+  await recovered.close_async();
+  if recovered_status.is_none() ||
+    !recovered_status.unwrap().starts_with("HTTP/1.1 200"); then
+    stdio.println("FAIL actor service did not recover after disconnected streams");
+    return 1;
+  fi
+
+  stdio.println("PASS native Oreslang actor-service and streaming TCP smoke");
   return 0;
 }

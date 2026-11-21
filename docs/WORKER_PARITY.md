@@ -26,15 +26,23 @@ YAML cannot register a code image or widen its capability manifest. The result
 remains an immutable, generation-scoped **symbolic descriptor**, not a runtime
 ActorRef or network grant.
 
-The opt-in `src/serve_reverse.ores` now contains exactly ONE trusted local
-code-image binding: `hello-v1` -> `HelloV1` HTTP actor pool.
-`config/worker-example.yaml` binds `service://greeting` to it.
-For that exact route the actor may return 200 through the existing
-Java/Graal host HTTP transport; arbitrary targets get 501 and external
-HTTP upstreams still get 501. No untrusted actor sandbox is claimed.
+The opt-in `src/serve_reverse.ores` has exactly TWO trusted local code
+images: `hello-v1` -> `HelloV1` and `stream-v1` -> `StreamV1`.
+`config/worker-example.yaml` declares symbolic service references for them.
+The sample's three local `service://` routes intentionally have **no**
+middleware chain: `service_bindings.reverse_route` rejects *all* nonempty
+middleware chains, including trace-only, until the supervisor can present an
+unforgeable generation-pinned receipt. The `/api` HTTP fallback alone keeps
+`middleware: required` to exercise missing-header 403 versus admitted-but-
+unimplemented 501. This is a loopback-only test fixture, **not** a general
+authentication or tracing bypass for production actor services.
+The supervisor registry, not YAML, authorizes these images without granting
+network capability. Local hello and streaming routes return 200, an unknown
+code image fails binding with 503, and external HTTP/pool upstreams return
+501. No untrusted actor sandbox or upstream forwarding is claimed.
 `tests/actor_ingress_tcp_smoke.ores` is a separate native Oreslang TCP
-integration candidate (200 local actor, 501 remote upstream, 403 denied).
-It has NOT been executed with a running listener.
+integration candidate (200 local/streaming actor, 501 upstream, 403 denied,
+503 unregistered image). It has NOT executed with a running listener.
 
 ## HAProxy and NGINX policy slices
 
