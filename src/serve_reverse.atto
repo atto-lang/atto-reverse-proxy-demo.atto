@@ -1,8 +1,8 @@
 // Opt-in loopback-only ingress proof. Routes and middleware operate on a
-// single parsed snapshot in the Oreslang supervisor. No outbound proxy call.
+// single parsed snapshot in the AttoLang supervisor. No outbound proxy call.
 // HTTP upstream routes return 501; a pre-approved local actor service can
 // respond through the existing guest HTTP actor adapter. Not a full proxy.
-// This is NOT src/main.ores and is intentionally NOT a production entrypoint.
+// This is NOT src/main.atto and is intentionally NOT a production entrypoint.
 import module proxy_yaml from "./proxy_yaml";
 import module proxy_wire from "./proxy_wire";
 import module route_policy from "./route_policy";
@@ -31,12 +31,12 @@ define isoactor HelloV1 as
     // Actor-side marker: only emitted after the single-use exchange claim.
     stdio.println("ORES_PROXY_TEST_CLAIM_HELLO");
     await exchange.respond(200, "text/plain; charset=utf-8",
-      "hello from native Oreslang actor service");
+      "hello from native AttoLang actor service");
     return;
   }
 end
 
-// Native Oreslang streaming actor path. Transport-owned byte credits and
+// Native AttoLang streaming actor path. Transport-owned byte credits and
 // response commit are managed by HttpExchange; each write is awaited.
 define isoactor StreamV1 as
   receive(ActorMail<String> mail): void {

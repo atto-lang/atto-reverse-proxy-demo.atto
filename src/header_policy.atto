@@ -1,4 +1,4 @@
-// Native Oreslang HTTP proxy header admission predicates.
+// Native AttoLang HTTP proxy header admission predicates.
 // Caller MUST perform raw byte parser/framing, duplicate header handling,
 // comma-token parsing and canonical lowercase conversion before invoking this.
 // These helpers NEVER write bytes, authenticate clients or grant network access.

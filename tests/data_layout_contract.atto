@@ -1,4 +1,4 @@
-// Native Oreslang semantic tests for SoA, AoSoA tile mapping and ECS IDs.
+// Native AttoLang semantic tests for SoA, AoSoA tile mapping and ECS IDs.
 // No timer/throughput claim: the fast native arena engine is still pending.
 import module data_layout from "../src/data_layout";
 

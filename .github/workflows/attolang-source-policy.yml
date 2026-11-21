@@ -1,0 +1,83 @@
+name: AttoLang source extension policy
+on:
+  # Temporary exact-tree mirrors in a separate private GitHub test organization.
+  # Never grants network, compiler or self-hosted runner authority.
+  push:
+    branches:
+      - 'ci-mirror/atto-proxy-*'
+  pull_request:
+    paths:
+      - '**/*.ores'
+      - '**/*.atto'
+      - 'src/**'
+      - 'tests/**'
+      - 'bench/**'
+      - 'ci/attolang_source_policy.sh'
+      - 'ci/test_attolang_source_policy.sh'
+      - 'ci/check_atto_inventory.py'
+      - 'ci/qualify_native_runtime.py'
+      - 'ci/oreslang-files.txt'
+      - 'ci/pure-contracts.txt'
+      - 'ci/sourcefree_proxy_audit.py'
+      - 'ci/test_raw_http_ingress.py'
+      - 'ci/verify_raw_probe_receipts.py'
+      - '.github/workflows/attolang-source-policy.yml'
+  workflow_dispatch:
+permissions: {}
+jobs:
+  source-policy:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+          submodules: false
+      - name: Attest local checkout commit, tree and attempt
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "CHECKED_OUT_COMMIT=$(git rev-parse HEAD)"
+          echo "CHECKED_OUT_TREE=$(git rev-parse HEAD^{tree})"
+          echo "CHECKED_OUT_RUN=$GITHUB_RUN_ID/$GITHUB_RUN_ATTEMPT"
+      - name: Syntax-check AttoLang policy
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash -n ci/attolang_source_policy.sh
+          bash -n ci/test_attolang_source_policy.sh
+      - name: Execute source-free negative mutation tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash ci/test_attolang_source_policy.sh ci/attolang_source_policy.sh
+      - name: Enforce .atto-only guest source
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash ci/attolang_source_policy.sh
+      - name: Validate complete AttoLang inventory and negative mutation controls
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 ci/check_atto_inventory.py
+          python3 ci/check_atto_inventory.py --self-test
+      - name: Reverse proxy source-free security audit
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 ci/sourcefree_proxy_audit.py
+      - name: Test raw-wire probe verdicts (synthetic responses only)
+        shell: bash
+        run: python3 ci/test_raw_http_ingress.py --self-test
+      - name: Test post-adversarial actor receipt verifier (synthetic only)
+        shell: bash
+        run: python3 ci/verify_raw_probe_receipts.py --self-test
+      - name: Test independent native qualification preflight (synthetic only)
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile ci/qualify_native_runtime.py
+          python3 ci/qualify_native_runtime.py --self-test

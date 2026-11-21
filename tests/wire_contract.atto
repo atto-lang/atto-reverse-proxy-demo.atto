@@ -1,0 +1,70 @@
+import module proxy_wire from "../src/proxy_wire";
+import module proxy_yaml from "../src/proxy_yaml";
+pub routine main(): int {
+  val good = proxy_wire.reverse("GET /api/v1 HTTP/1.1", "app.example.test");
+  if good.is_err(); then stdio.println("FAIL reverse origin"); return 1; fi
+  if good.unwrap().path != "/api/v1"; then return 1; fi
+  if proxy_wire.reverse("GET http://evil.test/x HTTP/1.1", "app.example.test").is_ok() ||
+    proxy_wire.reverse("POST /api HTTP/1.1", "app.example.test").is_ok() ||
+    proxy_wire.reverse("GET //evil.test/x HTTP/1.1", "app.example.test").is_ok() ||
+    proxy_wire.reverse("GET /api%2fadmin HTTP/1.1", "app.example.test").is_ok() ||
+    proxy_wire.reverse("GET /api/../admin HTTP/1.1", "app.example.test").is_ok() ||
+    proxy_wire.reverse("GET /api/./admin HTTP/1.1", "app.example.test").is_ok() ||
+    proxy_wire.reverse("GET /api?token=x HTTP/1.1", "app.example.test").is_ok() ||
+    proxy_wire.reverse("GET /api HTTP/1.1\r\n", "app.example.test").is_ok() ||
+    proxy_wire.reverse("GET /api HTTP/1.0", "app.example.test").is_ok() ||
+    proxy_wire.reverse("GET /api HTTP/1.1", "APP.EXAMPLE.TEST").is_ok(); then
+    stdio.println("FAIL reverse request-line denial"); return 1;
+  fi
+  if proxy_wire.upstream_origin("http://127.0.0.1:9000").is_err() ||
+    proxy_wire.upstream_origin("https://api.example.test:443").is_err() ||
+    proxy_wire.upstream_origin("http://user@api.example.test:9000").is_ok() ||
+    proxy_wire.upstream_origin("https://evil.test/internal").is_ok() ||
+    proxy_wire.upstream_origin("https://evil.test:22").is_ok() ||
+    proxy_wire.upstream_origin("https://[::1]:443").is_ok(); then
+    stdio.println("FAIL upstream origin admission"); return 1;
+  fi
+
+  // Metadata-only checks: the real listener must still check raw framing,
+  // duplicate Host/CL/TE, and transfer coding before actor handoff.
+  val head = proxy_wire.reverse("HEAD /api HTTP/1.1", "app.example.test");
+  if head.is_err(); then stdio.println("FAIL canonical HEAD metadata"); return 1; fi
+  val head_target = head.unwrap();
+  if head_target.method != "HEAD" || head_target.tunnel ||
+    head_target.authority != "app.example.test"; then
+    stdio.println("FAIL HEAD metadata misclassified"); return 1;
+  fi
+  if proxy_wire.reverse("GET /api//internal HTTP/1.1",
+      "app.example.test").is_ok() ||
+    proxy_wire.reverse("GET /api;param HTTP/1.1",
+      "app.example.test").is_ok() ||
+    proxy_wire.reverse("GET /api#section HTTP/1.1",
+      "app.example.test").is_ok() ||
+    proxy_wire.reverse("GET /api\\internal HTTP/1.1",
+      "app.example.test").is_ok() ||
+    proxy_wire.reverse("GET /api%00 HTTP/1.1",
+      "app.example.test").is_ok() ||
+    proxy_wire.reverse("GET /api HTTP/1.1", "app.example.test:443").is_ok() ||
+    proxy_wire.reverse("GET /api HTTP/1.1", "app.example.test.").is_ok() ||
+    proxy_wire.reverse("GET /api HTTP/1.1", "app_example.test").is_ok() ||
+    proxy_wire.reverse("GET /api HTTP/1.1", "app.example.test\n").is_ok() ||
+    proxy_wire.reverse("GET /api HTTP/1.1", "app.example.test\t").is_ok() ||
+    proxy_wire.reverse("GET /api  HTTP/1.1", "app.example.test").is_ok() ||
+    proxy_wire.reverse("GET /api HTTP/1.1 ", "app.example.test").is_ok() ||
+    proxy_wire.reverse("get /api HTTP/1.1", "app.example.test").is_ok(); then
+    stdio.println("FAIL reverse metadata normalization ambiguity"); return 1;
+  fi
+  if proxy_wire.upstream_origin("https://api.example.test?debug=1").is_ok() ||
+    proxy_wire.upstream_origin("https://api.example.test#fragment").is_ok() ||
+    proxy_wire.upstream_origin("https://api.example.test%2fadmin").is_ok() ||
+    proxy_wire.upstream_origin("https://api.example.test:0").is_ok() ||
+    proxy_wire.upstream_origin("https://api.example.test:65535").is_ok() ||
+    proxy_wire.upstream_origin("https://api.example.test:443:443").is_ok() ||
+    proxy_wire.upstream_origin("HTTPS://api.example.test").is_ok() ||
+    proxy_wire.upstream_origin("http://api.example.test\\evil").is_ok() ||
+    proxy_wire.upstream_origin("http://api.example.test:9000/path").is_ok(); then
+    stdio.println("FAIL reverse upstream origin ambiguity"); return 1;
+  fi
+  stdio.println("PASS reverse origin-form and upstream metadata grammar (no forwarding)");
+  return 0;
+}

@@ -1,4 +1,4 @@
-// Oreslang-native CLI entrypoint. Intentional fail-closed control-plane MVP.
+// AttoLang-native CLI entrypoint. Intentional fail-closed control-plane MVP.
 // It validates YAML but DOES NOT start a proxy listener or claim forwarding.
 // flags-2-env is invoked by the external CLI caller; this file uses the env ABI.
 import module proxy_yaml from "./proxy_yaml";

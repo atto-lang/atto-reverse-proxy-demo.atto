@@ -1,5 +1,5 @@
-// Oreslang-only external-client real TCP ingress smoke.
-// Run separately from src/serve_reverse.ores with NET permission for
+// AttoLang-only external-client real TCP ingress smoke.
+// Run separately from src/serve_reverse.atto with NET permission for
 // 127.0.0.1:8080. It verifies HTTP status lines, NOT upstream forwarding.
 // Configuration example expects Host api.example.test and x-internal-token.
 pub async routine main(): int {
@@ -50,6 +50,6 @@ pub async routine main(): int {
     stdio.println("FAIL encoded-path rejection");
     return 1;
   fi
-  stdio.println("PASS native Oreslang loopback ingress status contract");
+  stdio.println("PASS native AttoLang loopback ingress status contract");
   return 0;
 }

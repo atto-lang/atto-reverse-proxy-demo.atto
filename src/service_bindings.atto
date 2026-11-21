@@ -1,4 +1,4 @@
-// Workerd-inspired symbolic service binding compiler, native Oreslang only.
+// Workerd-inspired symbolic service binding compiler, native AttoLang only.
 // NOT a network/socket capability and NOT an ActorRef. The trusted supervisor
 // must resolve every YAML target through a pre-approved code-image registry.
 // Registry entries are trusted runtime state; YAML cannot create or widen them.

@@ -1,4 +1,4 @@
-// Small, strict Oreslang-only HTTP/1.1 admission boundary.
+// Small, strict AttoLang-only HTTP/1.1 admission boundary.
 // Not a full wire parser: the eventual transport must verify CRLF framing,
 // header multiplicity, limits, transfer coding and normalized authority BEFORE
 // passing these extracted request-line and Host values to this module.

@@ -5,9 +5,11 @@ on:
       # Any transitive admission/policy change can alter actor wire behavior.
       - 'src/**'
       - 'config/**'
-      - 'tests/actor_ingress_tcp_smoke.ores'
+      - 'tests/actor_ingress_tcp_smoke.atto'
       - 'ci/verify_actor_dispatch_receipts.sh'
       - 'ci/test_actor_dispatch_receipts.sh'
+      - 'ci/test_raw_http_ingress.py'
+      - 'ci/verify_raw_probe_receipts.py'
       - 'ci/sourcefree_proxy_audit.py'
       - '.github/workflows/actor-ingress-wire.yml'
   workflow_dispatch:
@@ -60,16 +62,16 @@ jobs:
           jdk_spec="$(java -XshowSettings:properties -version 2>&1 | sed -nE 's/^[[:space:]]*java\.specification\.version[[:space:]]*=[[:space:]]*([^[:space:]]+).*$/\1/p' | head -n 1)"
           test "$jdk_spec" = 25 || { echo 'JDK 25 required' >&2; exit 1; }
           launcher="$(type -P oreslang || true)"
-          test -n "$launcher" || { echo 'missing Oreslang launcher' >&2; exit 1; }
+          test -n "$launcher" || { echo 'missing AttoLang launcher' >&2; exit 1; }
           launcher="$(readlink -f -- "$launcher")"
           test -f "$launcher" && test -x "$launcher"
           if [[ ! "${APPROVED_ORESLANG_SHA256:-}" =~ ^[0-9a-fA-F]{64}$ ]]; then
-            echo 'missing administrator-approved Oreslang SHA-256' >&2
+            echo 'missing administrator-approved AttoLang SHA-256' >&2
             exit 1
           fi
           actual_sha="$(sha256sum -- "$launcher" | cut -d ' ' -f 1)"
           printf 'oreslang_path=%s\noreslang_sha256=%s\n' "$launcher" "$actual_sha"
-          test "$actual_sha" = "${APPROVED_ORESLANG_SHA256,,}" || { echo 'unapproved Oreslang launcher' >&2; exit 1; }
+          test "$actual_sha" = "${APPROVED_ORESLANG_SHA256,,}" || { echo 'unapproved AttoLang launcher' >&2; exit 1; }
           echo 'oreslang_approved_digest=true'
           # A private wrapper rechecks the administrator-approved digest on each exec.
           test -n "${RUNNER_TEMP:-}" && test -n "${GITHUB_RUN_ID:-}" && test -n "${GITHUB_RUN_ATTEMPT:-}"
@@ -82,7 +84,7 @@ jobs:
           printf '%s\n' \
             'test -f "$launcher" && test -x "$launcher" || exit 1' \
             'actual_sha="$(/usr/bin/sha256sum -- "$launcher" | /usr/bin/cut -d " " -f 1)"' \
-            'test "$actual_sha" = "$expected_sha" || { echo "approved Oreslang launcher changed" >&2; exit 1; }' \
+            'test "$actual_sha" = "$expected_sha" || { echo "approved AttoLang launcher changed" >&2; exit 1; }' \
             'exec "$launcher" "$@"' >> "$wrapper"
           chmod 700 "$wrapper"
           if timeout 15s "$wrapper" --build-info; then
@@ -92,17 +94,17 @@ jobs:
           elif timeout 15s "$wrapper" --help; then
             echo 'oreslang_probe=--help'
           else
-            echo 'bounded Oreslang launcher probes failed' >&2
+            echo 'bounded AttoLang launcher probes failed' >&2
             exit 1
           fi
-          "$wrapper" --check src/serve_reverse.ores
-          "$wrapper" --check tests/actor_ingress_tcp_smoke.ores
+          "$wrapper" --check src/serve_reverse.atto
+          "$wrapper" --check tests/actor_ingress_tcp_smoke.atto
           # Host-only synthetic checks do not establish guest native success.
           /bin/bash -n ci/verify_actor_dispatch_receipts.sh
           /bin/bash -n ci/test_actor_dispatch_receipts.sh
           /usr/bin/env -i PATH=/usr/bin:/bin LC_ALL=C /bin/bash --noprofile --norc \
             ci/test_actor_dispatch_receipts.sh ci/verify_actor_dispatch_receipts.sh
-      - name: Real native Oreslang actor HTTP exchange over loopback
+      - name: Real native AttoLang actor HTTP exchange over loopback
         shell: bash
         env:
           APPROVED_ORESLANG_SHA256: ${{ vars.ORESLANG_APPROVED_SHA256 }}
@@ -111,11 +113,11 @@ jobs:
           # Revalidate the executable in the same step as real-wire execution.
           # An earlier step's PATH lookup cannot authorize later invocations.
           launcher="$(type -P oreslang || true)"
-          test -n "$launcher" || { echo 'missing Oreslang launcher' >&2; exit 1; }
+          test -n "$launcher" || { echo 'missing AttoLang launcher' >&2; exit 1; }
           launcher="$(readlink -f -- "$launcher")"
-          test -f "$launcher" && test -x "$launcher" || { echo 'invalid Oreslang launcher' >&2; exit 1; }
+          test -f "$launcher" && test -x "$launcher" || { echo 'invalid AttoLang launcher' >&2; exit 1; }
           if [[ ! "${APPROVED_ORESLANG_SHA256:-}" =~ ^[0-9a-fA-F]{64}$ ]]; then
-            echo 'missing administrator-approved Oreslang SHA-256' >&2
+            echo 'missing administrator-approved AttoLang SHA-256' >&2
             exit 1
           fi
           actual_sha="$(sha256sum -- "$launcher" | cut -d ' ' -f 1)"
@@ -123,14 +125,14 @@ jobs:
           printf 'real_wire_oreslang_path=%s\nreal_wire_oreslang_sha256=%s\n' "$launcher" "$actual_sha"
           # Reuse the digest-checking wrapper, not PATH, for both server and client.
           wrapper="$RUNNER_TEMP/oreslang-wire-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/oreslang"
-          test -f "$wrapper" && test -x "$wrapper" || { echo 'verified Oreslang wrapper missing' >&2; exit 1; }
+          test -f "$wrapper" && test -x "$wrapper" || { echo 'verified AttoLang wrapper missing' >&2; exit 1; }
           export ores_proxy_conf_yaml="$GITHUB_WORKSPACE/config/worker-example.yaml"
           log="$RUNNER_TEMP/reverse-actor-ingress.log"
           # Only predeclared loopback is reachable. Do not grant --allow-all.
           "$wrapper" --no-prompt --allow-net=127.0.0.1:8080 \
             --allow-read="$ores_proxy_conf_yaml" \
             --allow-env=ores_proxy_conf_yaml \
-            src/serve_reverse.ores >"$log" 2>&1 &
+            src/serve_reverse.atto >"$log" 2>&1 &
           server_pid=$!
           # Termination is bounded even when a damaged actor ignores SIGTERM.
           cleanup() {
@@ -161,12 +163,16 @@ jobs:
           done
           if test "$ready" != 1; then
             cat "$log"
-            echo "Oreslang server did not bind within bounded readiness window" >&2
+            echo "AttoLang server did not bind within bounded readiness window" >&2
             exit 1
           fi
           timeout --signal=TERM --kill-after=5s 30s \
             "$wrapper" --no-prompt --allow-net=127.0.0.1:8080 \
-            tests/actor_ingress_tcp_smoke.ores
+            tests/actor_ingress_tcp_smoke.atto
           # Assert exact handoff counts after the bounded real-wire client exits.
           /bin/bash --noprofile --norc ci/verify_actor_dispatch_receipts.sh "$log"
+          python3 ci/test_raw_http_ingress.py --port 8080
+          # Count actor claims again AFTER the raw malformed requests.
+          # Only two extra canonical Hello requests may reach the actor.
+          python3 ci/verify_raw_probe_receipts.py "$log"
           cat "$log"

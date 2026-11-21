@@ -130,6 +130,39 @@ pub routine main(): int {
     stdio.println("FAIL duplicate trusted actor target"); return 1;
   fi
 
+
+  // Public dispatch must reject mismatched targets and routes regardless of
+  // the presence of a code image in the otherwise trusted registry.
+  if service_bindings.reverse_route(rt borrow old, rt borrow trusted,
+      "other.example.test", "/ok").is_ok() ||
+    service_bindings.local_dispatch_allowed(rt borrow old_bind,
+      rt borrow old, "api-net") ||
+    service_bindings.local_dispatch_allowed(rt borrow old_bind,
+      rt borrow old, "") ||
+    service_bindings.local_dispatch_allowed(rt borrow old_bind,
+      rt borrow updated, "api-v1"); then
+    stdio.println("FAIL reverse route/dispatch identity fence"); return 1;
+  fi
+  val privileged_bind = service_bindings.bind(rt borrow net_snapshot,
+    rt borrow trusted, "api-service");
+  if privileged_bind.is_err(); then
+    stdio.println("FAIL internal registry lookup fixture"); return 1;
+  fi
+  val privileged_descriptor = privileged_bind.unwrap();
+  if !privileged_descriptor.network_capable ||
+    service_bindings.local_dispatch_allowed(rt borrow privileged_descriptor,
+      rt borrow net_snapshot, "api-net"); then
+    stdio.println("FAIL network-capable actor reached public dispatch"); return 1;
+  fi
+  let Array<service_bindings.CodeImage> none =
+    new Array<service_bindings.CodeImage>();
+  let Array<service_bindings.CodeImage> malformed =
+    new Array<service_bindings.CodeImage>();
+  malformed.add(new service_bindings.CodeImage("../untrusted", "abi-v1", false));
+  if service_bindings.registry(none).is_ok() ||
+    service_bindings.registry(malformed).is_ok(); then
+    stdio.println("FAIL empty or malformed supervisor code-image registry"); return 1;
+  fi
   stdio.println("PASS trusted reverse service binding contract (no network authority)");
   return 0;
 }

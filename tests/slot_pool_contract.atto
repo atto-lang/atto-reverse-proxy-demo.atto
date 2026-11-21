@@ -1,4 +1,4 @@
-// Bounded multi-slot Oreslang pool, backpressure, stale and cross-slot tests.
+// Bounded multi-slot AttoLang pool, backpressure, stale and cross-slot tests.
 // Pure single-owner snapshots only; no concurrent network execution.
 import module slot_pool from "../src/slot_pool";
 
