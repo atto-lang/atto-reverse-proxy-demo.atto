@@ -20,7 +20,11 @@ from a YAML string.
 `kind: actor` and `target`. All three identifiers are ASCII lower-case,
 digits/hyphens only; every referenced service must exist. Duplicate names,
 missing fields, unsupported kinds, whitespace, path escapes and arbitrary URL
-bindings fail. `src/service_bindings.ores` now also requires a supervisor-owned trusted code-image registry before a YAML target can bind. YAML cannot register a code image or widen its capability manifest. The result remains an immutable, generation-scoped **symbolic descriptor**, not a runtime ActorRef or network grant.
+bindings fail. `src/service_bindings.ores` now also requires a
+supervisor-owned trusted code-image registry before a YAML target can bind.
+YAML cannot register a code image or widen its capability manifest. The result
+remains an immutable, generation-scoped **symbolic descriptor**, not a runtime
+ActorRef or network grant.
 
 The opt-in `src/serve_reverse.ores` now contains exactly ONE trusted local
 code-image binding: `hello-v1` -> `HelloV1` HTTP actor pool.
@@ -46,7 +50,8 @@ and an elementary failure-threshold circuit-breaker with cooldown. These are
 reference calculations, **not** shared HAProxy stick tables, production-wide
 rate limits or live latency sensors. Half-open admits MUST require an
 exclusive supervisor-issued probe lease before network integration.
-Generation changes intentionally reset counters, and monotonic time is provided by a trusted caller, never derived from a request header.
+Generation changes intentionally reset counters, and monotonic time is
+provided by a trusted caller, never derived from a request header.
 
 `src/network_admission.ores` composes the current request-slot lease, immutable configuration epoch, rate decision, breaker state, selected reverse origin, and a trusted resolver/network-policy classification before any future outbound transport. Its permit objects are proof descriptors only; the transport must not treat them as dial authority.
 
@@ -95,3 +100,30 @@ Sources: https://github.com/cloudflare/workerd ,
 https://github.com/cloudflare/workerd/blob/main/src/workerd/server/workerd.capnp ,
 https://nginx.org/en/docs/http/load_balancing.html ,
 https://www.haproxy.com/documentation/
+
+## Declarative weighted upstream pools (second vertical slice)
+
+`config/backend-example.yaml` demonstrates end-user YAML `backends:` with
+`name`, `pool`, `origin` and `weight`. For the provisional v1 format,
+weights are restricted to **1, 2, 3, 4, 5, or 10**; max 128 backends.
+Duplicate names or duplicate origin within a pool fail admission. An Oreslang
+reverse route can reference `pool://api`; dangling pools are rejected.
+
+`src/backend_pools.ores` compiles that YAML to the existing
+`load_balancer.choose` policy. Supported planned choices are
+`weighted-round-robin` (deterministic block-weighted rotation) and
+`least-active` (which defaults to choosing the first configured node in
+this **static** plan, because no live in-flight counters exist yet).
+This returns an untrusted **decision descriptor**, not an authenticated
+network connection. The current experimental reverse HTTP ingress returns
+501 for these pool routes, not a counterfeit upstream response. The forward
+proxy accepts backend declarations but does not route CONNECT through them.
+
+A production implementation must additionally implement all of:
+(1) resolved-address and certificate identity pinning; (2) egress-scoped
+capability minting by the trusted supervisor; (3) actor-owned atomic backend
+credit/reservation and exact-once release; (4) bounded connection pools and
+HTTP/1.1+2 framing; (5) health/probe and failover policy; (6) retries only
+for idempotent requests before headers commit; (7) streamed bodies with
+backpressure and request-generation pins. No such capability is inferred
+from a syntactically valid YAML origin.

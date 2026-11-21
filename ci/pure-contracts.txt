@@ -1,3 +1,4 @@
+tests/backend_pools_contract.ores
 tests/data_layout_contract.ores
 tests/generation_contract.ores
 tests/header_policy_contract.ores

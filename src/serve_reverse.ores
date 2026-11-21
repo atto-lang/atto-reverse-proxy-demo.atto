@@ -55,8 +55,8 @@ pub async routine main(): int {
   val config = parsed.unwrap();
   val snapshot = new generation.Snapshot(1, config);
 
-  // Trusted runtime registry: YAML may refer to hello-v1 but cannot create it,
-  // select another code image, or grant it ambient network authority.
+  // Trusted code-image registry is independent of YAML service declarations.
+  // No configured target can create an actor image or grant network authority.
   let Array<service_bindings.CodeImage> trusted_images =
     new Array<service_bindings.CodeImage>();
   trusted_images.add(new service_bindings.CodeImage(
@@ -101,6 +101,7 @@ pub async routine main(): int {
     fi
     val target = matched.unwrap();
     if !proxy_yaml.valid_service_ref(target.upstream) &&
+      !proxy_yaml.valid_pool_ref(target.upstream) &&
       proxy_wire.upstream_origin(target.upstream).is_err(); then
       await exchange.respond(502, "text/plain; charset=utf-8", "Invalid upstream origin");
       continue;
@@ -148,10 +149,9 @@ pub async routine main(): int {
         continue;
       fi
       val actor_binding = bound.unwrap();
-      // Re-check generation, exact code image and no-NET authority at the
-      // final supervisor-to-actor handoff. This is the caller half of the
-      // double-entry fence; the runtime still needs typed actor-owned receipt
-      // metadata so the pooled actor can independently verify the same facts.
+      // Re-check the generation, exact code image and no-NET invariant at the
+      // final supervisor-to-actor handoff. The runtime still owes the matching
+      // actor-local receipt check once typed http.handler metadata is available.
       if service_bindings.local_dispatch_allowed(rt borrow actor_binding,
           rt borrow snapshot, "hello-v1"); then
         hello.dispatch(exchange);

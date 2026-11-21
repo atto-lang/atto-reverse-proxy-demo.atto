@@ -3,9 +3,11 @@ on:
   push:
     branches:
       - feat/worker-service-bindings-20261023
+      - feat/yaml-backend-pools-20261023
   pull_request:
     branches:
       - audit/strict-proxy-boundaries-20261022
+      - feat/worker-service-bindings-20261023
 permissions:
   contents: read
 concurrency:

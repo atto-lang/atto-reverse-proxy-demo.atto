@@ -1,4 +1,5 @@
 src/admission_text.ores
+src/backend_pools.ores
 src/config_path.ores
 src/data_layout.ores
 src/generation.ores
@@ -17,6 +18,7 @@ src/slot_lifecycle.ores
 src/slot_pool.ores
 src/traffic_controls.ores
 tests/actor_ingress_tcp_smoke.ores
+tests/backend_pools_contract.ores
 tests/data_layout_contract.ores
 tests/generation_contract.ores
 tests/header_policy_contract.ores

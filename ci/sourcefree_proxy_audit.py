@@ -151,6 +151,34 @@ def source_guards() -> None:
           "negative deny and required-header pre-dial regressions retained")
 
 
+    pools = read("src/backend_pools.ores")
+    check('define module backend_pools as' in pools and
+          'load_balancer.choose' in pools and 'valid_upstream_origin' in pools,
+          "backend selection remains a validated per-generation plan")
+    check("network.connect" not in pools and "http.request" not in pools,
+          "backend selection cannot grant transport or socket authority")
+    check("pub val int epoch;" in pools
+          and "pub fnc current(borrow Plan plan" in pools
+          and "return plan.epoch == snapshot.epoch;" in pools,
+          "reverse pool plans carry explicit generation identity")
+    pool_contract = read("tests/backend_pools_contract.ores")
+    check("FAIL stale pool plan generation fence" in pool_contract
+          and "backend_pools.current(rt borrow direct_plan" in pool_contract
+          and "backend_pools.current(rt borrow newer_plan" in pool_contract,
+          "native pool contract rejects stale generation plans")
+    check('if route.middleware != ""; then' in pools and
+          'return Err("middleware receipt required before reverse pool planning");' in pools,
+          "middleware-bearing reverse pools fail closed before planning")
+    check("FAIL pool plan bypassed deny middleware" in read("tests/backend_pools_contract.ores")
+          and "FAIL pool plan bypassed required header" in read("tests/backend_pools_contract.ores"),
+          "deny and required-header pool negative fixtures retained")
+    pool_tests = read("tests/backend_pools_contract.ores")
+    check("weighted-round-robin" in pool_tests and
+          "FAIL deterministic backend rotation" in pool_tests and
+          "FAIL unknown backend pool" in pool_tests,
+          "weighted pool native contract and negative cases retained")
+
+
 def workflow_guards() -> None:
     wf = read(".github/workflows/native-contracts.yml")
     check("actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09" in wf

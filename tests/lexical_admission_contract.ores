@@ -99,12 +99,15 @@ pub routine main(): int {
   }
   let mut Array<proxy_yaml.Middleware> rules = new Array<proxy_yaml.Middleware>();
   rules.add(new proxy_yaml.Middleware("forged", "unknown", ""));
-  // Match the nominal Config fields: 9 scalars, middleware, routes, services.
+  // The full nominal Config shape also includes service and backend
+  // collections. A forged policy fixture must not silently use an obsolete
+  // constructor after schema evolution.
   val forged = new proxy_yaml.Config(
     "forward", "127.0.0.1", "8080", "20", "100", "1024",
     "true", "example.test", "443", rules,
     new Array<proxy_yaml.Route>(),
-    new Array<proxy_yaml.Service>()
+    new Array<proxy_yaml.Service>(),
+    new Array<proxy_yaml.Backend>()
   );
   if middleware_policy.evaluate(rt borrow forged, "forged", "", "").is_ok(); then
     stdio.println("FAIL forged unknown middleware kind"); return 1;

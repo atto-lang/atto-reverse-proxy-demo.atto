@@ -1,0 +1,81 @@
+// Compile a YAML backend pool into an immutable per-generation choice plan.
+// No DNS lookup, network capability, live health probing or socket admission.
+// Runtime ownership: a trusted actor later applies live health/active quotas,
+// then binds the chosen origin to a separately authorized egress capability.
+import module generation from "./generation";
+import module proxy_yaml from "./proxy_yaml";
+import module route_policy from "./route_policy";
+import module load_balancer from "./load_balancer";
+
+define module backend_pools as
+  // Generation-pinned routing plan. This is deliberately not a network
+  // capability; a transport must still obtain fresh admission for this epoch.
+  pub define class Plan as
+    pub val int epoch;
+    pub val String name;
+    pub val String origin;
+    pub val int index;
+    pub val int next_cursor;
+  end
+
+  pub fnc current(borrow Plan plan, borrow generation.Snapshot snapshot): bool {
+    return plan.epoch == snapshot.epoch;
+  }
+
+  fnc weight(String text): int {
+    if text == "1"; then return 1; fi
+    if text == "2"; then return 2; fi
+    if text == "3"; then return 3; fi
+    if text == "4"; then return 4; fi
+    if text == "5"; then return 5; fi
+    if text == "10"; then return 10; fi
+    return 0;
+  }
+
+  pub fnc choose(borrow generation.Snapshot snapshot, String pool,
+                 String algorithm, int cursor): Result<load_balancer.Choice, String> {
+    if !proxy_yaml.valid_identifier(pool); then
+      return Err("invalid pool identifier");
+    fi
+    let Array<load_balancer.Backend> entries = new Array<load_balancer.Backend>();
+    for (const entry of snapshot.configuration.backends) {
+      if entry.pool == pool; then
+        val int w = weight(entry.weight);
+        if w == 0 || !proxy_yaml.valid_upstream_origin(entry.origin); then
+          return Err("invalid backend origin or weight");
+        fi
+        entries.add(new load_balancer.Backend(entry.name,
+          entry.origin, w, 0, true, false));
+      fi
+    }
+    // The weights are used for a *stateless planned rotation*, not actual
+    // TCP load balancing: live in-flight counts and health are not wired.
+    return load_balancer.choose(entries, algorithm, cursor);
+  }
+
+  pub fnc reverse_route(borrow generation.Snapshot snapshot,
+                        String host, String path, String algorithm, int cursor):
+      Result<Plan, String> {
+    if snapshot.configuration.mode != "reverse"; then
+      return Err("pool route only valid for reverse proxy");
+    fi
+    val selected = route_policy.select(rt borrow snapshot.configuration, host, path);
+    if selected.is_err(); then return Err("unknown reverse route"); fi
+    val route = selected.unwrap();
+    // A pool choice is a plan, never a middleware authorization receipt.
+    // Until an opaque generation-pinned receipt exists, fail closed here too.
+    if route.middleware != ""; then
+      return Err("middleware receipt required before reverse pool planning");
+    fi
+    if !proxy_yaml.valid_pool_ref(route.upstream); then
+      return Err("reverse route has no pool binding");
+    fi
+    val names = route.upstream.split_literal("pool://");
+    if names.size != 2; then return Err("malformed pool reference"); fi
+    val backend_selection = choose(snapshot, names.get(1), algorithm, cursor);
+    if backend_selection.is_err(); then return Err("backend pool selection failed"); fi
+    val choice = backend_selection.unwrap();
+    return Ok(new Plan(snapshot.epoch, choice.name, choice.origin,
+      choice.index, choice.next_cursor));
+  }
+end
