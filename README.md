@@ -41,3 +41,9 @@ This README describes the demonstration's intended purpose. Current executable c
 AttoLang is the canonical project name; new source, examples and documentation use `.atto` and the `atto-lang` repository organization. This README defines scope, not feature readiness.
 
 **Acceptance:** name exact source SHA/tree, runtime/toolchain, positive and negative checks and execution receipt before claiming support. Host-only tests and empty CI steps do not prove guest execution.
+
+## Legacy migration provenance and gates
+
+The original `ores-truffle-oreslang/oreslang-reverse-proxy-demo.ores` repository is archived; the current AttoLang repository has a separate numeric GitHub ID. Historical `.ores` files and CLI/package names are compatibility history, not evidence of current `.atto` execution. Reverse proxy routing/security policy and isolation acceptance belong here; production load balancing/control planes and unsupported full-forwarding claims do not.
+
+[atto-lang](https://github.com/atto-lang) owns language, portable libraries, runtime/compiler contracts and demos; [atto-co](https://github.com/atto-co) owns managed production services, tenancy, billing and deployment. Any future original-ID transfer or commercial carve-out requires separate owner approval and security review. Inventory exact SHA/tree, numeric ID, protections, permissions, PRs, releases, packages, dependencies, runners, secrets, applications, webhooks, Pages and rollback owner; verify preservation and retest references after an actual transfer. Never mirror private code without authorization. Zero-step jobs are NOT_EXECUTED; host-only checks do not establish compiled guest execution or production networking behavior.
