@@ -9,39 +9,146 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
+      - name: Verify isolated stdlib imports before untrusted PR checkout
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Trusted inline workflow code: no PR checkout or PR-owned shell script
+          # may execute before the import-isolation probes.
+          test -x /usr/bin/python3
+          umask 077
+          tmp="$(/usr/bin/mktemp -d)"
+          trap '/usr/bin/rm -rf -- "$tmp"' EXIT
+          printf '%s\n' 'open("shadowed-tomllib", "w").close()' 'raise RuntimeError("untrusted tomllib imported")' > "$tmp/tomllib.py"
+          printf '%s\n' 'open("shadowed-pathlib", "w").close()' 'raise RuntimeError("untrusted pathlib imported")' > "$tmp/pathlib.py"
+          printf '%s\n' 'open("shadowed-sitecustomize", "w").close()' 'raise RuntimeError("untrusted startup hook")' > "$tmp/sitecustomize.py"
+          (
+            cd "$tmp"
+            PYTHONPATH="$tmp" PYTHONHOME="$tmp" /usr/bin/python3 -I - <<'PY'
+          import pathlib
+          import tomllib
+          assert callable(tomllib.loads)
+          assert pathlib.Path('.').is_dir()
+          PY
+          )
+          for marker in shadowed-tomllib shadowed-pathlib shadowed-sitecustomize; do
+            test ! -e "$tmp/$marker" || { echo "SECURITY_FAILURE: imported $marker" >&2; exit 1; }
+          done
+          echo 'SAFE_DEFAULTS_IMPORT_ISOLATION_PASS negative_vectors=3 source_free=1 native_guest=NOT_EXECUTED'
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           persist-credentials: false
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
-      - name: Validate flags-2-env admission contract
-        run: |
-          python3 - <<'PY'
-          import tomllib
-          from pathlib import Path
-          p = Path(".cli-flags.toml")
-          if p.is_symlink() or not p.is_file():
-              raise SystemExit(".cli-flags.toml must be a regular file")
-          data = tomllib.loads(p.read_text())
-          flags = data.get("flags", {})
-          if set(flags) != {"config-yaml"}:
-              raise SystemExit(f"unexpected CLI flags: {sorted(flags)}")
-          row = flags["config-yaml"]
-          if row.get("env") != "ores_proxy_conf_yaml" or row.get("type") != "string":
-              raise SystemExit("config-yaml flags-2-env contract changed")
-          if row.get("aliases") != ["config-yaml", "conf"]:
-              raise SystemExit("unexpected config aliases")
-          print("FLAGS_2_ENV_CONTRACT_PASS")
-          PY
-      - name: Validate reverse-proxy example stays loopback and protected
+      - name: Enforce exact flags-2-env fields and exercise negative fixtures
         shell: bash
         run: |
           set -euo pipefail
-          test -f config/example.yaml
-          test ! -L config/example.yaml
-          grep -Fxq 'mode: reverse' config/example.yaml
-          grep -Fxq '  host: 127.0.0.1' config/example.yaml
-          grep -Fxq '    kind: require_header' config/example.yaml
-          grep -Fxq '    header: x-internal-token' config/example.yaml
-          grep -Fxq '    upstream: http://127.0.0.1:9000' config/example.yaml
-          ! grep -Eq '(^|[[:space:]])host:[[:space:]]+(0\.0\.0\.0|::|\*)$' config/example.yaml
-          echo 'SAFE_DEFAULTS_PASS: static config only; upstream forwarding proof NOT_EXECUTED.'
+          /usr/bin/python3 -I - <<'PY'
+          import tomllib
+          from pathlib import Path
+          
+          EXPECTED_HELP = "Absolute trusted path to a proxy YAML configuration file."
+          EXPECTED_FIELDS = {"env", "aliases", "type", "help"}
+          
+          def validate(raw):
+              data = tomllib.loads(raw)
+              if set(data) != {"flags"}:
+                  raise ValueError("unreviewed top-level TOML sections")
+              flags = data["flags"]
+              if not isinstance(flags, dict) or set(flags) != {"config-yaml"}:
+                  raise ValueError("unreviewed CLI flags")
+              row = flags["config-yaml"]
+              if not isinstance(row, dict) or set(row) != EXPECTED_FIELDS:
+                  raise ValueError("unreviewed CLI option fields")
+              if (row["env"] != "ores_proxy_conf_yaml"
+                      or row["type"] != "string"
+                      or row["aliases"] != ["config-yaml", "conf"]
+                      or row["help"] != EXPECTED_HELP):
+                  raise ValueError("CLI flag admission contract changed")
+          
+          p = Path(".cli-flags.toml")
+          if p.is_symlink() or not p.is_file():
+              raise SystemExit(".cli-flags.toml must be a regular file")
+          original = p.read_text(encoding="utf-8")
+          validate(original)
+          mutations = {
+              "rogue-default": original + 'default = "/tmp/unreviewed-config.yaml"\n',
+              "rogue-extra-field": original + "unsafe = true\n",
+              "rogue-top-level": original + "[proxy]\nallow_private = true\n",
+              "rogue-new-flag": original + '[flags.bypass]\nenv = "ALLOW_ALL"\n',
+              "help-drift": original.replace(EXPECTED_HELP, "Choose any file"),
+              "env-drift": original.replace("ores_proxy_conf_yaml", "ores_proxy_config"),
+              "alias-drift": original.replace('"conf"', '"unrestricted"'),
+              "duplicate-key": original + 'env = "override"\n',
+          }
+          for label, mutated in mutations.items():
+              if mutated == original:
+                  raise SystemExit(f"TEST_FAILURE: fixture did not mutate: {label}")
+              try:
+                  validate(mutated)
+              except (ValueError, tomllib.TOMLDecodeError):
+                  continue
+              raise SystemExit(f"SECURITY_FAILURE: admitted unreviewed CLI mutation: {label}")
+          print(f"FLAGS_2_ENV_STRICT_PASS negative_fixtures={len(mutations)} source_free=1 native_guest=NOT_EXECUTED")
+          PY
+      - name: Enforce byte-exact reviewed example config and reject YAML ambiguity
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f config/example.yaml && test ! -L config/example.yaml
+          test -d "$RUNNER_TEMP"
+          umask 077
+          approved="$(/usr/bin/mktemp "$RUNNER_TEMP/reviewed-safe-example.XXXXXXXX")"
+          mutated="$(/usr/bin/mktemp "$RUNNER_TEMP/mutated-safe-example.XXXXXXXX")"
+          trap '/usr/bin/rm -f -- "$approved" "$mutated"' EXIT
+          # Exact example bytes are intentional: key-presence grep admits a
+          # second mapping/list or duplicate key with unsafe last-wins semantics.
+          # Do not mistake this fixture policy for a full YAML parser.
+          /usr/bin/cat > "$approved" <<'SAFE_EXAMPLE_REVIEWED_BYTES'
+          version: ores.proxy/v1
+          mode: reverse
+          listen:
+            host: 127.0.0.1
+            port: 8080
+          runtime:
+            carriers: 20
+            actors: 100
+            max_inflight: 1024
+          middleware:
+            - name: trace
+              kind: trace
+            - name: protected
+              kind: require_header
+              header: x-internal-token
+          routes:
+            - name: api
+              host: api.example.test
+              path_prefix: /api
+              upstream: http://127.0.0.1:9000
+              middleware: trace,protected
+          SAFE_EXAMPLE_REVIEWED_BYTES
+          if ! /usr/bin/cmp -s -- "$approved" config/example.yaml; then
+            echo 'SECURITY_FAILURE: example config differs from reviewed safe template' >&2
+            exit 1
+          fi
+          # Adversarial duplicate mapping keys: former grep checks accepted
+          # the safe occurrences while a last-wins YAML reader could replace them.
+          /usr/bin/cp -- "$approved" "$mutated"
+          /usr/bin/cat >> "$mutated" <<'UNSAFE_DUPLICATE_YAML'
+          listen:
+            host: 192.0.2.123
+          routes:
+            - name: api
+              upstream: http://169.254.169.254/
+          UNSAFE_DUPLICATE_YAML
+          if /usr/bin/cmp -s -- "$approved" "$mutated"; then
+            echo 'SECURITY_FAILURE: unsafe duplicate YAML block admitted' >&2
+            exit 1
+          fi
+          /usr/bin/cp -- "$approved" "$mutated"
+          /usr/bin/printf '\r' >> "$mutated"
+          if /usr/bin/cmp -s -- "$approved" "$mutated"; then
+            echo 'SECURITY_FAILURE: noncanonical CR byte admitted' >&2
+            exit 1
+          fi
+          echo 'SAFE_DEFAULTS_TEMPLATE_PASS duplicate_mapping=REJECTED cr_byte=REJECTED source_free=1 native_guest=NOT_EXECUTED'
