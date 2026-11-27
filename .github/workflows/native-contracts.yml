@@ -26,31 +26,58 @@ jobs:
           java-version: '25'
       - name: Confirm native compiler availability
         run: command -v oreslang
-      - name: Compiler-check entrypoint
-        run: oreslang --check src/main.ores
-      - name: Compiler-check configuration path admission
-        run: oreslang --check src/config_path.ores
-      - name: Compiler-check YAML parser
-        run: oreslang --check src/proxy_yaml.ores
-      - name: Compiler-check routing policy
-        run: oreslang --check src/route_policy.ores
-      - name: Compiler-check middleware policy
-        run: oreslang --check src/middleware_policy.ores
-      - name: Compiler-check generation coordinator
-        run: oreslang --check src/generation.ores
-      - name: Compiler-check native YAML contract
-        run: oreslang --check tests/yaml_policy_contract.ores
-      - name: Compiler-check native generation contract
-        run: oreslang --check tests/generation_contract.ores
-      - name: Compiler-check native middleware contract
-        run: oreslang --check tests/middleware_generation_contract.ores
-      - name: Compiler-check canonical path contract
-        run: oreslang --check tests/path_admission_contract.ores
-      - name: Execute canonical configuration path contract
-        run: oreslang tests/path_admission_contract.ores
-      - name: Execute YAML / routing / policy contract
-        run: oreslang tests/yaml_policy_contract.ores
-      - name: Execute generation epoch / rollback contract
-        run: oreslang tests/generation_contract.ores
-      - name: Execute independent middleware snapshot contract
-        run: oreslang tests/middleware_generation_contract.ores
+      - name: Fail on native contract inventory drift
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -z "$(find src tests -type l -print -quit)"
+          test "$(find src -maxdepth 1 -type f -name '*.ores' | wc -l)" -eq 13
+          test "$(find tests -maxdepth 1 -type f -name '*.ores' | wc -l)" -eq 11
+      - name: Compiler-check all native proxy sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          oreslang --check src/main.ores
+          oreslang --check src/config_path.ores
+          oreslang --check src/proxy_yaml.ores
+          oreslang --check src/route_policy.ores
+          oreslang --check src/middleware_policy.ores
+          oreslang --check src/generation.ores
+          oreslang --check src/data_layout.ores
+          oreslang --check src/header_policy.ores
+          oreslang --check src/middleware_manifest.ores
+          oreslang --check src/proxy_wire.ores
+          oreslang --check src/slot_lifecycle.ores
+          oreslang --check src/slot_pool.ores
+          oreslang --check src/serve_reverse.ores
+      - name: Compiler-check all native contract sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          oreslang --check tests/path_admission_contract.ores
+          oreslang --check tests/yaml_policy_contract.ores
+          oreslang --check tests/generation_contract.ores
+          oreslang --check tests/middleware_generation_contract.ores
+          oreslang --check tests/data_layout_contract.ores
+          oreslang --check tests/header_policy_contract.ores
+          oreslang --check tests/middleware_manifest_contract.ores
+          oreslang --check tests/slot_lifecycle_contract.ores
+          oreslang --check tests/slot_pool_contract.ores
+          oreslang --check tests/wire_contract.ores
+          oreslang --check tests/ingress_tcp_smoke.ores
+      - name: Execute all pure native proxy contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          oreslang tests/path_admission_contract.ores
+          oreslang tests/yaml_policy_contract.ores
+          oreslang tests/generation_contract.ores
+          oreslang tests/middleware_generation_contract.ores
+          oreslang tests/data_layout_contract.ores
+          oreslang tests/header_policy_contract.ores
+          oreslang tests/middleware_manifest_contract.ores
+          oreslang tests/slot_lifecycle_contract.ores
+          oreslang tests/slot_pool_contract.ores
+          oreslang tests/wire_contract.ores
+      - name: Preserve live-ingress execution boundary
+        run: echo 'ingress_tcp_smoke.ores is compiler-checked only; no listener is started in this gate.'
