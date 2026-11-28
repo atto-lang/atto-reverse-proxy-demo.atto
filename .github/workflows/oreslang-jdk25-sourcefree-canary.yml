@@ -1,0 +1,94 @@
+name: Oreslang JDK25 source-free runner canary
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/oreslang-jdk25-sourcefree-canary.yml'
+  workflow_dispatch:
+# No checkout, GitHub API, artifacts, or repository token is needed.
+permissions: {}
+jobs:
+  canary:
+    # Pin immutable repo identity before reserving a trusted self-hosted runner.
+    # A matching repo name or fork-controlled PR payload is insufficient.
+    if: >-
+      (github.event_name == 'pull_request' &&
+       github.event.repository.id == 1429954649 &&
+       github.event.pull_request.head.repo.id == 1429954649 &&
+       github.event.pull_request.base.repo.id == 1429954649 &&
+       github.event.pull_request.head.repo.full_name == github.repository &&
+       github.event.pull_request.base.ref == 'main') ||
+      (github.event_name == 'workflow_dispatch' &&
+       github.event.repository.id == 1429954649 &&
+       github.ref == 'refs/heads/main')
+    runs-on: [self-hosted, linux, x64, oreslang-jdk25]
+    timeout-minutes: 5
+    steps:
+      - name: Record trusted runner and source identity
+        shell: bash
+        env:
+          EXPECTED_REPOSITORY: ${{ github.repository }}
+          APPROVED_REPOSITORY_ID: '1429954649'
+          EVENT_REPOSITORY_ID: ${{ github.event.repository.id }}
+          EVENT_HEAD_REPO_ID: ${{ github.event.pull_request.head.repo.id }}
+          EVENT_BASE_REPO_ID: ${{ github.event.pull_request.base.repo.id }}
+          EVENT_NAME: ${{ github.event_name }}
+          EXPECTED_PR_HEAD: ${{ github.event.pull_request.head.sha }}
+          WORKFLOW_RUN_ID: ${{ github.run_id }}
+          WORKFLOW_RUN_ATTEMPT: ${{ github.run_attempt }}
+        run: |
+          set -euo pipefail
+          test "$EVENT_REPOSITORY_ID" = "$APPROVED_REPOSITORY_ID" || { echo 'unexpected event repository ID' >&2; exit 1; }
+          if [[ "$EVENT_NAME" == 'pull_request' ]]; then
+            test "$EVENT_HEAD_REPO_ID" = "$APPROVED_REPOSITORY_ID" || { echo 'unexpected PR head repository ID' >&2; exit 1; }
+            test "$EVENT_BASE_REPO_ID" = "$APPROVED_REPOSITORY_ID" || { echo 'unexpected PR base repository ID' >&2; exit 1; }
+          fi
+          test -n "${RUNNER_NAME:-}" || { echo 'missing runner name' >&2; exit 1; }
+          test "${RUNNER_OS:-}" = Linux
+          test "${RUNNER_ARCH:-}" = X64
+          test "$(uname -m)" = x86_64
+          printf 'runner_name=%s\nrunner_os=%s\nrunner_arch=%s\n' "$RUNNER_NAME" "$RUNNER_OS" "$RUNNER_ARCH"
+          printf 'repository=%s\nrepository_id=%s\npr_head_sha=%s\nrun_id=%s\nrun_attempt=%s\n' "$EXPECTED_REPOSITORY" "$EVENT_REPOSITORY_ID" "$EXPECTED_PR_HEAD" "$WORKFLOW_RUN_ID" "$WORKFLOW_RUN_ATTEMPT"
+          uname -a
+      - name: Verify installed JDK major 25
+        shell: bash
+        run: |
+          set -euo pipefail
+          java -version
+          spec="$(java -XshowSettings:properties -version 2>&1 | sed -nE 's/^[[:space:]]*java\.specification\.version[[:space:]]*=[[:space:]]*([^[:space:]]+).*$/\1/p' | head -n 1)"
+          test "$spec" = "25" || { printf 'JDK 25 required, found java.specification.version=%s\n' "${spec:-missing}" >&2; exit 1; }
+          printf 'jdk_specification_version=%s\n' "$spec"
+      - name: Verify resolved Oreslang launcher and bounded invocation
+        shell: bash
+        env:
+          # Set by the trusted repo/org administrator, never from PR source.
+          APPROVED_ORESLANG_SHA256: ${{ vars.ORESLANG_APPROVED_SHA256 }}
+        run: |
+          set -euo pipefail
+          launcher="$(type -P oreslang || true)"
+          test -n "$launcher" || { echo 'oreslang not on PATH' >&2; exit 1; }
+          launcher="$(readlink -f -- "$launcher")"
+          test -f "$launcher" && test -x "$launcher" || { echo 'oreslang is not an executable regular file' >&2; exit 1; }
+          printf 'oreslang_path=%s\n' "$launcher"
+          # A printed hash alone does not prove this is the approved runtime.
+          # Require an administrator-provisioned exact digest, fail closed.
+          if [[ ! "${APPROVED_ORESLANG_SHA256:-}" =~ ^[0-9a-fA-F]{64}$ ]]; then
+            echo 'missing or invalid ORESLANG_APPROVED_SHA256 repository/org variable' >&2
+            exit 1
+          fi
+          actual_sha256="$(sha256sum -- "$launcher" | cut -d ' ' -f 1)"
+          printf 'oreslang_sha256=%s\n' "$actual_sha256"
+          if [[ "$actual_sha256" != "${APPROVED_ORESLANG_SHA256,,}" ]]; then
+            echo 'oreslang binary digest differs from approved runtime' >&2
+            exit 1
+          fi
+          echo 'oreslang_digest_verified=true'
+          if timeout 15s "$launcher" --version; then
+            echo 'oreslang_probe=--version'
+          elif timeout 15s "$launcher" --build-info; then
+            echo 'oreslang_probe=--build-info'
+          elif timeout 15s "$launcher" --help; then
+            echo 'oreslang_probe=--help'
+          else
+            echo 'oreslang launcher failed all bounded probes' >&2
+            exit 1
+          fi
