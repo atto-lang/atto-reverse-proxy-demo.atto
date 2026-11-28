@@ -2,28 +2,100 @@ name: Reverse proxy source contracts
 on:
   pull_request:
   workflow_dispatch:
-permissions:
-  contents: read
+permissions: {}
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 jobs:
   inventory:
+    # Hosted, read-only source audit. Never authorize fork input or any
+    # self-hosted runner from this PR-head contract.
+    if: >-
+      (github.event_name == 'pull_request' &&
+       github.event.pull_request.head.repo.id == 1429954649 &&
+       github.event.pull_request.base.repo.id == 1429954649)
+      || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.ref_protected == true)
     runs-on: ubuntu-24.04
     timeout-minutes: 5
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           persist-credentials: false
+          submodules: false
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
-      - name: Verify exact source tree
+      - name: Verify exact source head and tree
         shell: bash
         env:
-          EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          EXPECTED_DEMO_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
-      - name: Reject missing, empty or linked contract inputs
+          [[ "$EXPECTED_DEMO_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$(git rev-parse HEAD)" == "$EXPECTED_DEMO_SHA" ]]
+          [[ -z "$(git status --porcelain)" ]]
+          printf 'EXACT_DEMO_HEAD=%s\n' "$EXPECTED_DEMO_SHA"
+          printf 'EXACT_DEMO_TREE=%s\n' "$(git rev-parse HEAD^{tree})"
+      - name: Reject resurrection of legacy PR-head native workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          # No self-hosted runner or guest invoked. Same admission function is applied
+          # to current HEAD and isolated clean/mutated Git fixtures.
+          legacy='.github/workflows/native-contracts.yml'
+          expected_blob='4f167ddefc97fcead03723f6b7f109663040942e'
+          verify_retired() {
+            local root="$1" file="$legacy" mode actual committed
+            test -f "$root/$file" && test ! -L "$root/$file" || return 1
+            mode="$(/usr/bin/git -C "$root" ls-files --stage -- "$file")" || return 1
+            [[ "$mode" == '100644 '* ]] || return 1
+            actual="$(/usr/bin/git -C "$root" hash-object --no-filters -- "$file")" || return 1
+            committed="$(/usr/bin/git -C "$root" rev-parse "HEAD:$file")" || return 1
+            [[ "$actual" == "$expected_blob" && "$committed" == "$expected_blob" ]]
+          }
+          verify_retired "$GITHUB_WORKSPACE" || {
+            echo 'SECURITY_FAILURE: legacy native workflow missing, linked, or resurrected' >&2
+            exit 1
+          }
+          echo "LEGACY_NATIVE_WORKFLOW_RETIRED reviewed_blob=$expected_blob"
+          # Real adversarial fixture: a committed broad self-hosted workflow must be
+          # refused, as must uncommitted replacement, symlink, and missing file.
+          test -d "$RUNNER_TEMP"
+          fixture="$(/usr/bin/mktemp -d -- "$RUNNER_TEMP/legacy-native-negative.XXXXXX")"
+          trap '/usr/bin/rm -rf -- "$fixture"' EXIT
+          /usr/bin/git -C "$fixture" init -q
+          /usr/bin/mkdir -p -- "$fixture/.github/workflows"
+          /usr/bin/cp -- "$GITHUB_WORKSPACE/$legacy" "$fixture/$legacy"
+          /usr/bin/git -C "$fixture" add -- "$legacy"
+          /usr/bin/git -C "$fixture" -c user.name='Security fixture' -c user.email='fixture@example.invalid' commit -qm 'approved disabled legacy stub'
+          verify_retired "$fixture" || {
+            echo 'TEST_FAILURE: approved legacy stub was rejected' >&2
+            exit 1
+          }
+          /usr/bin/printf '%s\n' 'name: Unreviewed native workflow' 'on:' '  workflow_dispatch:' 'jobs:' '  native:' '    runs-on: [self-hosted, linux, x64, oreslang-jdk25]' > "$fixture/$legacy"
+          if verify_retired "$fixture"; then
+            echo 'TEST_FAILURE: uncommitted broad self-hosted workflow admitted' >&2
+            exit 1
+          fi
+          /usr/bin/git -C "$fixture" add -- "$legacy"
+          /usr/bin/git -C "$fixture" -c user.name='Security fixture' -c user.email='fixture@example.invalid' commit -qm 'simulate unsafe release merge'
+          if verify_retired "$fixture"; then
+            echo 'TEST_FAILURE: committed broad self-hosted workflow admitted' >&2
+            exit 1
+          fi
+          /usr/bin/rm -- "$fixture/$legacy"
+          /usr/bin/ln -s /dev/null "$fixture/$legacy"
+          if verify_retired "$fixture"; then
+            echo 'TEST_FAILURE: symlinked native workflow admitted' >&2
+            exit 1
+          fi
+          /usr/bin/rm -- "$fixture/$legacy"
+          if verify_retired "$fixture"; then
+            echo 'TEST_FAILURE: missing native workflow admitted' >&2
+            exit 1
+          fi
+          echo 'LEGACY_NATIVE_RETIREMENT_NEGATIVE_FIXTURES_PASS scenarios=4; native_guest=NOT_EXECUTED'
+      - name: Reject absent, untracked, empty, nonregular or linked contract inputs
         shell: bash
         run: |
           set -euo pipefail
@@ -43,7 +115,134 @@ jobs:
             test -f "$file"
             test -s "$file"
             test ! -L "$file"
+            git ls-files --error-unmatch -- "$file" >/dev/null
+            [[ "$(git ls-files --stage -- "$file")" == "100644 "* ]]
+            cmp -s "$file" <(git show "HEAD:$file")
           done
           test -z "$(find src tests config -type l -print -quit)"
+          echo 'TRACKED_SOURCE_CONTRACT_INVENTORY_PASS required_files=11'
+      # PR-head source is untrusted data, not executable CI control code.
+      # bash -n parses without executing expansions, functions, or commands.
+      # Execute audit scripts only from a protected-main workflow_dispatch.
+      # This hosted contract is NOT release approval or native evidence.
+      - name: Parse untrusted PR audit scripts without running them
+        if: github.event_name == 'pull_request'
+        shell: /bin/bash --noprofile --norc -p -e -o pipefail {0}
+        run: |
+          set -euo pipefail
+          for script in ci/source-policy.sh ci/test-source-policy.sh ci/native-release-evidence-v1.sh ci/test-native-release-evidence-v1.sh ci/trusted-native-verifier.sh; do
+            test -f "$script" && test ! -L "$script" || exit 1
+            # -p refuses startup hooks and exported shell functions.
+            /bin/bash -p -n "$script"
+          done
+          # Mutated PR script is untrusted INPUT. Never execute it. Regression
+          # covers both a simple command and command-substitution side effect,
+          # plus an inherited BASH_ENV startup payload.
+          fixture="$(/usr/bin/mktemp -d -- "$RUNNER_TEMP/pr-script-noexec.XXXXXX")"
+          trap '/usr/bin/rm -rf -- "$fixture"' EXIT
+          /usr/bin/printf '%s\n' '#!/bin/bash' \
+            'touch "${MALICIOUS_MARKER:?}"' \
+            'v="$(touch "${MALICIOUS_MARKER:?}")"' > "$fixture/pr-owned.sh"
+          /usr/bin/printf '%s\n' 'touch "${MALICIOUS_MARKER:?}"' > "$fixture/attack-env.sh"
+          MALICIOUS_MARKER="$fixture/payload-executed" BASH_ENV="$fixture/attack-env.sh" \
+            /bin/bash -p -n "$fixture/pr-owned.sh"
+          test ! -e "$fixture/payload-executed" || {
+            echo 'SECURITY_FAILURE: PR-owned audit script executed during syntax-only check' >&2
+            exit 1
+          }
+          echo 'PR_HEAD_AUDIT_NOEXEC_NEGATIVE_PASS shell_payload=2 bash_env=1; native_guest=NOT_EXECUTED'
+          echo 'PR_HEAD_AUDIT_SCRIPTS_SYNTAX_ONLY; scripts NOT_EXECUTED; native_guest=NOT_EXECUTED'
+      - name: Exercise source-policy negative fixtures (protected main only)
+        if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.ref_protected == true
+        shell: /bin/bash --noprofile --norc -p -e -o pipefail {0}
+        run: |
+          set -euo pipefail
+          bash -n ci/source-policy.sh
+          bash -n ci/test-source-policy.sh
+          bash ci/test-source-policy.sh
+      - name: Verify trusted native verifier source hardening
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash -n ci/trusted-native-verifier.sh
+          grep -Fq "frozen tracked source has multiple hardlinks" ci/trusted-native-verifier.sh
+          grep -Fq "frozen tracked source has multiple hardlinks" .github/workflows/trusted-frozen-reverse-native.yml
+          grep -Fq 'guest_tmp="$(/usr/bin/mktemp -d -- "$runner_temp_root/oreslang-guest.XXXXXX")"' ci/trusted-native-verifier.sh
+          grep -Fq '"TMPDIR=$guest_tmp"' ci/trusted-native-verifier.sh
+          grep -Fq 'runner_temp_root="$(/usr/bin/realpath -e -- "$RUNNER_TEMP")"' ci/trusted-native-verifier.sh
+          grep -Fq 'runner temp root must be owned by the runner account' ci/trusted-native-verifier.sh
+          grep -Fq 'runner temp root must not be group/world writable' ci/trusted-native-verifier.sh
+          grep -Fq 'runner temp root must be outside the frozen checkout' ci/trusted-native-verifier.sh
+          grep -Fq "missing_sentinel='@ORESLANG_MISSING_CONFIG@'" ci/trusted-native-verifier.sh
+          grep -Fq 'missing_cfg="$guest_tmp/ores-proxy-missing-config.yaml"' ci/trusted-native-verifier.sh
+          grep -Fq 'missing-config sentinel requires exactly one scoped --allow-read' ci/trusted-native-verifier.sh
+          grep -Fq 'trap cleanup_guest_tmp EXIT' ci/trusted-native-verifier.sh
+          # An early rejected runtime/config request must not leak a private temp dir
+          # on a long-lived trusted runner. Require cleanup before any validation.
+          tmp_create_line="$(grep -nF 'guest_tmp="$(/usr/bin/mktemp -d -- "$runner_temp_root/oreslang-guest.XXXXXX")"' ci/trusted-native-verifier.sh | /usr/bin/cut -d: -f1)"
+          cleanup_line="$(grep -nF 'trap cleanup_guest_tmp EXIT' ci/trusted-native-verifier.sh | /usr/bin/cut -d: -f1)"
+          tmp_check_line="$(grep -nF 'test -d "$guest_tmp" && test ! -L "$guest_tmp" || exit 1' ci/trusted-native-verifier.sh | /usr/bin/cut -d: -f1)"
+          [[ "$tmp_create_line" =~ ^[0-9]+$ && "$cleanup_line" =~ ^[0-9]+$ && "$tmp_check_line" =~ ^[0-9]+$ ]] &&
+            (( tmp_create_line < cleanup_line && cleanup_line < tmp_check_line )) || {
+            echo 'SECURITY_FAILURE: private guest temp cleanup trap installed too late' >&2
+            exit 1
+          }
+          grep -Fq '/usr/bin/rm -rf -- "$guest_tmp"' ci/trusted-native-verifier.sh
+          grep -Fq "missing_sentinel='@ORESLANG_MISSING_CONFIG@'" .github/workflows/trusted-frozen-reverse-native.yml
+          verifier_blob="$(git hash-object --no-filters -- ci/trusted-native-verifier.sh)"
+          grep -Fq "test \"\$verifier_blob\" = '$verifier_blob'" .github/workflows/trusted-frozen-reverse-native.yml
+          echo "TRUSTED_NATIVE_VERIFIER_SOURCE_HARDENING_PASS private_tmp=1 private_missing_fixture=1 cleanup=1 temp_root=validated verifier_blob=$verifier_blob"
+      - name: Model strict app-bound status check rule (source-free)
+        shell: bash
+        run: |
+          set -euo pipefail
+          workflow='.github/workflows/trusted-frozen-reverse-native.yml'
+          test "$(/usr/bin/grep -Fc '(.parameters.strict_required_status_checks_policy == true)' "$workflow")" -eq 2
+          test "$(/usr/bin/grep -Fc '(.integration_id | type == "number" and . > 0)' "$workflow")" -eq 2
+          policy='any(.[];
+              .type == "required_status_checks" and
+              (.parameters.strict_required_status_checks_policy == true) and
+              (.parameters.required_status_checks |
+                type == "array" and length > 0 and
+                all(.[]; (.context | type == "string" and length > 0) and
+                          (.integration_id | type == "number" and . > 0))
+              )
+            )'
+          valid='[{"type":"required_status_checks","parameters":{"strict_required_status_checks_policy":true,"required_status_checks":[{"context":"CI","integration_id":15368}]}}]'
+          /usr/bin/jq -e "$policy" <<<"$valid" >/dev/null
+          negatives=(
+            'del(.[0])'
+            '.[0].parameters.required_status_checks=[]'
+            '.[0].parameters.strict_required_status_checks_policy=false'
+            '.[0].parameters.required_status_checks[0].context=""'
+            '.[0].parameters.required_status_checks[0].integration_id=null'
+            '.[0].parameters.required_status_checks[0].integration_id=0'
+            '.[0].parameters.required_status_checks[0].integration_id="untrusted"'
+          )
+          for mutation in "${negatives[@]}"; do
+            bad="$(/usr/bin/jq -c "$mutation" <<<"$valid")"
+            if /usr/bin/jq -e "$policy" <<<"$bad" >/dev/null; then
+              echo "SECURITY_FAILURE: status-check rule accepted $mutation" >&2
+              exit 1
+            fi
+          done
+          echo 'STRICT_REQUIRED_STATUS_RULE_MODEL_PASS positive=1 rejected=7; native=NOT_EXECUTED'
+      - name: Audit exact checked-out source against pinned head (protected main only)
+        if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.ref_protected == true
+        shell: /bin/bash --noprofile --norc -p -e -o pipefail {0}
+        env:
+          EXPECTED_DEMO_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          bash ci/source-policy.sh
+      - name: Validate shared native evidence format (protected main only)
+        if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.ref_protected == true
+        shell: /bin/bash --noprofile --norc -p -e -o pipefail {0}
+        run: |
+          set -euo pipefail
+          bash -n ci/native-release-evidence-v1.sh
+          bash -n ci/test-native-release-evidence-v1.sh
+          bash ci/test-native-release-evidence-v1.sh
       - name: Preserve non-production verdict
+        shell: bash
         run: echo 'SOURCE_INVENTORY_ONLY; native compile/execute, upstream forwarding and network proof NOT_EXECUTED.'

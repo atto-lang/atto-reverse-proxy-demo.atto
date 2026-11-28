@@ -43,12 +43,52 @@ jobs:
           printf 'STRUCTURAL_ONLY tracked_ores_sources=%s\n' "$n"
           printf 'NOT_EXECUTED: no genuine compiler or Oreslang guest was run\n'
 
-      - name: Test adversarial source-policy regressions
-        shell: bash
-        run: bash ci/test-source-policy.sh
-      - name: Enforce exact Git-index source policy
-        shell: bash
+      # Untrusted PR-head shell scripts are source DATA: never run them on the
+      # hosted PR workflow. Only a separately reviewed protected main may run
+      # actual source-policy and adversarial suites.
+      - name: Parse PR policy scripts without executing PR-owned code
+        if: github.event_name == 'pull_request'
+        shell: /bin/bash --noprofile --norc -p -e -o pipefail {0}
+        run: |
+          set -euo pipefail
+          for script in ci/test-source-policy.sh ci/source-policy.sh; do
+            test -f "$script" && test ! -L "$script" && test -s "$script" || exit 1
+            /bin/bash -p -n "$script"
+          done
+          # Inline synthetic mutation: unsafe script and BASH_ENV must be inert
+          # under syntax-only validation, not executed as a PR subprocess.
+          scratch="$(/usr/bin/mktemp -d -- "$RUNNER_TEMP/hostile-upstream.XXXXXX")"
+          trap '/usr/bin/rm -rf -- "$scratch"' EXIT
+          /usr/bin/printf '%s\n' '#!/bin/bash' \
+            'touch "${ATTACK_MARKER:?}"' \
+            'x="$(touch "${ATTACK_MARKER:?}")"' > "$scratch/attacker.sh"
+          /usr/bin/printf '%s\n' 'touch "${ATTACK_MARKER:?}"' > "$scratch/startup.sh"
+          ATTACK_MARKER="$scratch/marker" BASH_ENV="$scratch/startup.sh" \
+            /bin/bash -p -n "$scratch/attacker.sh"
+          test ! -e "$scratch/marker" || {
+            echo 'SECURITY_FAILURE: PR-owned policy script executed under hosted syntax gate' >&2
+            exit 1
+          }
+          echo 'UPSTREAM_PR_SCRIPT_NOEXEC_NEGATIVE_PASS shell=2 bash_env=1; native_guest=NOT_EXECUTED'
+      - name: Reject unprotected main for executable policy runs
+        if: github.event_name != 'pull_request'
+        shell: /bin/bash --noprofile --norc -p -e -o pipefail {0}
+        env:
+          REF_PROTECTED: ${{ github.ref_protected }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = 'refs/heads/main' && test "$REF_PROTECTED" = true || {
+            echo 'SECURITY_FAILURE: source-policy execution requires protected main' >&2
+            exit 1
+          }
+      - name: Test adversarial source-policy regressions (protected main only)
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && github.ref_protected == true
+        shell: /bin/bash --noprofile --norc -p -e -o pipefail {0}
+        run: /bin/bash -p ci/test-source-policy.sh
+      - name: Enforce exact Git-index source policy (protected main only)
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && github.ref_protected == true
+        shell: /bin/bash --noprofile --norc -p -e -o pipefail {0}
         env:
           EXPECTED_DEMO_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
           SOURCE_POLICY_MODE: strict
-        run: bash ci/source-policy.sh
+        run: /bin/bash -p ci/source-policy.sh
